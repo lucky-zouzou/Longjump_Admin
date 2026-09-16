@@ -1,0 +1,1 @@
+ALTER TABLE `wholesale_orders` ADD `cancelled_amount` integer DEFAULT 0 NOT NULL;

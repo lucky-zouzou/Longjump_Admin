@@ -1,0 +1,11 @@
+export const REQUIRED_MONTHLY_SCOPES: Array<{site:string;channel:string}>;
+export function missingMonthlyScopes(submissions:Array<{site:string;channel:string}>):Array<{site:string;channel:string}>;
+export function allocationMatchesTotal(total:number,allocations:Array<{qty:number}>):boolean;
+export function prorateAllocations(allocations:Array<{site?:string;channel?:string;qty?:number}>,targetQty:number):Array<{site:string;channel:string;qty:number}>;
+export function roundSupplyQuantity(value:number,minOrderQty?:number,orderMultiple?:number):number;
+export function calculateSupplyPlan(input:{dailySales:number[];dailyCoverage?:boolean[];currentQty:number;pendingShelf?:number;seaInTransit:number;productionInProgress:number;productionLeadDays:number;seaLeadDays:number;reviewCycleDays:number;serviceLevel:number;daysToNextSea:number|null;dataDays:number;daysSinceLastImport?:number|null;minOrderQty?:number;orderMultiple?:number}):Record<string,number|string|null|number[]|boolean[]>;
+export function canAdvanceBatch(actorRole:string,stageOwner:string,adminReason?:string):boolean;
+export function newProductScopeGate(input:{researchCount:number;seedingCount:number;requiredCount?:number}):boolean;
+export function financeGatePasses(input:{grossMarginRate:number;targetGrossMarginRate:number}):boolean;
+export function sampleGateReady(sampleData:Record<string,unknown>,confirmationStages:string[]):boolean;
+export function shelfScopesComplete(allocations:Array<{site?:string;channel?:string}>,evidence:Array<{stage?:string;site?:string;channel?:string}>):boolean;

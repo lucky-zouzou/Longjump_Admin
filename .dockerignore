@@ -1,0 +1,12 @@
+node_modules
+dist
+dist-node
+.wrangler
+.git
+data
+backups
+secrets
+.env*
+tests/.generated
+outputs
+work

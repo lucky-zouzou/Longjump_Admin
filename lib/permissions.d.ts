@@ -1,0 +1,10 @@
+export const PERMISSION_LABELS:Readonly<Record<string,string>>;
+export const ROLE_PERMISSIONS:Readonly<Record<string,readonly string[]>>;
+export const NAVIGATION_BY_ROLE:Readonly<Record<string,readonly string[]>>;
+export const DATA_DOMAIN_LABELS:Readonly<Record<string,string>>;
+export const ROLE_DATA_DOMAINS:Readonly<Record<string,readonly string[]>>;
+export function hasPermission(role:string,permission:string):boolean;
+export function canReadDomain(role:string,domain:string):boolean;
+export function dataDomainsForRole(role:string):string[];
+export function permissionsForRole(role:string):string[];
+export function navigationForRole(role:string):string[];

@@ -1,0 +1,15 @@
+{
+  "product": "LOONG JUMP",
+  "version": 17,
+  "date": "2026-09-14",
+  "source_commit": "e7e3da0645147055b36879aca9899adba116ad1f",
+  "tests": {
+    "passed": 70,
+    "failed": 0,
+    "skipped": 0
+  },
+  "node": "24",
+  "pnpm": "11.19.0",
+  "contains_production_data": false,
+  "entry_document": "README_技术交付.md"
+}
