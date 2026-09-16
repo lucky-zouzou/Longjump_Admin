@@ -1,6 +1,7 @@
 import { sites } from "@openai/sites-vite-plugin";
 import vinext from "vinext";
 import { defineConfig } from "vite";
+import { fileURLToPath } from "node:url";
 import hostingConfig from "./.openai/hosting.json";
 
 const SITE_CREATOR_PLACEHOLDER_DATABASE_ID =
@@ -34,7 +35,7 @@ const localBindingConfig = {
 };
 
 export default defineConfig(async () => {
-  if(process.env.LOONGJUMP_TARGET==="node")return {plugins:[vinext()],resolve:{alias:{"cloudflare:workers":new URL("./server/env.mjs",import.meta.url).pathname}},build:{outDir:"dist-node"}};
+  if(process.env.LOONGJUMP_TARGET==="node")return {plugins:[vinext()],resolve:{alias:{"cloudflare:workers":fileURLToPath(new URL("./server/env.mjs",import.meta.url))}},build:{outDir:"dist-node"}};
   // Keep Wrangler and Miniflare state project-local. These are non-secret tool
   // settings; application environment belongs in ignored `.env*` files.
   process.env.WRANGLER_WRITE_LOGS ??= "false";
