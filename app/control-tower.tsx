@@ -3,6 +3,7 @@
 import ForecastSettings from "./forecast-settings";
 import PlanChanges,{SupplyPicker,PurchaseReassign} from "./plan-changes";
 import Wholesale from "./wholesale";
+import UserManagement,{type ManagedUser} from "./user-management";
 import { WholesaleLanguageContext,useWholesalePreference } from "./wholesale-language";
 import { translateWholesale } from "../lib/wholesale-i18n.mjs";
 import { useCallback, useEffect, useState } from "react";
@@ -35,7 +36,7 @@ type Row = Record<string,any>;
 type Snapshot = {
   actor:Row; currentMonth:string; metrics:Row; inventory:Row[]; movements:Row[]; sales:Row[]; imports:Row[];
   supplyPolicies:Row[]; forecastHistory:Row[]; planChanges:Row[]; receipts:Row[]; submissions:Row[]; approvals:Row[]; batches:Row[]; skuSettings:Row[]; audit:Row[];
-  users:Row[]; suggestions:Row[]; monthlyStatus:Row[]; issues:Row[]; newProductProjects:Row[];
+  users:ManagedUser[]; suggestions:Row[]; monthlyStatus:Row[]; issues:Row[]; newProductProjects:Row[];
   salesScopeStatus:Row[]; salesTopSkus:Row[]; purchaseOrders:Row[]; productionOrders:Row[];
   shipmentBatches:Row[]; shipmentReceipts:Row[];
   transportBatches:Row[]; transportReceipts:Row[]; businessPartners:Row[]; warehouses:Row[]; countRequests:Row[]; myTasks:Row[];
@@ -45,9 +46,9 @@ type AllocationDraft = { site:string; channel:string; qty:string };
 type Act = (action:string,payload:Row,success:string)=>Promise<Row|null>;
 
 const navItems = [
-  ["overview","总览","◫"], ["wholesale","印尼线下批发","▣"], ["suggestions","补货驾驶舱","◎"], ["new-products","新品孵化","◇"], ["sales","销售数据","↗"], ["inventory","库存流水","▦"],
+  ["overview","总览","◫"], ["users","用户管理","♙"], ["wholesale","印尼线下批发","▣"], ["suggestions","补货驾驶舱","◎"], ["new-products","新品孵化","◇"], ["sales","销售数据","↗"], ["inventory","库存流水","▦"],
   ["receipt","历史到仓","↓"], ["monthly","月度计划","▤"], ["approval","审批中心","✓"], ["fulfillment","系列采购生产","▥"], ["batches","海运批次","⇢"],
-  ["master","主数据","⌘"], ["audit","审计日志","◷"], ["users","账号权限","♙"], ["permissions","权限测试","⊙"],
+  ["master","主数据","⌘"], ["audit","审计日志","◷"], ["permissions","权限测试","⊙"],
 ];
 const fmt = (value:unknown) => Number(value || 0).toLocaleString("zh-CN");
 const pct = (value:unknown) => `${(Number(value || 0) * 100).toFixed(0)}%`;
@@ -180,7 +181,7 @@ export default function ControlTower({ identity }: { identity:Identity }) {
         </div>
       </header>
       <div className="content">
-        {actor.role==="运营" && (!actor.site || !actor.channel) && <div className="notice warn">当前账号尚未绑定站点和渠道，请联系管理员在“账号权限”中完成分配后再录入业务数据。</div>}
+        {actor.role==="运营" && (!actor.site || !actor.channel) && <div className="notice warn">当前账号尚未绑定站点和渠道，请联系管理员在“用户管理”中完成分配后再录入业务数据。</div>}
         {tab==="wholesale" && <WholesaleLanguageContext.Provider value={wholesaleLocale}><Wholesale onChanged={refresh}/></WholesaleLanguageContext.Provider>}
         {tab==="overview" && <Overview data={data} go={setTab}/>}
         {tab==="suggestions" && <Suggestions data={data} act={act} busy={busy}/>}
@@ -194,7 +195,7 @@ export default function ControlTower({ identity }: { identity:Identity }) {
         {tab==="batches" && <Batches data={data} act={act} busy={busy}/>}
         {tab==="master" && <MasterData data={data} act={act} busy={busy}/>}
         {tab==="audit" && <Audit data={data}/>}
-        {tab==="users" && <Users data={data} act={act} busy={busy}/>}
+        {tab==="users" && <UserManagement users={data.users} actorId={actor.id} act={act} busy={busy} onCreated={refresh}/>}
         {tab==="permissions" && <PermissionTest data={data}/>}
       </div>
     </main>
@@ -906,19 +907,6 @@ function MasterData({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}){
   </>;
 }
 
-function Users({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
-  const [drafts,setDrafts]=useState<Record<string,Row>>({});
-  const value=(user:Row,key:string)=>drafts[user.id]?.[key]??user[key]??"";
-  const update=(user:Row,key:string,next:unknown)=>setDrafts({...drafts,[user.id]:{...user,...drafts[user.id],[key]:next}});
-  return <>
-    <PageHead title="账号与服务端权限" desc="使用ChatGPT身份登录；成员首次登录后，管理员在此绑定岗位和站点渠道"/>
-    <div className="notice info">首位登录系统的成员自动成为管理员。之后的成员首次登录后会出现在列表中；运营账号必须绑定唯一站点和渠道；销售角色自动绑定印尼线下分销。所有权限在服务端校验，页面隐藏按钮不等于授权。</div>
-    <Panel title="成员权限">
-        <div className="table-wrap"><table><thead><tr><th>成员</th><th>邮箱</th><th>角色</th><th>站点</th><th>渠道</th><th>责任单位</th><th>状态</th><th></th></tr></thead><tbody>{data.users.map(user=><tr key={user.id}><td><strong>{user.name}</strong></td><td>{user.email}</td><td><select value={value(user,"role")} onChange={e=>update(user,"role",e.target.value)}>{["管理员","销售","运营","运营主管","新品开发","财务","供应链","工厂","海运"].map(r=><option key={r}>{r}</option>)}</select></td><td><select disabled={value(user,"role")!=="运营"} value={value(user,"site")} onChange={e=>update(user,"site",e.target.value)}><option value="">请选择</option>{SITES.map(s=><option key={s}>{s}</option>)}</select></td><td><select disabled={value(user,"role")!=="运营"} value={value(user,"channel")} onChange={e=>update(user,"channel",e.target.value)}><option value="">请选择</option>{CHANNELS.map(c=><option key={c}>{c}</option>)}</select></td><td><input value={value(user,"responsibility_unit")} onChange={e=>update(user,"responsibility_unit",e.target.value)} placeholder="工厂/承运商/团队"/></td><td><select value={String(value(user,"active"))} onChange={e=>update(user,"active",e.target.value==="1")}><option value="1">启用</option><option value="false">停用</option></select></td><td><button className="btn primary" disabled={busy} onClick={()=>act("assignUser",{userId:user.id,role:value(user,"role"),site:value(user,"site"),channel:value(user,"channel"),responsibilityUnit:value(user,"responsibility_unit"),active:value(user,"active")!==false},"账号权限已更新")}>保存</button></td></tr>)}</tbody></table></div>
-    </Panel>
-  </>;
-}
-
 const ROLE_TEST_ORDER=["管理员","销售","运营","供应链","工厂","海运","运营主管","新品开发","财务"];
 const ROLE_BOUNDARY:Record<string,string>={
   销售:"仅印尼本人客户和批发订单；申请出库、查询发货、回款和开票，不能自审或确认收款",
@@ -956,7 +944,7 @@ function PermissionTest({data}:{data:Snapshot}) {
       <Pill tone={data.users.every(userReady)?"green":"amber"}>{data.users.filter(userReady).length}/{data.users.length} 个账号配置通过</Pill>
     </PageHead>
     <div className="metrics">
-      <div className="metric"><div className="label">系统账号</div><div className="value">{fmt(data.users.length)}</div><div className="foot">成员首次登录后进入列表</div></div>
+      <div className="metric"><div className="label">系统账号</div><div className="value">{fmt(data.users.length)}</div><div className="foot">管理员创建或成员首次登录后进入列表</div></div>
       <div className="metric"><div className="label">启用账号</div><div className="value">{fmt(data.users.filter(user=>Number(user.active)===1).length)}</div><div className="foot">停用账号无法进入系统</div></div>
       <div className="metric"><div className="label">运营范围完整</div><div className="value">{data.users.filter(user=>user.role==="运营"&&user.site&&user.channel).length}/{data.users.filter(user=>user.role==="运营").length}</div><div className="foot">运营必须绑定站点＋渠道</div></div>
       <div className="metric"><div className="label">权限岗位</div><div className="value">{ROLE_TEST_ORDER.length}</div><div className="foot">所有写入动作采用岗位白名单</div></div>
@@ -967,7 +955,7 @@ function PermissionTest({data}:{data:Snapshot}) {
           <Field label="选择用户"><select value={selected.id} onChange={event=>setSelectedUserId(event.target.value)}>{data.users.map(user=><option key={user.id} value={user.id}>{user.name} · {user.role}</option>)}</select></Field>
           <div className="permission-user-card"><div><strong>{selected.name}</strong><span>{selected.email}</span></div><Pill tone={userReady(selected)?"green":"amber"}>{userReady(selected)?"配置通过":"需要处理"}</Pill><p>{ROLE_BOUNDARY[selectedRole]||"尚未配置岗位权限"}</p><small>{selectedRole==="运营"?`操作范围：${selected.site||"未绑定站点"} · ${selected.channel||"未绑定渠道"}`:"操作范围：按岗位负责节点"}</small></div>
           <div className="permission-checks">{checks.map(check=><div className={check.pass?"pass":"fail"} key={check.label}><i>{check.pass?"✓":"!"}</i><span>{check.label}</span></div>)}</div>
-        </>:<Empty>暂无成员账号，请让成员先使用ChatGPT身份登录一次</Empty>}
+        </>:<Empty>暂无成员账号，请到“用户管理”中确认账号开通方式</Empty>}
       </Panel>
       <Panel title="该用户可见与可操作范围" desc="页面可见不等于可写，写入仍以右侧动作清单为准">
         {selected?<>
