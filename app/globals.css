@@ -94,6 +94,9 @@ tr:hover td { background:#fbfcff; }
 .field.span-2 { grid-column:span 2; }
 .field.span-4 { grid-column:span 4; }
 .form-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:14px; }
+.user-fields { border:0; padding:0; margin:0; min-width:0; }
+.user-table input,.user-table select { min-width:90px; max-width:200px; border:1px solid var(--line); border-radius:7px; padding:7px 8px; background:#fff; }
+.user-table :disabled { opacity:.65; }
 .notice { border-radius:10px; padding:10px 12px; font-size:11px; line-height:1.55; margin-bottom:12px; }
 .notice.info { color:#2450ad; background:#edf3ff; border:1px solid #d9e4ff; }
 .notice.warn { color:#8a5508; background:#fff7e8; border:1px solid #f4dfb6; }
