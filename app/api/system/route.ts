@@ -1,3 +1,4 @@
+import {validateImportRows,groupInboundRows} from "../../../lib/tabular-import.mjs";
 import {planIntegrityGuards} from "../../../lib/plan-integrity.mjs";
 import {systemChecks} from "../../../lib/system-checks.mjs";
 import {saveForecastData} from "../../../lib/forecast-management.mjs";
@@ -96,15 +97,17 @@ async function all(sql:string, args:unknown[] = []) {
   return (await database().prepare(sql).bind(...args).all<AnyRow>()).results ?? [];
 }
 async function body(request:Request) {
-  try { return await request.json() as AnyRow; } catch { throw new HttpError(400, "请求内容格式不正确"); }
+  const text=await request.text();
+  if(text.length>2_000_000)throw new HttpError(413,"导入内容过大，请拆分文件");
+  try { const value=JSON.parse(text);if(!value||typeof value!=="object"||Array.isArray(value))throw Error();return value as AnyRow; } catch { throw new HttpError(400, "请求内容格式不正确"); }
 }
 function normalizedSales(rows:SaleInput[]) {
   if (!Array.isArray(rows) || rows.length === 0 || rows.length > 5000) throw new HttpError(400, "销售明细需为1—5000行");
   const map = new Map<string, { sku:string; name:string; qty:number }>();
   for (const row of rows) {
     const sku = cleanSku(row.sku);
-    const qty = int(row.qty);
-    if (!sku || !Number.isInteger(qty) || qty <= 0) throw new HttpError(400, "销售数据存在空SKU或非正整数销量");
+    const qty = Number(row.qty);
+    if (!sku || !Number.isSafeInteger(qty) || qty <= 0 || qty>1_000_000_000) throw new HttpError(400, "销售数据存在空SKU或非正整数销量");
     const previous = map.get(sku);
     map.set(sku, { sku, name:cleanText(row.name, 120) || previous?.name || "", qty:(previous?.qty ?? 0) + qty });
   }
@@ -470,11 +473,13 @@ export async function GET(request:Request) {
 
 export async function POST(request:Request) {
   try {
+    const origin=request.headers.get("origin");if(origin&&origin!==new URL(request.url).origin)throw new HttpError(403,"请求来源无效");
     await ensureSchema();
     const actor = await requireActor(request);
     const payload = await body(request);
     const action = cleanText(payload.action, 40);
     await assertWritable(database());
+    if (action === "bulkImport") return await bulkImport(actor,payload);
     if (action === "salesImport") return await salesImport(actor, payload);
     if (action === "reverseSalesImport") return await reverseSalesImport(actor,payload);
     if (action === "inventoryAdjust") return await inventoryAdjust(actor, payload);
@@ -514,6 +519,32 @@ export async function POST(request:Request) {
     if (action === "saveWarehouse") return await saveWarehouse(actor,payload);
     throw new HttpError(400, "未知操作");
   } catch (error) { return errorResponse(error); }
+}
+
+async function bulkImport(actor:Actor,payload:AnyRow){
+  const kind=String(payload.kind||"");
+  if(!["inventory","inbound"].includes(kind))throw new HttpError(400,"不支持的批量导入类型");
+  requireBusinessPermission(actor,kind==="inbound"?"inbound.receive":actor.role==="管理员"?"inventory.adjust":"inventory.count.submit");
+  let rows:AnyRow[];
+  try{const parsed=validateImportRows(kind,payload.rows);if(parsed.errors.length)throw Error(parsed.errors.map((e:{row:number;message:string})=>`第${e.row}行：${e.message}`).join("；"));rows=parsed.rows;}catch(error){throw new HttpError(400,error instanceof Error?error.message:"导入明细无效");}
+  const fileName=cleanText(payload.fileName,180),fileHash=cleanText(payload.fileHash,64);
+  if(!/^[a-f0-9]{64}$/.test(fileHash))throw new HttpError(400,"文件校验码无效，请重新选择文件");
+  const canonical=JSON.stringify(rows.map(({_row,...row})=>row).sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b))));
+  const digest=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(canonical));
+  const key=`data_import:${kind}:${Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,"0")).join("")}`,db=database();
+  if(await db.prepare("SELECT id FROM system_operations WHERE id=?").bind(key).first())throw new HttpError(409,"这份数据已经导入，系统已阻止重复写入；新盘点请填写新的调整原因");
+  let entries=rows;
+  if(kind==="inbound"){try{entries=groupInboundRows(rows);}catch(error){throw new HttpError(400,error instanceof Error?error.message:"到仓单分组无效");}}
+  const statements:D1PreparedStatement[]=[guardStatement(db,actor,"批量文件导入","1=1",[],key,{kind,fileName,fileHash,rows:rows.length})];
+  let imported=0,skipped=0;
+  for(const entry of entries){
+    try{const result=await (kind==="inbound"?receiveInbound(actor,entry,statements):actor.role==="管理员"?inventoryAdjust(actor,entry,statements):submitInventoryCount(actor,entry,statements));const detail=await result.json();if(detail.skipped)skipped++;else imported++;}
+    catch(error){if(error instanceof HttpError)throw new HttpError(error.status,`第${entry._row}行：${error.message}。整份文件未写入`);throw error;}
+  }
+  if(statements.length>950)throw new HttpError(400,"本次涉及的渠道分配过多，请拆分文件后重试；整份文件未写入");
+  statements.push(audit(actor,"批量文件导入","data_import",key,{kind,fileName,fileHash,rows:rows.length,imported,skipped}));
+  try{await atomicBatch(db,statements);}catch(error){if(/UNIQUE/.test(String(error)))throw new HttpError(409,"文件、单号或盘点记录已存在，本次整批未写入");throw error;}
+  return Response.json({ok:true,imported,skipped,rows:rows.length});
 }
 
 async function salesImport(actor:Actor, payload:AnyRow) {
@@ -583,39 +614,45 @@ async function reverseSalesImport(actor:Actor,payload:AnyRow){
   return Response.json({ok:true,importId,reversedQty:Number(source.total_qty||0)});
 }
 
-async function inventoryAdjust(actor:Actor, payload:AnyRow) {
+async function inventoryAdjust(actor:Actor, payload:AnyRow, staged?:D1PreparedStatement[]) {
   requireBusinessPermission(actor,"inventory.adjust");
   const site = cleanText(payload.site, 20), channel = cleanText(payload.channel, 20), sku = cleanSku(payload.sku);
   validSiteChannel(site, channel); requireScope(actor, site, channel);
-  const countedQty = int(payload.countedQty), reason = cleanText(payload.reason, 240);
-  if (!sku || !Number.isInteger(countedQty) || countedQty < 0) throw new HttpError(400, "盘点数量必须是非负整数");
+  const countedQty = Number(payload.countedQty), reason = cleanText(payload.reason, 240);
+  if (!sku || !Number.isSafeInteger(countedQty) || countedQty < 0) throw new HttpError(400, "盘点数量必须是非负整数");
   if (reason.length < 4) throw new HttpError(400, "请填写盘点调整原因");
   const db = database(), timestamp = nowIso();
   const current = await db.prepare("SELECT qty,name FROM inventory_balances WHERE site=? AND channel=? AND sku=?").bind(site,channel,sku).first<AnyRow>();
   const oldQty = Number(current?.qty ?? 0), delta = countedQty - oldQty;
+  if (delta === 0 && staged) return Response.json({ok:true,skipped:true});
   if (delta === 0) throw new HttpError(400, "盘点数量与系统库存一致，无需调整");
   const ref = makeId("count");
-  await db.batch([
-    ...countStatements(db,{site,channel,sku,name:cleanText(current?.name,120),from:oldQty,to:countedQty,reference:ref,actorId:actor.id,reason,timestamp}),
+  const statements=[
+    db.prepare("INSERT INTO sku_settings(sku,name,updated_at) VALUES (?,?,?) ON CONFLICT(sku) DO NOTHING").bind(sku,cleanText(current?.name||payload.name,120),timestamp),
+    ...countStatements(db,{site,channel,sku,name:cleanText(current?.name||payload.name,120),from:oldQty,to:countedQty,reference:ref,actorId:actor.id,reason,timestamp}),
     audit(actor, "库存盘点调整", "inventory", `${site}|${channel}|${sku}`, { oldQty, countedQty, delta, reason }),
-  ]);
+  ];
+  if(staged)staged.push(...statements);else await db.batch(statements);
   return Response.json({ ok:true, oldQty, countedQty, delta });
 }
 
-async function submitInventoryCount(actor:Actor,payload:AnyRow){
+async function submitInventoryCount(actor:Actor,payload:AnyRow,staged?:D1PreparedStatement[]){
   requireBusinessPermission(actor,"inventory.count.submit");
-  const site=cleanText(payload.site,20),channel=cleanText(payload.channel,20),sku=cleanSku(payload.sku),reason=cleanText(payload.reason,500),countedQty=int(payload.countedQty);
+  const site=cleanText(payload.site,20),channel=cleanText(payload.channel,20),sku=cleanSku(payload.sku),reason=cleanText(payload.reason,500),countedQty=Number(payload.countedQty);
   validSiteChannel(site,channel);requireScope(actor,site,channel);
-  if(!sku||!Number.isInteger(countedQty)||countedQty<0||reason.length<4) throw new HttpError(400,"请填写有效盘点实数和差异原因");
+  if(!sku||!Number.isSafeInteger(countedQty)||countedQty<0||reason.length<4) throw new HttpError(400,"请填写有效盘点实数和差异原因");
   const db=database(),current=await db.prepare("SELECT qty FROM inventory_balances WHERE site=? AND channel=? AND sku=?").bind(site,channel,sku).first<AnyRow>();
   const systemQty=Number(current?.qty??0);
+  if(systemQty===countedQty&&staged)return Response.json({ok:true,skipped:true});
   if(systemQty===countedQty) throw new HttpError(400,"盘点数量与当前可售库存一致，无需提交");
   if(await db.prepare("SELECT id FROM inventory_count_requests WHERE site=? AND channel=? AND sku=? AND status='pending'").bind(site,channel,sku).first()) throw new HttpError(409,"该SKU已有待复核盘点差异");
   const idValue=makeId("count_request"),timestamp=nowIso();
-  await db.batch([
+  const statements=[
+    guardStatement(db,actor,"盘点提交校验","NOT EXISTS(SELECT 1 FROM inventory_count_requests WHERE site=? AND channel=? AND sku=? AND status='pending') AND COALESCE((SELECT qty FROM inventory_balances WHERE site=? AND channel=? AND sku=?),0)=?",[site,channel,sku,site,channel,sku,systemQty]),
     db.prepare("INSERT INTO inventory_count_requests (id,site,channel,sku,system_qty,counted_qty,reason,status,decision_comment,creator_id,decided_by,created_at,updated_at) VALUES (?,?,?,?,?,?,?,'pending','',?,NULL,?,?)").bind(idValue,site,channel,sku,systemQty,countedQty,reason,actor.id,timestamp,timestamp),
     audit(actor,"提交库存盘点差异","inventory_count",idValue,{site,channel,sku,systemQty,countedQty,reason}),
-  ]);
+  ];
+  if(staged)staged.push(...statements);else await db.batch(statements);
   return Response.json({ok:true,id:idValue,systemQty,countedQty});
 }
 
@@ -649,7 +686,7 @@ async function resolveInventoryHold(actor:Actor,payload:AnyRow){
   return Response.json(await resolveInventoryHoldSources(database(),actor,{...payload,site,channel,sku}));
 }
 
-async function receiveInbound(actor:Actor, payload:AnyRow) {
+async function receiveInbound(actor:Actor, payload:AnyRow, staged?:D1PreparedStatement[]) {
   requireBusinessPermission(actor,"inbound.receive");
   const receiptNo = cleanText(payload.receiptNo, 80), sku = cleanSku(payload.sku), name = cleanText(payload.name,120);
   const proofRef = cleanText(payload.proofRef, 240), sourceBatch = cleanText(payload.sourceBatch,80);
@@ -657,15 +694,15 @@ async function receiveInbound(actor:Actor, payload:AnyRow) {
   if(!sourceBatch&&actor.role!=="管理员") throw new HttpError(403,"供应链到仓必须关联系统批次；只有管理员可处理历史或线下例外入库");
   const allocationMap = new Map<string,{site:string;channel:string;qty:number}>();
   for (const raw of Array.isArray(payload.allocations) ? payload.allocations : []) {
-    const site = cleanText(raw.site,20), channel = cleanText(raw.channel,20), qty = int(raw.qty);
+    const site = cleanText(raw.site,20), channel = cleanText(raw.channel,20), qty = Number(raw.qty);
     validSiteChannel(site,channel);
-    if (!Number.isInteger(qty) || qty <= 0) throw new HttpError(400, "渠道分配数量必须是正整数");
+    if (!Number.isSafeInteger(qty) || qty <= 0) throw new HttpError(400, "渠道分配数量必须是正整数");
     const key = `${site}|${channel}`, previous = allocationMap.get(key);
     allocationMap.set(key, { site, channel, qty:(previous?.qty ?? 0) + qty });
   }
   const allocations = [...allocationMap.values()];
   const totalQty = allocations.reduce((sum,r) => sum + r.qty,0);
-  if (!allocations.length || !allocationMatchesTotal(int(payload.totalQty), allocations)) throw new HttpError(400, "站点＋渠道分配合计必须等于实收到仓总数");
+  if (!allocations.length || !allocationMatchesTotal(Number(payload.totalQty), allocations)) throw new HttpError(400, "站点＋渠道分配合计必须等于实收到仓总数");
   const db = database();
   if (await db.prepare("SELECT id FROM inbound_receipts WHERE receipt_no=?").bind(receiptNo).first()) throw new HttpError(409, "该到仓单号已经入库，系统已阻止重复入库");
   const receiptId = makeId("receipt"), timestamp = nowIso();
@@ -689,12 +726,13 @@ async function receiveInbound(actor:Actor, payload:AnyRow) {
     const planned=parseJson<Array<{site:string;channel:string;qty:number}>>(batch.allocations_json,[]);
     const plannedMap=new Map(planned.map((row)=>[`${row.site}|${row.channel}`,Number(row.qty)]));
     if(allocations.length!==plannedMap.size||allocations.some((row)=>plannedMap.get(`${row.site}|${row.channel}`)!==row.qty)) throw new HttpError(409,"到仓站点渠道分配与生产批次不一致");
+    statements.unshift(guardStatement(db,actor,"到仓批次校验","EXISTS(SELECT 1 FROM production_batches WHERE id=? AND stage='awaiting_receipt' AND sku=? AND qty=? AND allocations_json=?)",[sourceBatch,sku,totalQty,batch.allocations_json]));
     const evidence = parseJson<AnyRow[]>(batch.evidence_json, []);
     evidence.push({ stage:"warehouse_received", reference:receiptNo, proofRef, at:timestamp, by:actor.name, role:actor.role });
     statements.push(db.prepare("UPDATE production_batches SET stage='shelf_pending',stage_owner='运营',evidence_json=?,updated_at=? WHERE id=?").bind(JSON.stringify(evidence),timestamp,sourceBatch));
   }
   statements.push(audit(actor,"渠道级到仓入库","receipt",receiptNo,{sku,totalQty,allocations,sourceBatch,proofRef}));
-  await db.batch(statements);
+  if(staged)staged.push(...statements);else await db.batch(statements);
   return Response.json({ ok:true, receiptId, totalQty, allocations, nextStage:sourceBatch?"shelf_pending":null });
 }
 
@@ -1052,7 +1090,8 @@ async function receiveTransportLeg(actor:Actor,payload:AnyRow){
   if(await db.prepare("SELECT id FROM transport_receipts WHERE receipt_no=?").bind(receiptNo).first()) throw new HttpError(409,"到仓单号已经登记");
   const sourceItems=await all("SELECT li.*,bi.name FROM transport_leg_items li JOIN transport_batch_items bi ON bi.id=li.batch_item_id WHERE li.leg_id=?",[legId]);
   const inputMap=new Map<string,{received:number;quarantine:number}>();
-  for(const row of Array.isArray(payload.items)?payload.items:[]){const idValue=cleanText(row.id||row.legItemId,120),received=int(row.receivedQty),quarantine=int(row.quarantineQty??0);if(idValue&&Number.isInteger(received)&&received>0&&Number.isInteger(quarantine)&&quarantine>=0&&quarantine<=received)inputMap.set(idValue,{received,quarantine});}
+  if(!Array.isArray(payload.items)||!payload.items.length)throw new HttpError(400,"缺少到仓明细");
+  for(const row of payload.items){const idValue=cleanText(row.id||row.legItemId,120),received=Number(row.receivedQty),quarantine=Number(row.quarantineQty??0);if(!idValue||!Number.isSafeInteger(received)||received<=0||!Number.isSafeInteger(quarantine)||quarantine<0||quarantine>received||inputMap.has(idValue)||!sourceItems.some(item=>item.id===idValue))throw new HttpError(400,"到仓明细存在未知或重复SKU、非整数数量或无效隔离数量");inputMap.set(idValue,{received,quarantine});}
   const selected=sourceItems.filter((row)=>inputMap.has(row.id));
   if(!selected.length) throw new HttpError(400,"本次至少登记一个SKU的实收数量");
   for(const item of selected) if(inputMap.get(item.id)!.received>Number(item.qty)-Number(item.received_qty||0)) throw new HttpError(409,`${item.sku}实收超过剩余可收数量`);
@@ -1180,7 +1219,8 @@ async function receiveShipmentBatch(actor:Actor,payload:AnyRow){
   const sourceItems=await all("SELECT * FROM shipment_batch_items WHERE batch_id=?",[batchId]);
   const previousReceiptItems=await all("SELECT i.* FROM shipment_receipt_items i JOIN shipment_receipts r ON r.id=i.receipt_id WHERE r.batch_id=?",[batchId]);
   const inputMap=new Map<string,number>();
-  for(const row of Array.isArray(payload.items)?payload.items:[]){const idValue=cleanText(row.id,120),qty=int(row.receivedQty);if(idValue&&Number.isInteger(qty)&&qty>0)inputMap.set(idValue,qty);}
+  if(!Array.isArray(payload.items)||!payload.items.length)throw new HttpError(400,"缺少到仓明细");
+  for(const row of payload.items){const idValue=cleanText(row.id,120),qty=Number(row.receivedQty);if(!idValue||!Number.isSafeInteger(qty)||qty<=0||inputMap.has(idValue)||!sourceItems.some(item=>item.id===idValue))throw new HttpError(400,"到仓明细存在未知或重复SKU、非整数数量");inputMap.set(idValue,qty);}
   const selected=sourceItems.filter((item)=>inputMap.has(item.id));
   if(!selected.length) throw new HttpError(400,"本次至少登记一个SKU的实收数量");
   for(const item of selected){const remaining=Math.max(0,Number(item.shipped_qty)-Number(item.received_qty||0));if(Number(inputMap.get(item.id))>remaining)throw new HttpError(409,`${item.sku}本次最多可收${remaining}件`);}

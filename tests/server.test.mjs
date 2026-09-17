@@ -41,6 +41,24 @@ test('独立服务器：公司登录、禁止伪造身份、岗位隔离、出�
  updatedUsers=await request('admin','/api/system');assert.equal(updatedUsers.body.users.find(user=>user.id===accountResult.body.userId).active,0);
  assert.equal((await request('admin','/api/system',{action:'assignUser',userId:accountResult.body.userId,role:'运营',site:'马来西亚',channel:'Shopee',active:true})).status,200);
  cookies.newops=await login('newops');assert.equal((await request('newops','/api/system')).status,200);
+ // Bulk imports are authenticated and atomic through the production HTTP router.
+ const importMeta={fileName:'http-stock.csv',fileHash:'c'.repeat(64)};
+ const stockRows=[{site:'马来西亚',channel:'Shopee',sku:'HTTP-IMPORT',name:'导入库存',countedQty:12,reason:'期初库存核对'}];
+ assert.equal((await request('finance','/api/system',{action:'bulkImport',kind:'inventory',rows:stockRows,...importMeta})).status,403);
+ const bulk=await request('admin','/api/system',{action:'bulkImport',kind:'inventory',rows:stockRows,...importMeta});assert.equal(bulk.status,200,JSON.stringify(bulk.body));assert.equal(bulk.body.imported,1);
+ assert.equal((await request('admin','/api/system',{action:'bulkImport',kind:'inventory',rows:stockRows,...importMeta})).status,409);
+ const opsCount=await request('newops','/api/system',{action:'bulkImport',kind:'inventory',rows:[{...stockRows[0],countedQty:9}],...importMeta});assert.equal(opsCount.status,200,JSON.stringify(opsCount.body));
+ assert.equal((await request('newops','/api/system')).body.inventory.find(r=>r.sku==='HTTP-IMPORT').qty,12);
+ assert.equal((await request('newops','/api/system',{action:'bulkImport',kind:'inventory',rows:[{...stockRows[0],site:'印尼',countedQty:2}],...importMeta})).status,403);
+ const importedReceipt={receiptNo:'HTTP-RCV-1',sku:'HTTP-RCV',site:'印尼',channel:'TikTok',qty:3,proofRef:'仓库签收001'};
+ assert.equal((await request('admin','/api/system',{action:'bulkImport',kind:'inbound',rows:[importedReceipt],...importMeta})).status,200);
+ const invalidBatch=await request('admin','/api/system',{action:'bulkImport',kind:'inbound',rows:[{...importedReceipt,receiptNo:'HTTP-RCV-2'},importedReceipt],...importMeta});assert.equal(invalidBatch.status,409);
+ const afterImport=await request('admin','/api/system');assert.ok(!afterImport.body.receipts.some(r=>r.receipt_no==='HTTP-RCV-2'));
+ const salesImport={action:'salesImport',site:'马来西亚',channel:'Shopee',businessDate:new Date(Date.now()+8*3600000).toISOString().slice(0,10),sourceBatchRef:'HTTP-SALES-001',importKey:'http-file-sales-001',rows:[{sku:'HTTP-IMPORT',qty:2}],fileName:'sales.csv'};
+ assert.equal((await request('newops','/api/system',salesImport)).status,200);
+ assert.equal((await request('newops','/api/system',salesImport)).status,409);
+ assert.equal((await request('newops','/api/system')).body.inventory.find(r=>r.sku==='HTTP-IMPORT').qty,10);
+ const crossImport=await fetch(origin+'/api/system',{method:'POST',headers:{cookie:cookies.admin,origin:'https://attacker.test','content-type':'application/json'},body:JSON.stringify({action:'bulkImport',kind:'inventory',rows:stockRows,...importMeta})});assert.equal(crossImport.status,403);
  const c=await request('sales','/api/wholesale',{action:'customerCreate',name:'HTTP客户',contact:'Sari',phone:'08123456',city:'Jakarta',address:'Warehouse 1'});assert.equal(c.status,200,JSON.stringify(c.body));const day=new Date(Date.now()+7*3600000).toISOString().slice(0,10);
  const o=await request('sales','/api/wholesale',{action:'orderCreate',customerId:c.body.id,businessDate:day,paymentTerms:'credit',dueDate:'2027-01-01',items:[{sku:'HTTP-BAG',qty:5,unitPrice:100000}]});assert.equal(o.status,200);let view=await request('sales','/api/wholesale'),order=view.body.orders[0];
  assert.equal((await request('sales','/api/wholesale',{action:'orderApprove',orderId:o.body.id,version:order.version,supplyUserId:'supply',stockBasisConfirmed:true,reason:'申请人不得自行审批'})).status,403);

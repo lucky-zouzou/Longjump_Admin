@@ -36,7 +36,7 @@ function compileComponent(file,extra="",overrides={}){
   const url=new URL(file,import.meta.url),require=createRequire(url),module={exports:{}};
   const source=readFileSync(url,"utf8")+extra;
   const compiled=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX,esModuleInterop:true}}).outputText;
-  new Function("require","module","exports",compiled)(name=>overrides[name]??(name==="./wholesale-management-ui"?compileComponent("../app/wholesale-management-ui.tsx","",overrides):require(name)),module,module.exports);
+  new Function("require","module","exports",compiled)(name=>overrides[name]??(name==="./wholesale-management-ui"?compileComponent("../app/wholesale-management-ui.tsx","",overrides):name==="./table-import"?compileComponent("../app/table-import.tsx","",overrides):require(name)),module,module.exports);
   return module.exports;
 }
 test("所有线下表单和对账组件使用印尼语渲染，选项值保持业务编码",()=>{
