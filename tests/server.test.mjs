@@ -8,6 +8,7 @@ test('独立服务器：公司登录、禁止伪造身份、岗位隔离、出�
  try{await new Promise((res,rej)=>{const timer=setTimeout(()=>rej(Error('Server startup timeout: '+logs)),15000);child.stdout.on('data',b=>{if(String(b).includes('ready at')){clearTimeout(timer);res()}});child.once('exit',code=>{clearTimeout(timer);rej(Error(`Server exited ${code}: ${logs}`))})});
  const forged=await fetch(origin+'/api/system',{headers:{'oai-authenticated-user-id':'admin','oai-authenticated-user-email':'admin@example.test','x-local-test-user':'admin'}});assert.equal(forged.status,401);
  const login=async who=>{const page=await fetch(origin+'/signin-with-chatgpt'),html=await page.text(),csrf=html.match(/name="csrf" value="([a-f0-9]+)"/)[1],pre=page.headers.getSetCookie()[0].split(';')[0];const r=await fetch(origin+'/signin-with-chatgpt',{method:'POST',redirect:'manual',headers:{origin,'content-type':'application/x-www-form-urlencoded',cookie:pre},body:new URLSearchParams({csrf,email:`${who}@example.test`,password})});assert.equal(r.status,303,await r.text());return r.headers.getSetCookie().find(c=>c.startsWith('lj_session=')).split(';')[0]};
+ const health=await fetch(origin+'/healthz');assert.equal(health.status,200);assert.deepEqual(await health.json(),{ok:true,release:'local'});
  const cookies={};for(const who of ['admin','sales','supply','finance'])cookies[who]=await login(who);
  const request=async(who,path,payload)=>{const r=await fetch(origin+path,{method:payload?'POST':'GET',headers:{cookie:cookies[who],origin,...(payload?{'content-type':'application/json'}:{})},...(payload?{body:JSON.stringify({...payload,operationId:crypto.randomUUID()})}:{})});const text=await r.text();let body;try{body=JSON.parse(text)}catch{body=text}return {status:r.status,body}};
  const system=await request('admin','/api/system');assert.equal(system.status,200,JSON.stringify(system.body));const page=await fetch(origin+'/',{headers:{cookie:cookies.admin}});assert.equal(page.status,200);assert.ok((await page.text()).includes('LOONG'));
@@ -58,6 +59,11 @@ test('独立服务器：公司登录、禁止伪造身份、岗位隔离、出�
  assert.equal((await request('newops','/api/system',salesImport)).status,200);
  assert.equal((await request('newops','/api/system',salesImport)).status,409);
  assert.equal((await request('newops','/api/system')).body.inventory.find(r=>r.sku==='HTTP-IMPORT').qty,10);
+ const confirmDay={action:'confirmSalesDay',site:'马来西亚',channel:'Shopee',businessDate:salesImport.businessDate,confirmed:true,note:'HTTP核对平台整日销量'};
+ assert.equal((await request('finance','/api/system',confirmDay)).status,403);
+ assert.equal((await request('newops','/api/system',{...confirmDay,site:'印尼'})).status,403);
+ assert.equal((await request('newops','/api/system',confirmDay)).status,200);
+ assert.equal((await request('newops','/api/system')).body.salesScopeStatus[0].updatedToday,true);
 
  // Sales dashboard retains authentication and site scope through the actual router.
  assert.equal((await fetch(origin+'/api/sales-dashboard')).status,401);

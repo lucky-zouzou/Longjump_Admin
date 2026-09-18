@@ -3,6 +3,7 @@ import SalesDashboard from "./sales-dashboard";
 import {SITE_CURRENCIES,SALES_CURRENCIES} from "../lib/sales-data.mjs";
 
 import TableImport from "./table-import";
+import MonthlyDemandEditor from "./monthly-demand-editor";
 import {matchImportItems,groupInboundRows} from "../lib/tabular-import.mjs";
 import ForecastSettings from "./forecast-settings";
 import PlanChanges,{SupplyPicker,PurchaseReassign} from "./plan-changes";
@@ -45,7 +46,6 @@ type Snapshot = {
   shipmentBatches:Row[]; shipmentReceipts:Row[];
   transportBatches:Row[]; transportReceipts:Row[]; businessPartners:Row[]; warehouses:Row[]; countRequests:Row[]; myTasks:Row[];
 };
-type PlanDraft = { sku:string; name:string; qty:string; reason:string };
 type AllocationDraft = { site:string; channel:string; qty:string };
 type Act = (action:string,payload:Row,success:string)=>Promise<Row|null>;
 
@@ -80,20 +80,22 @@ export default function ControlTower({ identity }: { identity:Identity }) {
   const [loading,setLoading] = useState(true);
   const [busy,setBusy] = useState(false);
   const [toast,setToast] = useState("");
+  const [connectionError,setConnectionError]=useState(""),[lastSync,setLastSync]=useState("");
   const [showWelcome,setShowWelcome] = useState(true);
   const [welcomeLeaving,setWelcomeLeaving] = useState(false);
 
   const refresh = useCallback(async () => {
-    const response = await fetch("/api/system", { cache:"no-store" });
+    try{const response = await fetch("/api/system", { cache:"no-store",signal:AbortSignal.timeout(20000) });
     const result = await parseResponse(response);
-    setData(result);
+    setData(result);setConnectionError("");setLastSync(new Date().toLocaleTimeString("zh-CN"));
+    }catch(error){setConnectionError(error instanceof Error?error.message:"更新失败");throw error;}
   },[]);
 
   useEffect(() => {
     let active=true;
     fetch("/api/system",{cache:"no-store"})
       .then(parseResponse)
-      .then(result=>{if(active)setData(result);})
+      .then(result=>{if(active){setData(result);setLastSync(new Date().toLocaleTimeString("zh-CN"));setConnectionError("");}})
       .catch(error=>{if(active)setToast(error.message);})
       .finally(()=>{if(active)setLoading(false);});
     return ()=>{active=false;};
@@ -183,7 +185,7 @@ export default function ControlTower({ identity }: { identity:Identity }) {
         <div><h2>{shellT("全链路可视化协同")}</h2><p>{shellT("SKU需求 → 系列采购 → 系列生产 → 海运批次 → 到仓上架")}</p></div>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
           {hasPermission(actor.role,"backup.export")&&<button className="btn" onClick={exportBackup}>{shellT("导出备份")}</button>}
-          <span className="status-pill">{shellT("● 数据库已连接")}</span>
+          <span className={`status-pill ${connectionError?"connection-failed":""}`} role="status">{connectionError?"更新失败 · 数据可能已过时":`已同步 ${lastSync||"—"}`}</span>{connectionError&&<button className="btn danger" onClick={()=>void refresh().catch(()=>{})}>重新连接</button>}
         </div>
       </header>
       <div className="content">
@@ -321,17 +323,10 @@ function SupplyCoverage({rows}:{rows:Row[]}) {
 
 function Suggestions({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
   const actor=data.actor;
-  const [newDraftSku,setNewDraftSku]=useState("");
-  const [zeroDemand,setZeroDemand]=useState(false),[zeroReason,setZeroReason]=useState("");
-  const [drafts,setDrafts]=useState<PlanDraft[]>(()=>data.suggestions.filter((r)=>r.suggestedProduction>0).map((r)=>({sku:r.sku,name:r.name,qty:String(r.suggestedProduction),reason:r.alertLabel||"系统动态建议"})));
   const [selectedKey,setSelectedKey]=useState(data.suggestions[0]?supplyKey(data.suggestions[0]):"");
   const [setting,setSetting]=useState({sku:"",name:"",productSeries:"",supplierName:"",factoryName:"",productType:"老款",unitPrice:"0",productionLeadDays:"21",seaLeadDays:"35",reviewCycleDays:"7",serviceLevel:"0.95",minOrderQty:"1",orderMultiple:"1",cartonQty:"1",unitVolumeCbm:"0"});
   const selected=data.suggestions.find(row=>supplyKey(row)===selectedKey)||data.suggestions[0];
   const effectiveSelectedKey=selected?supplyKey(selected):"";
-  const submit=async()=>{
-    if(!actor.site||!actor.channel) return;
-    await act("monthlySubmit",{month:data.currentMonth,site:actor.site,channel:actor.channel,zeroDemand,zeroReason,items:drafts.filter(r=>Number(r.qty)>0).map((r)=>({...r,qty:Number(r.qty)}))},"本月备货需求已保存并进入完整度检查");
-  };
   const chooseSetting=(sku:string)=>{
     const row=data.skuSettings.find(item=>item.sku===sku);
     if(!row)return;
@@ -363,12 +358,7 @@ function Suggestions({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
       <tbody>{data.suggestions.length===0?<tr><td colSpan={10}><Empty>请先录入库存和销售数据，系统将自动形成动态建议</Empty></td></tr>:data.suggestions.map((r)=><tr key={supplyKey(r)}><td><Pill tone={ALERT_TONE[r.alertLevel]||"blue"}>{r.alertLabel}</Pill><div className="cell-note">{r.alertReason}</div></td><td>{r.site}<br/><span className="cell-note">{r.channel}</span></td><td><strong>{r.sku}</strong><br/><span className="cell-note">{r.name||"—"}</span></td><td className="num">{Number(r.avg7).toFixed(1)}</td><td className="num" style={{color:r.trendRate>=.2?"var(--blue)":r.trendRate<0?"var(--green)":undefined}}>{r.previous7>0?`${r.trendRate>=0?"+":""}${pct(r.trendRate)}`:"—"}</td><td className="num" style={{color:r.qty<0?"var(--red)":undefined}}>{fmt(r.qty)}<div className="cell-note">{days(r.stockCoverDays)}</div></td><td className="num">{fmt(r.seaInTransit)}<div className="cell-note">{r.nextSeaEta||"未填写ETA"}</div></td><td className="num">{fmt(r.productionInProgress)}</td><td className="num">{fmt(r.suggestedReplenishment)}</td><td className="num"><strong>{fmt(r.suggestedProduction)}</strong><div className="cell-note">目标 {fmt(r.targetQty)}</div></td></tr>)}</tbody></table></div>
     </Panel>
     {actor.role==="运营" && <Panel title="提交本月备货需求" desc="系统建议可调整；调整原因与最终提交量一并存档">
-      <label>增加备货SKU<select value={newDraftSku} onChange={e=>setNewDraftSku(e.target.value)}><option value="">请选择SKU</option>{data.skuSettings.filter(r=>!drafts.some(d=>d.sku===r.sku)).map(r=><option key={r.sku} value={r.sku}>{r.sku} · {r.name}</option>)}</select><button className="btn" disabled={!newDraftSku} onClick={()=>{const r=data.skuSettings.find(r=>r.sku===newDraftSku);if(r)setDrafts([...drafts,{sku:r.sku,name:r.name,qty:"1",reason:"运营补充需求"}]);setNewDraftSku("");}}>增加</button></label>
-      <label><input type="checkbox" checked={zeroDemand} onChange={e=>setZeroDemand(e.target.checked)}/>确认本月无需备货</label>{zeroDemand&&<label>确认说明<input value={zeroReason} onChange={e=>setZeroReason(e.target.value)}/><button className="btn primary" disabled={busy||zeroReason.length<4} onClick={submit}>提交无需备货</button></label>}
-      {!zeroDemand&&(drafts.length===0?<Empty>当前没有建议启动生产的SKU，可提交无需备货确认</Empty>:<>
-        <div className="table-wrap"><table><thead><tr><th>SKU</th><th>商品</th><th className="num">提交数量</th><th>调整原因</th></tr></thead><tbody>{drafts.map((r,i)=><tr key={r.sku}><td>{r.sku}</td><td>{r.name}</td><td><input aria-label={`${r.sku}提交数量`} value={r.qty} onChange={e=>setDrafts(drafts.map((x,j)=>j===i?{...x,qty:e.target.value}:x))} style={{width:90,border:"1px solid var(--line)",borderRadius:7,padding:6,textAlign:"right"}}/></td><td><input aria-label={`${r.sku}调整原因`} value={r.reason} onChange={e=>setDrafts(drafts.map((x,j)=>j===i?{...x,reason:e.target.value}:x))} style={{width:"100%",border:"1px solid var(--line)",borderRadius:7,padding:6}}/></td></tr>)}</tbody></table></div>
-        <div className="form-actions"><button className="btn primary" disabled={busy||!actor.site} onClick={submit}>提交 {data.currentMonth} 需求</button></div>
-      </>)}
+      <MonthlyDemandEditor key={`${actor.id}|${data.currentMonth}|${actor.site}|${actor.channel}`} actor={actor} month={data.currentMonth} submissions={data.submissions} suggestions={data.suggestions} skuSettings={data.skuSettings} act={act} busy={busy}/>
     </Panel>}
     {hasPermission(actor.role,"sku.manage")&&<Panel title="SKU系列与供应参数" desc="产品系列是供应链合并下单、工厂合并生产的必要依据">
       {data.skuSettings.some(row=>!row.product_series||row.product_series==="待归类")&&<div className="notice warn">还有 <strong>{data.skuSettings.filter(row=>!row.product_series||row.product_series==="待归类").length}</strong> 个SKU未归入产品系列。涉及这些SKU的月度计划会暂停进入审批。</div>}
@@ -576,10 +566,12 @@ function Field({label,children,span}:{label:string;children:React.ReactNode;span
 
 function SalesImport({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
   const actor=data.actor;
-  const [form,setForm]=useState({businessDate:localDate(),site:actor.site||SITES[0],channel:actor.channel||"TikTok",sourceBatchRef:""});
+  const [form,setForm]=useState({businessDate:localDate(),site:actor.site||SITES[0],channel:actor.channel||"TikTok",sourceBatchRef:"",reportKind:"partial"});
+  const [dayConfirmed,setDayConfirmed]=useState(false),[dayNote,setDayNote]=useState("");
+  useEffect(()=>{setDayConfirmed(false);setDayNote("");},[form.businessDate,form.site,form.channel]);
   const [manual,setManual]=useState({sku:"",name:"",qty:"",unitPrice:"",amount:"",adCost:"",currency:SITE_CURRENCIES[actor.site as keyof typeof SITE_CURRENCIES]||"MYR"});
   const addManual=async()=>{
-    const result=await act("salesImport",{...form,rows:[{...manual,qty:Number(manual.qty)}],fileName:"手工录入",importKey:`manual|${form.businessDate}|${form.site}|${form.channel}|${crypto.randomUUID()}`},"销售已录入并统一扣减库存");
+    const result=await act("salesImport",{...form,reportKind:"partial",rows:[{...manual,qty:Number(manual.qty)}],fileName:"手工录入",importKey:`manual|${form.businessDate}|${form.site}|${form.channel}|${crypto.randomUUID()}`},"销售已录入并统一扣减库存");
     if(!result)return;
     setManual({...manual,sku:"",name:"",qty:"",unitPrice:"",amount:"",adCost:""});
   };
@@ -591,12 +583,13 @@ function SalesImport({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
       <Pill tone={updated===data.salesScopeStatus.length?"green":"red"}>今日已更新 {updated}/{data.salesScopeStatus.length}</Pill>
     </PageHead>
     <SalesDashboard actor={actor} refreshToken={data}/>
-    <Panel title="每日销售更新状态" desc="当天未导入的站点显示红色待更新提醒">
-      <div className="sales-scope-grid">{data.salesScopeStatus.map(row=><div className={classNames("sales-scope-card",row.updatedToday?"updated":"pending")} key={`${row.site}-${row.channel}`}><div><strong>{row.site}</strong><span>{row.channel}</span></div><Pill tone={row.updatedToday?"green":"red"}>{row.updatedToday?"今日已更新":"今日待更新"}</Pill><b>今日 {fmt(row.salesToday)}件</b><small>7天 {fmt(row.sales7Qty)}件｜最近 {row.lastSaleDate||"无记录"}</small></div>)}</div>
+    <Panel title="每日销售更新状态" desc="完整日报或零销售确认后才完成；部分销售和费用补录仍显示待核对">
+      <div className="sales-scope-grid">{data.salesScopeStatus.map(row=><div className={classNames("sales-scope-card",row.updatedToday?"updated":"pending")} key={`${row.site}-${row.channel}`}><div><strong>{row.site}</strong><span>{row.channel}</span></div><Pill tone={row.updatedToday?"green":"red"}>{row.updatedToday?"日报已完整":row.lastImportDate===localDate()?"已导入 · 待核对":"今日待更新"}</Pill><b>今日 {fmt(row.salesToday)}件</b><small>7天 {fmt(row.sales7Qty)}件｜最近 {row.lastSaleDate||"无记录"}</small></div>)}</div>
     </Panel>
     {canImport&&<>
     <Panel title="导入 Excel / CSV" desc="同一文件或平台报表编号不能重复导入；错误行需全部修正后再提交">
       <div className="form-grid">
+        <Field label="文件覆盖范围"><select value={form.reportKind} onChange={e=>setForm({...form,reportKind:e.target.value})}><option value="partial">部分 / 增量销售（默认）</option><option value="complete">完整销售日报（该日首次导入）</option><option value="cost">仅广告费用补录</option></select></Field>
         <Field label="销售日期"><input type="date" value={form.businessDate} onChange={e=>setForm({...form,businessDate:e.target.value})}/></Field>
         <Field label="站点"><select disabled={actor.role==="运营"} value={form.site} onChange={e=>setForm({...form,site:e.target.value})}>{SITES.map(s=><option key={s}>{s}</option>)}</select></Field>
         <Field label="渠道"><select disabled={actor.role==="运营"} value={form.channel} onChange={e=>setForm({...form,channel:e.target.value})}>{REQUIRED_CHANNELS.map(s=><option key={s}>{s}</option>)}</select></Field>
@@ -606,6 +599,11 @@ function SalesImport({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
         if(form.sourceBatchRef.trim().length<3)throw Error("请先填写至少3个字符的平台报表/订单批次号");
         return Boolean(await act("salesImport",{...form,rows,...meta,importKey:`file|${form.businessDate}|${form.site}|${form.channel}|${meta.fileHash}`},"销售已导入，库存流水同步生成"));
       }}/>
+    </Panel>
+    <Panel title="确认日报完整 / 零销售" desc="分批导入完成后，在这里确认该日所有销售已核对。后续新增或冲销销量会自动恢复待核对状态；费用补录不影响确认。">
+      <div className="form-grid"><Field label="核对日期"><strong>{form.businessDate} · {form.site} · {form.channel}</strong></Field><Field label="核对依据" span={2}><input value={dayNote} onChange={e=>setDayNote(e.target.value)} placeholder="平台日报编号、ERP核对记录或零销售说明"/></Field></div>
+      <label className="report-toggle"><input type="checkbox" checked={dayConfirmed} onChange={e=>setDayConfirmed(e.target.checked)}/>我已核对该日全部销售；无销售时确认该日为零销售</label>
+      <div className="form-actions"><button className="btn primary" disabled={busy||!dayConfirmed||dayNote.trim().length<4} onClick={async()=>{if(await act("confirmSalesDay",{...form,confirmed:dayConfirmed,note:dayNote},"该日销售完整度已确认")){setDayConfirmed(false);setDayNote("");}}}>确认该日销售完整</button></div>
     </Panel>
     <Panel title="单条销售录入" desc="与批量导入一致：销售记录、库存余额和库存流水同时写入">
       <div className="form-grid">

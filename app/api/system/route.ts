@@ -1,3 +1,4 @@
+import {publicSystemSnapshot} from "../../../lib/system-response.mjs";
 import {normalizeSales,SITE_CURRENCIES} from "../../../lib/sales-data.mjs";
 import {validateImportRows,groupInboundRows} from "../../../lib/tabular-import.mjs";
 import {planIntegrityGuards} from "../../../lib/plan-integrity.mjs";
@@ -123,39 +124,39 @@ export async function GET(request:Request) {
       all(`SELECT * FROM inventory_movements${scope.clause} ORDER BY created_at DESC LIMIT 500`, scope.args),
       all(`SELECT * FROM sales_records${scope.clause}${scope.clause?" AND":" WHERE"} reversed_at IS NULL ORDER BY business_date DESC,created_at DESC LIMIT 1000`, scope.args),
       all(`SELECT * FROM sales_imports${scope.clause} ORDER BY created_at DESC LIMIT 100`, scope.args),
-      all("SELECT site,channel,MAX(business_date) last_sale_date,SUM(CASE WHEN business_date=? THEN total_qty ELSE 0 END) sales_today,SUM(CASE WHEN business_date>=? THEN total_qty ELSE 0 END) sales_7_qty,COUNT(DISTINCT CASE WHEN business_date>=? THEN business_date END) import_days_7 FROM sales_imports WHERE reversed_at IS NULL GROUP BY site,channel",[today,cutoff7,cutoff7]),
+      all("SELECT site,channel,MAX(CASE WHEN report_kind IN ('complete','zero') THEN business_date END) last_sale_date,MAX(business_date) last_import_date,SUM(CASE WHEN business_date=? THEN total_qty ELSE 0 END) sales_today,SUM(CASE WHEN business_date>=? THEN total_qty ELSE 0 END) sales_7_qty,COUNT(DISTINCT CASE WHEN business_date>=? AND report_kind IN ('complete','zero') THEN business_date END) import_days_7 FROM sales_imports WHERE reversed_at IS NULL GROUP BY site,channel",[today,cutoff7,cutoff7]),
       all(`SELECT site,channel,sku,SUM(qty) qty FROM sales_records WHERE reversed_at IS NULL AND business_date>=?${actor.role==="运营"?" AND site=? AND channel=?":""} GROUP BY site,channel,sku ORDER BY qty DESC LIMIT 100`,actor.role==="运营"?[cutoff7,actor.site,actor.channel]:[cutoff7]),
       actor.role === "运营"
         ? all("SELECT r.*, GROUP_CONCAT(a.site||'|'||a.channel||'|'||a.qty, ';;') allocations FROM inbound_receipts r JOIN inbound_allocations a ON a.receipt_id=r.id AND a.site=? AND a.channel=? GROUP BY r.id ORDER BY r.received_at DESC LIMIT 200",[actor.site,actor.channel])
         : all("SELECT r.*, GROUP_CONCAT(a.site||'|'||a.channel||'|'||a.qty, ';;') allocations FROM inbound_receipts r LEFT JOIN inbound_allocations a ON a.receipt_id=r.id GROUP BY r.id ORDER BY r.received_at DESC LIMIT 200"),
       actor.role === "运营" ? all("SELECT * FROM monthly_submissions WHERE site=? AND channel=? ORDER BY month DESC", [actor.site, actor.channel]) : all("SELECT * FROM monthly_submissions ORDER BY month DESC,site,channel"),
-      all("SELECT month,site,channel FROM monthly_submissions ORDER BY month DESC LIMIT 500"),
-      ["管理员","供应链"].includes(actor.role) ? all("SELECT * FROM approval_requests ORDER BY created_at DESC LIMIT 100") : all("SELECT id,type,month,status,stage,decision_comment,created_at,updated_at FROM approval_requests WHERE 1=0"),
-      all("SELECT * FROM production_batches ORDER BY updated_at DESC LIMIT 300"),
-      all("SELECT * FROM new_product_projects ORDER BY cycle_month DESC,created_at DESC LIMIT 200"),
-      all("SELECT * FROM new_product_stage_records ORDER BY submitted_at DESC LIMIT 3000"),
+      all("SELECT month,site,channel FROM monthly_submissions ORDER BY month DESC"),
+      ["管理员","供应链"].includes(actor.role) ? all("SELECT * FROM approval_requests WHERE status='pending' OR id IN (SELECT id FROM approval_requests ORDER BY created_at DESC LIMIT 100) ORDER BY created_at DESC") : all("SELECT id,type,month,status,stage,decision_comment,created_at,updated_at FROM approval_requests WHERE 1=0"),
+      all("SELECT * FROM production_batches WHERE stage NOT IN ('arrived','completed','on_shelf') OR id IN (SELECT id FROM production_batches ORDER BY updated_at DESC LIMIT 300) ORDER BY updated_at DESC"),
+      all("SELECT * FROM new_product_projects WHERE status NOT IN ('completed','abandoned') OR id IN (SELECT id FROM new_product_projects ORDER BY updated_at DESC LIMIT 200) ORDER BY updated_at DESC"),
+      all("SELECT * FROM new_product_stage_records ORDER BY submitted_at DESC"),
       all("SELECT * FROM sku_settings ORDER BY sku"),
       actor.role === "管理员" ? all("SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT 500") : all("SELECT * FROM audit_logs WHERE actor_id=? ORDER BY created_at DESC LIMIT 200", [actor.id]),
-      all("SELECT * FROM series_purchase_orders ORDER BY updated_at DESC LIMIT 300"),
-      all("SELECT * FROM series_purchase_order_items ORDER BY updated_at DESC LIMIT 3000"),
-      all("SELECT * FROM series_production_orders ORDER BY updated_at DESC LIMIT 300"),
-      all("SELECT * FROM series_production_order_items ORDER BY updated_at DESC LIMIT 3000"),
-      all("SELECT * FROM shipment_batches ORDER BY updated_at DESC LIMIT 500"),
-      all("SELECT * FROM shipment_batch_items ORDER BY updated_at DESC LIMIT 5000"),
+      all("SELECT * FROM series_purchase_orders ORDER BY updated_at DESC"),
+      all("SELECT * FROM series_purchase_order_items ORDER BY updated_at DESC"),
+      all("SELECT * FROM series_production_orders ORDER BY updated_at DESC"),
+      all("SELECT * FROM series_production_order_items ORDER BY updated_at DESC"),
+      all("SELECT * FROM shipment_batches WHERE stage NOT IN ('on_shelf') OR id IN (SELECT id FROM shipment_batches ORDER BY updated_at DESC LIMIT 500) ORDER BY updated_at DESC"),
+      all("SELECT * FROM shipment_batch_items ORDER BY updated_at DESC"),
       all("SELECT * FROM shipment_receipts ORDER BY received_at DESC LIMIT 500"),
       all("SELECT * FROM shipment_receipt_items ORDER BY created_at DESC LIMIT 5000"),
-      all("SELECT * FROM shipment_shelf_confirmations ORDER BY confirmed_at DESC LIMIT 5000"),
+      all("SELECT * FROM shipment_shelf_confirmations ORDER BY confirmed_at DESC"),
       actor.role === "管理员" ? all("SELECT * FROM users ORDER BY created_at") : actor.role==="供应链" ? all("SELECT id,email,name,role,responsibility_unit,active FROM users WHERE active=1 AND role IN ('供应链','工厂','海运') ORDER BY role,name") : all("SELECT * FROM users WHERE id=?", [actor.id]),
       canReadDomain(actor.role,"master") ? all("SELECT * FROM business_partners ORDER BY type,name") : all("SELECT * FROM business_partners WHERE 1=0"),
       canReadDomain(actor.role,"master")||canReadDomain(actor.role,"transport") ? all("SELECT * FROM warehouses ORDER BY site,channel,name") : all("SELECT * FROM warehouses WHERE 1=0"),
-      canReadDomain(actor.role,"inventory") ? (actor.role==="运营"?all("SELECT * FROM inventory_count_requests WHERE site=? AND channel=? ORDER BY created_at DESC LIMIT 200",[actor.site,actor.channel]):all("SELECT * FROM inventory_count_requests ORDER BY created_at DESC LIMIT 300")) : all("SELECT * FROM inventory_count_requests WHERE 1=0"),
-      canReadDomain(actor.role,"transport") ? all("SELECT * FROM transport_batches WHERE status<>'completed' OR id IN (SELECT id FROM transport_batches ORDER BY updated_at DESC LIMIT 200) ORDER BY updated_at DESC LIMIT 400") : all("SELECT * FROM transport_batches WHERE 1=0"),
+      canReadDomain(actor.role,"inventory") ? (actor.role==="运营"?all("SELECT * FROM inventory_count_requests WHERE site=? AND channel=? AND (status='pending' OR id IN (SELECT id FROM inventory_count_requests ORDER BY created_at DESC LIMIT 300)) ORDER BY created_at DESC",[actor.site,actor.channel]):all("SELECT * FROM inventory_count_requests WHERE status='pending' OR id IN (SELECT id FROM inventory_count_requests ORDER BY created_at DESC LIMIT 300) ORDER BY created_at DESC")) : all("SELECT * FROM inventory_count_requests WHERE 1=0"),
+      canReadDomain(actor.role,"transport") ? all("SELECT * FROM transport_batches WHERE status<>'completed' OR id IN (SELECT id FROM transport_batches ORDER BY updated_at DESC LIMIT 200) ORDER BY updated_at DESC") : all("SELECT * FROM transport_batches WHERE 1=0"),
       canReadDomain(actor.role,"transport") ? all("SELECT * FROM transport_batch_items WHERE batch_id IN (SELECT id FROM transport_batches WHERE status<>'completed' OR id IN (SELECT id FROM transport_batches ORDER BY updated_at DESC LIMIT 200)) ORDER BY updated_at DESC") : all("SELECT * FROM transport_batch_items WHERE 1=0"),
-      canReadDomain(actor.role,"transport") ? all("SELECT * FROM transport_legs WHERE stage<>'on_shelf' OR id IN (SELECT id FROM transport_legs ORDER BY updated_at DESC LIMIT 400) ORDER BY updated_at DESC LIMIT 800") : all("SELECT * FROM transport_legs WHERE 1=0"),
+      canReadDomain(actor.role,"transport") ? all("SELECT * FROM transport_legs WHERE stage<>'on_shelf' OR id IN (SELECT id FROM transport_legs ORDER BY updated_at DESC LIMIT 400) ORDER BY updated_at DESC") : all("SELECT * FROM transport_legs WHERE 1=0"),
       canReadDomain(actor.role,"transport") ? all("SELECT * FROM transport_leg_items WHERE leg_id IN (SELECT id FROM transport_legs WHERE stage<>'on_shelf' OR id IN (SELECT id FROM transport_legs ORDER BY updated_at DESC LIMIT 400)) ORDER BY updated_at DESC") : all("SELECT * FROM transport_leg_items WHERE 1=0"),
       canReadDomain(actor.role,"transport") ? all("SELECT * FROM transport_receipts ORDER BY received_at DESC LIMIT 500") : all("SELECT * FROM transport_receipts WHERE 1=0"),
       canReadDomain(actor.role,"transport") ? all("SELECT * FROM transport_receipt_items ORDER BY created_at DESC LIMIT 3000") : all("SELECT * FROM transport_receipt_items WHERE 1=0"),
-      canReadDomain(actor.role,"transport") ? all("SELECT * FROM transport_shelf_confirmations ORDER BY confirmed_at DESC LIMIT 3000") : all("SELECT * FROM transport_shelf_confirmations WHERE 1=0"),
+      canReadDomain(actor.role,"transport") ? all("SELECT * FROM transport_shelf_confirmations ORDER BY confirmed_at DESC") : all("SELECT * FROM transport_shelf_confirmations WHERE 1=0"),
     ]);
     const [inventory, movements, sales, imports, salesScopeRows, salesTopSkus, receipts, submissions, submissionScopeRows, approvals, batches, newProductRows, newProductStageRows, skuSettings, auditRows, purchaseOrderRows, purchaseItemRows, productionOrderRows, productionItemRows, shipmentRows, shipmentItemRows, shipmentReceiptRows, shipmentReceiptItemRows, shelfConfirmationRows, users,businessPartners,warehouses,countRequests,transportRows,transportItemRows,transportLegRows,transportLegItemRows,transportReceiptRows,transportReceiptItemRows,transportShelfRows] = results;
 
@@ -164,7 +165,7 @@ export async function GET(request:Request) {
       .filter((row)=>actor.role!=="运营"||(row.site===actor.site&&row.channel===actor.channel))
       .map((row)=>{
         const status=salesScopeMap.get(`${row.site}|${row.channel}`)??{};
-        return {...row,lastSaleDate:status.last_sale_date||"",salesToday:Number(status.sales_today||0),sales7Qty:Number(status.sales_7_qty||0),importDays7:Number(status.import_days_7||0),updatedToday:status.last_sale_date===today};
+        return {...row,lastImportDate:status.last_import_date||"",lastSaleDate:status.last_sale_date||"",salesToday:Number(status.sales_today||0),sales7Qty:Number(status.sales_7_qty||0),importDays7:Number(status.import_days_7||0),updatedToday:status.last_sale_date===today};
       });
 
     const batchViews:AnyRow[]=batches.map((batch):AnyRow=>{
@@ -430,7 +431,7 @@ export async function GET(request:Request) {
       ...project,
       records:project.records.map((record:AnyRow)=>record.stage_key==="finance"&&!canReadDomain(actor.role,"finance_detail")?{...record,data:{submitted:true},conclusion:"财务测算已提交"}:record),
     })):[];
-    return Response.json({
+    return Response.json(publicSystemSnapshot({
       actor, currentMonth, metrics, myTasks,
       inventory:canReadDomain(actor.role,"inventory")?inventory:[],
       movements:canReadDomain(actor.role,"inventory")?movements:[],
@@ -439,7 +440,7 @@ export async function GET(request:Request) {
       receipts:canReadDomain(actor.role,"inventory")?receipts:[],
       supplyPolicies:canReadDomain(actor.role,"planning")?policies:[],
       forecastHistory:canReadDomain(actor.role,"planning")?await all(`SELECT f.*,COALESCE((SELECT SUM(s.qty) FROM sales_records s WHERE s.sku=f.sku AND s.site=f.site AND s.channel=f.channel AND substr(s.business_date,1,7)=f.month AND s.reversed_at IS NULL),0)-COALESCE((SELECT SUM(c.return_qty) FROM sales_demand_corrections c WHERE c.sku=f.sku AND c.site=f.site AND c.channel=f.channel AND substr(c.business_date,1,7)=f.month),0) actual_sales FROM forecast_snapshots f${actor.role==="运营"?" WHERE f.site=? AND f.channel=?":""} ORDER BY month DESC`,actor.role==="运营"?[actor.site,actor.channel]:[]):[],
-      planChanges: ["管理员","供应链"].includes(actor.role)?await all("SELECT * FROM plan_changes ORDER BY created_at DESC"):[],
+      planChanges: ["管理员","供应链"].includes(actor.role)?(await all("SELECT * FROM plan_changes ORDER BY created_at DESC")).map(r=>({...r,old:parseJson(r.old_json,{}),next:parseJson(r.new_json,{})})):[],
       submissions:canReadDomain(actor.role,"planning")?submissions.map((r) => ({ ...r, items:parseJson(r.items_json, []) })):[],
       approvals:canReadDomain(actor.role,"planning")?approvals.map((r) => ({ ...r, payload:parseJson(r.payload_json, {}) })):[],
       batches:canReadDomain(actor.role,"transport")?visibleBatches:[],
@@ -459,7 +460,7 @@ export async function GET(request:Request) {
       salesScopeStatus:canReadDomain(actor.role,"sales")?salesScopeStatus:[],
       salesTopSkus:canReadDomain(actor.role,"sales")?salesTopSkus:[],
       issues:supplyIssues,
-    });
+    }));
   } catch (error) { return errorResponse(error); }
 }
 
@@ -472,6 +473,7 @@ export async function POST(request:Request) {
     const action = cleanText(payload.action, 40);
     await assertWritable(database());
     if (action === "bulkImport") return await bulkImport(actor,payload);
+    if (action === "confirmSalesDay") return await confirmSalesDay(actor,payload);
     if (action === "salesImport") return await salesImport(actor, payload);
     if (action === "reverseSalesImport") return await reverseSalesImport(actor,payload);
     if (action === "inventoryAdjust") return await inventoryAdjust(actor, payload);
@@ -539,6 +541,25 @@ async function bulkImport(actor:Actor,payload:AnyRow){
   return Response.json({ok:true,imported,skipped,rows:rows.length});
 }
 
+async function confirmSalesDay(actor:Actor,payload:AnyRow){
+  requireBusinessPermission(actor,"sales.import");
+  const site=cleanText(payload.site,20),channel=cleanText(payload.channel,20),date=cleanText(payload.businessDate,10);
+  validSiteChannel(site,channel);requireScope(actor,site,channel);
+  if(channel==="线下分销"||!/^\d{4}-\d{2}-\d{2}$/.test(date)||!Number.isFinite(Date.parse(date))||new Date(date).toISOString().slice(0,10)!==date||date>chinaDate()||date<chinaDate(-90))throw new HttpError(400,"请选择近90天内有效的线上销售日期");
+  if(payload.confirmed!==true)throw new HttpError(400,"请确认已核对该日全部销售，包括零销售情况");
+  const note=cleanText(payload.note,240);if(note.length<4)throw new HttpError(400,"请填写日报核对依据，至少4个字符");
+  const db=database(),idsSql="SELECT id FROM sales_imports WHERE site=? AND channel=? AND business_date=? AND total_qty>0 AND reversed_at IS NULL ORDER BY id";
+  const rows=await all(idsSql,[site,channel,date]),fingerprint=rows.map(r=>r.id).join('|');
+  const key=`coverage|${site}|${channel}|${date}`,timestamp=nowIso(),id=makeId('sale_day');
+  await db.batch([
+    guardStatement(db,actor,"销售日报完整度确认",`COALESCE((SELECT GROUP_CONCAT(id,'|') FROM (${idsSql})), '')=?`,[site,channel,date,fingerprint]),
+    db.prepare("UPDATE sales_imports SET report_kind='partial' WHERE site=? AND channel=? AND business_date=? AND report_kind IN ('complete','zero') AND reversed_at IS NULL").bind(site,channel,date),
+    db.prepare("INSERT INTO sales_imports(id,import_key,business_date,site,channel,file_name,source_batch_ref,row_count,total_qty,actor_id,created_at,report_kind) VALUES(?,?,?,?,?,?,?,0,0,?,?,?) ON CONFLICT(import_key) DO UPDATE SET report_kind=excluded.report_kind,reversed_at=NULL,reversed_by=NULL,reversal_reason='',actor_id=excluded.actor_id,created_at=excluded.created_at,file_name=excluded.file_name").bind(id,key,date,site,channel,note,'日报核对',actor.id,timestamp,rows.length?'complete':'zero'),
+    audit(actor,"确认销售日报完整","sales_day",key,{date,site,channel,note,sourceImportIds:rows.map(r=>r.id),zero:!rows.length}),
+  ]);
+  return Response.json({ok:true,zero:!rows.length});
+}
+
 async function salesImport(actor:Actor, payload:AnyRow) {
   requireBusinessPermission(actor,"sales.import");
   const site = cleanText(payload.site, 20), channel = cleanText(payload.channel, 20);
@@ -558,12 +579,17 @@ async function salesImport(actor:Actor, payload:AnyRow) {
   if(await db.prepare("SELECT id FROM sales_imports WHERE site=? AND channel=? AND business_date=? AND source_batch_ref=? AND reversed_at IS NULL").bind(site,channel,businessDate,sourceBatchRef).first()) throw new HttpError(409,"该平台批次或手工凭证号已经导入，系统已阻止重复扣库存");
   const importId = makeId("sale_import"), timestamp = nowIso();
   const totalQty = rows.reduce((sum,r) => sum + r.qty, 0);
+  const reportKind=totalQty===0?"cost":payload.reportKind==="complete"?"complete":"partial";
+  if(payload.reportKind==="cost"&&totalQty>0)throw new HttpError(400,"费用补录只能包含销量为0的费用行");
+  if(payload.reportKind==="complete"&&totalQty===0)throw new HttpError(400,"费用文件不能作为完整销售日报；零销售日请使用确认入口");
   const settings = await all("SELECT sku,unit_price,name FROM sku_settings");
   const settingMap = new Map<string, AnyRow>(settings.map((r:AnyRow) => [r.sku, r]));
   const statements = [
-    db.prepare("INSERT INTO sales_imports (id,import_key,business_date,site,channel,file_name,source_batch_ref,row_count,total_qty,actor_id,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)")
-      .bind(importId, importKey, businessDate, site, channel, cleanText(payload.fileName, 180),sourceBatchRef, new Set(rows.map(row=>row.sku)).size, totalQty, actor.id, timestamp),
+    ...(totalQty>0?[db.prepare("UPDATE sales_imports SET report_kind='partial' WHERE site=? AND channel=? AND business_date=? AND report_kind IN ('complete','zero') AND reversed_at IS NULL").bind(site,channel,businessDate)]:[]),
+    db.prepare("INSERT INTO sales_imports (id,import_key,business_date,site,channel,file_name,source_batch_ref,row_count,total_qty,actor_id,created_at,report_kind) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)")
+      .bind(importId, importKey, businessDate, site, channel, cleanText(payload.fileName, 180),sourceBatchRef, new Set(rows.map(row=>row.sku)).size, totalQty, actor.id, timestamp,reportKind),
   ];
+  if(reportKind==="complete")statements.unshift(guardStatement(db,actor,"完整销售日报校验","NOT EXISTS(SELECT 1 FROM sales_imports WHERE site=? AND channel=? AND business_date=? AND total_qty>0 AND reversed_at IS NULL)",[site,channel,businessDate]));
   rows.forEach((row) => {
     const setting = settingMap.get(row.sku);
     const name = row.name || cleanText(setting?.name, 120);
@@ -597,8 +623,8 @@ async function reverseSalesImport(actor:Actor,payload:AnyRow){
   if(!source) throw new HttpError(404,"销售导入批次不存在");
   if(source.reversed_at) throw new HttpError(409,"该销售导入批次已经冲销");
   const rows=await all("SELECT r.sku,COALESCE(s.name,'') name,r.qty FROM sales_records r LEFT JOIN sku_settings s ON s.sku=r.sku WHERE r.import_id=? AND r.reversed_at IS NULL",[importId]);
-  if(!rows.length) throw new HttpError(409,"该批次没有可冲销销售明细");
-  const timestamp=nowIso(),statements=[guardStatement(db,actor,"销售冲销校验","EXISTS(SELECT 1 FROM sales_imports WHERE id=? AND reversed_at IS NULL)",[importId]),...reversalStatements(db,{source,records:rows.filter(row=>row.qty>0),reason,actorId:actor.id,timestamp})];
+  if(!rows.length&&!String(source.import_key).startsWith("coverage|")) throw new HttpError(409,"该批次没有可冲销销售明细");
+  const timestamp=nowIso(),statements=[...(Number(source.total_qty)>0?[db.prepare("UPDATE sales_imports SET report_kind='partial' WHERE site=? AND channel=? AND business_date=? AND report_kind IN ('complete','zero') AND reversed_at IS NULL").bind(source.site,source.channel,source.business_date)]:[]),guardStatement(db,actor,"销售冲销校验","EXISTS(SELECT 1 FROM sales_imports WHERE id=? AND reversed_at IS NULL)",[importId]),...reversalStatements(db,{source,records:rows.filter(row=>row.qty>0),reason,actorId:actor.id,timestamp})];
   statements.push(
     db.prepare("UPDATE sales_records SET reversed_at=? WHERE import_id=? AND reversed_at IS NULL").bind(timestamp,importId),
     db.prepare("UPDATE sales_imports SET reversed_at=?,reversed_by=?,reversal_reason=? WHERE id=? AND reversed_at IS NULL").bind(timestamp,actor.id,reason,importId),
@@ -734,9 +760,11 @@ function normalizePlanItems(raw:unknown): PlanItem[] {
   if (!Array.isArray(raw) || raw.length === 0 || raw.length > 1000) throw new HttpError(400, "备货明细需为1—1000行");
   const map = new Map<string,PlanItem>();
   for (const item of raw) {
-    const sku = cleanSku(item.sku), qty = int(item.qty);
-    if (!sku || !Number.isInteger(qty) || qty <= 0) throw new HttpError(400, "备货明细存在空SKU或非正整数数量");
+    if (!item || typeof item !== "object" || !["string","number"].includes(typeof item.qty)) throw new HttpError(400, "备货明细格式无效");
+    const sku = cleanSku(item.sku), qty = Number(item.qty);
+    if (!sku || sku.length > 120 || !Number.isSafeInteger(qty) || qty <= 0 || qty > 1_000_000_000) throw new HttpError(400, "备货明细存在空SKU或无效数量，数量须为1—1,000,000,000的整数");
     const previous = map.get(sku);
+    if ((previous?.qty??0)+qty > 1_000_000_000) throw new HttpError(400, "同一SKU备货总量不能超过1,000,000,000");
     map.set(sku,{ sku,name:cleanText(item.name,120)||previous?.name||"",qty:(previous?.qty??0)+qty,reason:cleanText(item.reason,240)||previous?.reason||"" });
   }
   return [...map.values()];
@@ -779,6 +807,9 @@ async function monthlySubmit(actor:Actor, payload:AnyRow) {
   for(const item of items)if(!forecasts.suggestions.some(r=>r.sku===item.sku))forecasts.suggestions.push({sku:item.sku,site,channel,name:item.name,suggestedProduction:0,forecastDaily:0,confidence:"无销量历史",forecastVersion:"7-21-56-v1",note:"运营人工追加SKU，无历史数据可生成系统建议"});
   const snapshots=forecasts.suggestions.filter((r:AnyRow)=>r.site===site&&r.channel===channel).map((r:AnyRow)=>db.prepare("INSERT INTO forecast_snapshots (id,month,sku,site,channel,system_qty,forecast_sales,operator_qty,model_json,created_at) VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(month,sku,site,channel) DO UPDATE SET system_qty=excluded.system_qty,forecast_sales=excluded.forecast_sales,operator_qty=excluded.operator_qty,model_json=excluded.model_json,created_at=excluded.created_at").bind(makeId("forecast"),month,r.sku,site,channel,r.suggestedProduction,r.forecastDaily*new Date(Number(month.slice(0,4)),Number(month.slice(5,7)),0).getDate(),items.find(i=>i.sku===r.sku)?.qty||0,JSON.stringify(r),timestamp));
   await atomicBatch(db,[
+    // Removed manual-only SKUs may no longer occur in the current forecast rows.
+    // Clear their previous operator demand along with the replaced submission.
+    db.prepare("UPDATE forecast_snapshots SET operator_qty=0 WHERE month=? AND site=? AND channel=?").bind(month,site,channel),
     ...snapshots,
     guardStatement(db,actor,"monthlySubmit","NOT EXISTS (SELECT 1 FROM approval_requests WHERE type='monthly_plan' AND month=? AND status IN ('pending','approved'))",[month]),
     db.prepare("INSERT INTO monthly_submissions (id,month,site,channel,items_json,total_qty,actor_id,submitted_at,zero_demand,zero_reason) VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(month,site,channel) DO UPDATE SET items_json=excluded.items_json,total_qty=excluded.total_qty,actor_id=excluded.actor_id,submitted_at=excluded.submitted_at,zero_demand=excluded.zero_demand,zero_reason=excluded.zero_reason,version=monthly_submissions.version+1")
@@ -937,7 +968,7 @@ async function completeProductionOrder(actor:Actor,payload:AnyRow){
   for(const item of sourceItems){const qty=Number(inputMap.get(item.id));if(qty<0||qty>Number(item.planned_qty)*2)throw new HttpError(400,`${item.sku}完工数量不合法`);totalProduced+=qty;}
   const timestamp=nowIso(),status=totalProduced===Number(order.total_planned_qty)?"completed":"completed_with_variance";
   const evidence=parseJson<AnyRow[]>(order.evidence_json,[]);evidence.push({stage:"production_completed",reference:evidenceRef,note,plannedQty:Number(order.total_planned_qty),producedQty:totalProduced,at:timestamp,by:actor.name,role:actor.role});
-  const statements=sourceItems.map((item)=>db.prepare("UPDATE series_production_order_items SET produced_qty=?,updated_at=? WHERE id=?").bind(inputMap.get(item.id),timestamp,item.id));
+  const statements=[guardStatement(db,actor,"生产完工状态校验","EXISTS(SELECT 1 FROM series_production_orders WHERE id=? AND status=? AND updated_at=?)",[productionOrderId,order.status,order.updated_at]),...sourceItems.map((item)=>db.prepare("UPDATE series_production_order_items SET produced_qty=?,updated_at=? WHERE id=?").bind(inputMap.get(item.id),timestamp,item.id))];
   statements.push(
     db.prepare("UPDATE series_production_orders SET status=?,total_produced_qty=?,progress_pct=100,qc_status='pending',evidence_json=?,started_at=COALESCE(started_at,created_at),completed_at=?,updated_at=? WHERE id=?").bind(status,totalProduced,JSON.stringify(evidence),timestamp,timestamp,productionOrderId),
     db.prepare("UPDATE series_purchase_orders SET status='awaiting_qc',updated_at=? WHERE id=?").bind(timestamp,order.purchase_order_id),
