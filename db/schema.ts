@@ -103,6 +103,7 @@ export const inventoryMovements = sqliteTable("inventory_movements", {
 ]);
 
 export const salesImports = sqliteTable("sales_imports", {
+  reportKind: text("report_kind").notNull().default("partial"),
   id: text("id").primaryKey(),
   importKey: text("import_key").notNull(),
   businessDate: text("business_date").notNull(),
