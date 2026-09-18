@@ -1,3 +1,4 @@
+import {normalizeSales,SITE_CURRENCIES} from "../../../lib/sales-data.mjs";
 import {validateImportRows,groupInboundRows} from "../../../lib/tabular-import.mjs";
 import {planIntegrityGuards} from "../../../lib/plan-integrity.mjs";
 import {systemChecks} from "../../../lib/system-checks.mjs";
@@ -101,17 +102,8 @@ async function body(request:Request) {
   if(text.length>2_000_000)throw new HttpError(413,"导入内容过大，请拆分文件");
   try { const value=JSON.parse(text);if(!value||typeof value!=="object"||Array.isArray(value))throw Error();return value as AnyRow; } catch { throw new HttpError(400, "请求内容格式不正确"); }
 }
-function normalizedSales(rows:SaleInput[]) {
-  if (!Array.isArray(rows) || rows.length === 0 || rows.length > 5000) throw new HttpError(400, "销售明细需为1—5000行");
-  const map = new Map<string, { sku:string; name:string; qty:number }>();
-  for (const row of rows) {
-    const sku = cleanSku(row.sku);
-    const qty = Number(row.qty);
-    if (!sku || !Number.isSafeInteger(qty) || qty <= 0 || qty>1_000_000_000) throw new HttpError(400, "销售数据存在空SKU或非正整数销量");
-    const previous = map.get(sku);
-    map.set(sku, { sku, name:cleanText(row.name, 120) || previous?.name || "", qty:(previous?.qty ?? 0) + qty });
-  }
-  return [...map.values()];
+function normalizedSales(rows:SaleInput[],currency="") {
+  try { return normalizeSales(rows,currency); } catch(error) { throw new HttpError(400,error instanceof Error?error.message:"销售明细无效"); }
 }
 
 export async function GET(request:Request) {
@@ -553,9 +545,9 @@ async function salesImport(actor:Actor, payload:AnyRow) {
   validSiteChannel(site, channel); requireScope(actor, site, channel);
   if(site==="印尼"&&channel==="线下分销") throw new HttpError(409,"印尼线下销售请通过线下批发订单发货生成，禁止再次导入扣库");
   const businessDate = cleanText(payload.businessDate, 10);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(businessDate)) throw new HttpError(400, "销售日期无效");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(businessDate)||!Number.isFinite(Date.parse(businessDate))||new Date(businessDate).toISOString().slice(0,10)!==businessDate) throw new HttpError(400, "销售日期无效");
   if(businessDate>chinaDate()||businessDate<chinaDate(-90)) throw new HttpError(400,"销售日期只能选择今天或近90天内日期");
-  const rows = normalizedSales(payload.rows);
+  const rows = normalizedSales(payload.rows,payload.currency||SITE_CURRENCIES[site as keyof typeof SITE_CURRENCIES]);
   const importKey = cleanText(payload.importKey, 160);
   const sourceBatchRef=cleanText(payload.sourceBatchRef,100).toUpperCase();
   if(sourceBatchRef.length<3) throw new HttpError(400,"请填写平台订单批次、日报编号或唯一手工凭证号");
@@ -570,17 +562,19 @@ async function salesImport(actor:Actor, payload:AnyRow) {
   const settingMap = new Map<string, AnyRow>(settings.map((r:AnyRow) => [r.sku, r]));
   const statements = [
     db.prepare("INSERT INTO sales_imports (id,import_key,business_date,site,channel,file_name,source_batch_ref,row_count,total_qty,actor_id,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)")
-      .bind(importId, importKey, businessDate, site, channel, cleanText(payload.fileName, 180),sourceBatchRef, rows.length, totalQty, actor.id, timestamp),
+      .bind(importId, importKey, businessDate, site, channel, cleanText(payload.fileName, 180),sourceBatchRef, new Set(rows.map(row=>row.sku)).size, totalQty, actor.id, timestamp),
   ];
   rows.forEach((row) => {
     const setting = settingMap.get(row.sku);
     const name = row.name || cleanText(setting?.name, 120);
-    const price = Number(setting?.unit_price ?? 0);
+    const price = row.amount===null||!row.qty?0:row.amount/row.qty;
     const saleId = makeId("sale");
     statements.push(
       db.prepare("INSERT INTO sku_settings (sku,name,product_type,unit_price,lead_time_days,safety_pct,updated_at) VALUES (?,?,'老款',0,63,.25,?) ON CONFLICT(sku) DO UPDATE SET name=CASE WHEN excluded.name<>'' THEN excluded.name ELSE sku_settings.name END,updated_at=excluded.updated_at").bind(row.sku, name, timestamp),
-      db.prepare("INSERT INTO sales_records (id,import_id,business_date,site,channel,sku,qty,unit_price,amount,source_ref,actor_id,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)")
-        .bind(saleId, importId, businessDate, site, channel, row.sku, row.qty, price, price * row.qty, sourceBatchRef, actor.id, timestamp),
+      db.prepare("INSERT INTO sales_records (id,import_id,business_date,site,channel,sku,qty,unit_price,amount,source_ref,actor_id,created_at,currency,reported_amount,ad_cost) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)")
+        .bind(saleId, importId, businessDate, site, channel, row.sku, row.qty, price, row.amount??0, sourceBatchRef, actor.id, timestamp,row.currency,row.amount,row.adCost),
+    );
+    if(row.qty>0) statements.push(
       db.prepare("INSERT INTO inventory_balances (site,channel,sku,name,qty,updated_at) VALUES (?,?,?,?,-?,?) ON CONFLICT(site,channel,sku) DO UPDATE SET qty=inventory_balances.qty-?,name=CASE WHEN excluded.name<>'' THEN excluded.name ELSE inventory_balances.name END,updated_at=excluded.updated_at")
         .bind(site, channel, row.sku, name, row.qty, timestamp, row.qty),
       db.prepare("INSERT INTO inventory_movements (id,site,channel,sku,name,movement_type,qty_delta,balance_after,reference_type,reference_id,note,actor_id,created_at) SELECT ?,site,channel,sku,name,'销售出库',-?,qty,'销售导入',?,'销售统一扣库',?,? FROM inventory_balances WHERE site=? AND channel=? AND sku=?")
@@ -604,7 +598,7 @@ async function reverseSalesImport(actor:Actor,payload:AnyRow){
   if(source.reversed_at) throw new HttpError(409,"该销售导入批次已经冲销");
   const rows=await all("SELECT r.sku,COALESCE(s.name,'') name,r.qty FROM sales_records r LEFT JOIN sku_settings s ON s.sku=r.sku WHERE r.import_id=? AND r.reversed_at IS NULL",[importId]);
   if(!rows.length) throw new HttpError(409,"该批次没有可冲销销售明细");
-  const timestamp=nowIso(),statements=reversalStatements(db,{source,records:rows,reason,actorId:actor.id,timestamp});
+  const timestamp=nowIso(),statements=[guardStatement(db,actor,"销售冲销校验","EXISTS(SELECT 1 FROM sales_imports WHERE id=? AND reversed_at IS NULL)",[importId]),...reversalStatements(db,{source,records:rows.filter(row=>row.qty>0),reason,actorId:actor.id,timestamp})];
   statements.push(
     db.prepare("UPDATE sales_records SET reversed_at=? WHERE import_id=? AND reversed_at IS NULL").bind(timestamp,importId),
     db.prepare("UPDATE sales_imports SET reversed_at=?,reversed_by=?,reversal_reason=? WHERE id=? AND reversed_at IS NULL").bind(timestamp,actor.id,reason,importId),
