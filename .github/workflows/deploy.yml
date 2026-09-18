@@ -3,10 +3,32 @@ name: Deploy to Production
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
+concurrency:
+  group: production-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
 jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm install -g pnpm@11.19.0
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test
   deploy:
+    if: github.event_name != 'pull_request'
+    needs: verify
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -27,28 +49,39 @@ jobs:
         run: |
           tar \
             --exclude='./.git' --exclude='./node_modules' --exclude='./.wrangler' \
-            --exclude='./dist-node' --exclude='./secrets' --exclude='./backups' \
+            --exclude='./dist-node' --exclude='./dist' --exclude='./secrets' --exclude='./backups' --exclude='./data' \
             --exclude='./.env' --exclude='./Caddyfile' --exclude='./compose.yaml' \
             --exclude='./.github' \
             -czf - . | ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes \
             -o BatchMode=yes -o PreferredAuthentications=publickey \
             root@47.238.71.113 'cd /root/loong-jump-v17 && tar -xzf -'
 
+      - name: Back up current data before migration
+        run: |
+          ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes root@47.238.71.113 \
+            'cd /root/loong-jump-v17 && docker compose exec -T app node server/cli.mjs backup --output /backups/pre-${{ github.sha }}-${{ github.run_attempt }}.tar'
+
       - name: Build and restart app
         timeout-minutes: 20
         run: |
           ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes \
             root@47.238.71.113 \
-            'cd /root/loong-jump-v17 && docker compose build app && docker compose up -d app'
+            'cd /root/loong-jump-v17 && docker compose build --build-arg LOONGJUMP_RELEASE=${{ github.sha }} app && docker compose up -d app'
 
       - name: Wait for healthy
-        timeout-minutes: 5
+        env:
+          EXPECTED_RELEASE: ${{ github.sha }}
+        timeout-minutes: 6
         run: |
           for i in $(seq 1 30); do
             status=$(ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes root@47.238.71.113 \
-              "docker ps --filter name=loong-jump-v17-app-1 --format '{{.Status}}'")
+              "docker inspect --format '{{.State.Running}} {{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' loong-jump-v17-app-1")
             case "$status" in
-              *healthy*) echo "container healthy: $status"; exit 0 ;;
+              "true healthy")
+                curl --fail --silent --show-error --max-time 15 https://admin.loongjump.com/healthz | \
+                  node -e "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{const r=JSON.parse(s);if(r.ok!==true||r.release!==process.env.EXPECTED_RELEASE)process.exit(1)})"
+                exit 0 ;;
+              "false "*|"true unhealthy") echo "container failed: $status" >&2; exit 1 ;;
             esac
             echo "waiting for healthy... ($status)"
             sleep 10
