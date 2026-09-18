@@ -1,4 +1,6 @@
 "use client";
+import SalesDashboard from "./sales-dashboard";
+import {SITE_CURRENCIES,SALES_CURRENCIES} from "../lib/sales-data.mjs";
 
 import TableImport from "./table-import";
 import {matchImportItems,groupInboundRows} from "../lib/tabular-import.mjs";
@@ -157,6 +159,8 @@ export default function ControlTower({ identity }: { identity:Identity }) {
   const roleNav=navigationForRole(actor.role).filter(key=>key!=="wholesale"||actor.role!=="运营"||actor.site==="印尼");
   const tab=roleNav.includes(selectedTab)?selectedTab:roleNav[0];
   const visibleNav = navItems.filter(([key]) => roleNav.includes(key));
+  const taskCount=(key:string)=>key==="overview"?data.myTasks.length:data.myTasks.filter(task=>task.tab===key).length;
+  const taskBadge=(key:string)=>taskCount(key)>0?<span className="nav-task-count" aria-label={`${taskCount(key)}项待办`}>{taskCount(key)>99?"99+":taskCount(key)}</span>:null;
   const shellT=(key:string)=>translateWholesale(tab==="wholesale"?wholesaleLocale.language:"zh",key);
 
   return <div className="app-shell" lang={tab==="wholesale"&&wholesaleLocale.language==="id"?"id":"zh-CN"}>
@@ -164,7 +168,7 @@ export default function ControlTower({ identity }: { identity:Identity }) {
       <div className="brand"><img className="brand-logo" src="/loong-jump-logo-white.png" alt="LOONG JUMP"/><p>{shellT("品牌出海供应链控制塔")}</p></div>
       <nav className="nav" aria-label={shellT("系统导航")}>
         {visibleNav.map(([key,label,icon]) => <button key={key} className={classNames("nav-button",tab===key&&"active")} onClick={()=>setTab(key)}>
-          <span className="nav-icon">{icon}</span><span>{shellT(key==="sales"?(actor.role==="运营"?"每日销售导入":"销售监控"):label)}</span>
+          <span className="nav-icon">{icon}</span><span>{shellT(key==="sales"?(actor.role==="运营"?"每日销售导入":"销售看板"):label)}</span>{taskBadge(key)}
         </button>)}
       </nav>
       <div className="account">
@@ -202,7 +206,7 @@ export default function ControlTower({ identity }: { identity:Identity }) {
       </div>
     </main>
     <nav className="mobile-nav" aria-label={shellT("移动端导航")}>
-      {visibleNav.map(([key,label,icon]) => <button key={key} className={classNames("nav-button",tab===key&&"active")} onClick={()=>setTab(key)}><span>{icon}</span><span>{shellT(key==="sales"?(actor.role==="运营"?"销售导入":"销售监控"):label)}</span></button>)}
+      {visibleNav.map(([key,label,icon]) => <button key={key} className={classNames("nav-button",tab===key&&"active")} onClick={()=>setTab(key)}><span>{icon}</span><span>{shellT(key==="sales"?(actor.role==="运营"?"销售导入":"销售看板"):label)}</span>{taskBadge(key)}</button>)}
     </nav>
     {toast && <div className="toast">{shellT(toast)}</div>}
   </div>;
@@ -236,6 +240,7 @@ function Pill({children,tone="blue"}:{children:React.ReactNode;tone?:string}) { 
 function Empty({children}:{children:React.ReactNode}) { return <div className="empty">{children}</div>; }
 
 function Overview({data,go}:{data:Snapshot;go:(tab:string)=>void}) {
+  const [showAllTasks,setShowAllTasks]=useState(false);
   const m=data.metrics;
   const completeness=m.monthlyRequired ? m.monthlySubmitted/m.monthlyRequired : 0;
   return <>
@@ -248,7 +253,7 @@ function Overview({data,go}:{data:Snapshot;go:(tab:string)=>void}) {
       <div className="metric"><div className="label">海运在途</div><div className="value">{fmt(m.seaTransitQty)}</div><div className="foot">只统计已进入海运的数量</div></div>
       <div className="metric"><div className="label">建议启动生产</div><div className="value" style={{color:m.suggestedProductionQty?"var(--amber)":"var(--ink)"}}>{fmt(m.suggestedProductionQty)}</div><div className="foot">已扣库存、海运在途和生产中</div></div>
     </div>
-    {data.myTasks.length>0&&<Panel title="我的待办" desc="系统按当前账号和责任范围自动生成"><div className="task-grid">{data.myTasks.slice(0,8).map((task,index)=><button className={`task-card ${task.level}`} key={`${task.title}-${index}`} onClick={()=>go(task.tab)}><strong>{task.title}</strong><span>{task.detail}</span><i>去处理 →</i></button>)}</div></Panel>}
+    {data.myTasks.length>0&&<Panel title={`我的待办 · ${data.myTasks.length} 项`} desc="红色事项需要处理；完成相应业务后自动移出待办" action={data.myTasks.length>8&&<button className="btn danger" onClick={()=>setShowAllTasks(!showAllTasks)}>{showAllTasks?"收起待办":`展开全部 ${data.myTasks.length} 项`}</button>}><div className="task-grid">{(showAllTasks?data.myTasks:data.myTasks.slice(0,8)).map((task,index)=><button className={`task-card ${task.level}`} key={`${task.title}-${index}`} onClick={()=>go(task.tab)}><strong>{task.title}</strong><span>{task.detail}</span><i>{task.level==="red"?"优先处理":"待处理"} →</i></button>)}</div></Panel>}
     <div className="grid-2">
       <Panel title="本月提交完整度" desc="五个站点 × TikTok/Shopee，全部提交后才能进入审批" action={<button className="btn" onClick={()=>go("monthly")}>查看明细</button>}>
         <div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:8}}><span>{m.monthlySubmitted}/{m.monthlyRequired} 已提交</span><strong>{pct(completeness)}</strong></div>
@@ -439,7 +444,7 @@ function NewProducts({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
   const thisMonthCount=projects.filter(project=>project.cycle_month===data.currentMonth).length;
   return <>
     <PageHead title="新品孵化与首批备货" desc="管理员每月7号发起；22天完成打板判断，通过后自动生成首批生产批次">
-      <Pill tone={thisMonthCount?"green":"amber"}>{thisMonthCount?`本月已发起 ${thisMonthCount} 款`:"本月待发起"}</Pill>
+      <Pill tone={thisMonthCount?"green":"red"}>{thisMonthCount?`本月已发起 ${thisMonthCount} 款`:"本月待发起"}</Pill>
     </PageHead>
     <div className="notice info"><strong>固定节奏：</strong>7号发起 → 选款3天 → 调研3天与种草7天并行 → 财务2天 → 打板10天 → 首批生产30天＋交付确认。种草差或毛利不达标时必须提前止损。</div>
     {actor.role==="管理员"&&<Panel title="发起本月新品测试" desc="同一SKU每月只能发起一次；首批计划默认3000件，可按实际调整">
@@ -551,8 +556,8 @@ function NewProducts({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
             <div className="form-actions"><button className="btn primary" disabled={busy||!sample.sampleRef||!sample.note} onClick={()=>act("submitNewProductStage",{projectId:selected.id,stageKey:"sample",...sample},"打板结果已提交")}>提交打板结果</button></div>
           </>:<Empty>等待工厂提交实物样品结果</Empty>}
           <div className="sample-confirmations">
-            <div><Pill tone={(record("sample_development")?.source_version===record("sample")?.version?record("sample_development"):null)?"green":"amber"}>{(record("sample_development")?.source_version===record("sample")?.version?record("sample_development"):null)?"新品开发已确认":"新品开发待确认"}</Pill>{["管理员","新品开发"].includes(actor.role)&&!(record("sample_development")?.source_version===record("sample")?.version?record("sample_development"):null)&&<><input value={developmentConfirmation} onChange={event=>setDevelopmentConfirmation(event.target.value)} placeholder="填写确认意见"/><button className="btn" disabled={busy||!developmentConfirmation} onClick={()=>act("submitNewProductStage",{projectId:selected.id,stageKey:"sample_development",confirmationNote:developmentConfirmation,conclusion:"确认通过"},"新品开发确认已记录")}>确认</button></>}</div>
-            <div><Pill tone={(record("sample_operations")?.source_version===record("sample")?.version?record("sample_operations"):null)?"green":"amber"}>{(record("sample_operations")?.source_version===record("sample")?.version?record("sample_operations"):null)?"运营主管已确认":"运营主管待确认"}</Pill>{["管理员","运营主管"].includes(actor.role)&&!(record("sample_operations")?.source_version===record("sample")?.version?record("sample_operations"):null)&&<><input value={operationsConfirmation} onChange={event=>setOperationsConfirmation(event.target.value)} placeholder="填写确认意见"/><button className="btn" disabled={busy||!operationsConfirmation} onClick={()=>act("submitNewProductStage",{projectId:selected.id,stageKey:"sample_operations",confirmationNote:operationsConfirmation,conclusion:"确认通过"},"运营主管确认已记录")}>确认</button></>}</div>
+            <div><Pill tone={(record("sample_development")?.source_version===record("sample")?.version?record("sample_development"):null)?"green":"red"}>{(record("sample_development")?.source_version===record("sample")?.version?record("sample_development"):null)?"新品开发已确认":"新品开发待确认"}</Pill>{["管理员","新品开发"].includes(actor.role)&&!(record("sample_development")?.source_version===record("sample")?.version?record("sample_development"):null)&&<><input value={developmentConfirmation} onChange={event=>setDevelopmentConfirmation(event.target.value)} placeholder="填写确认意见"/><button className="btn" disabled={busy||!developmentConfirmation} onClick={()=>act("submitNewProductStage",{projectId:selected.id,stageKey:"sample_development",confirmationNote:developmentConfirmation,conclusion:"确认通过"},"新品开发确认已记录")}>确认</button></>}</div>
+            <div><Pill tone={(record("sample_operations")?.source_version===record("sample")?.version?record("sample_operations"):null)?"green":"red"}>{(record("sample_operations")?.source_version===record("sample")?.version?record("sample_operations"):null)?"运营主管已确认":"运营主管待确认"}</Pill>{["管理员","运营主管"].includes(actor.role)&&!(record("sample_operations")?.source_version===record("sample")?.version?record("sample_operations"):null)&&<><input value={operationsConfirmation} onChange={event=>setOperationsConfirmation(event.target.value)} placeholder="填写确认意见"/><button className="btn" disabled={busy||!operationsConfirmation} onClick={()=>act("submitNewProductStage",{projectId:selected.id,stageKey:"sample_operations",confirmationNote:operationsConfirmation,conclusion:"确认通过"},"运营主管确认已记录")}>确认</button></>}</div>
           </div>
         </Panel>
         <Panel title="首批备货数量与分配" desc={`系统建议 ${fmt(selected.recommended_first_batch_qty||selected.first_batch_qty)} 件；管理员确认最终数量后生成正式采购生产单`}>
@@ -572,35 +577,23 @@ function Field({label,children,span}:{label:string;children:React.ReactNode;span
 function SalesImport({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
   const actor=data.actor;
   const [form,setForm]=useState({businessDate:localDate(),site:actor.site||SITES[0],channel:actor.channel||"TikTok",sourceBatchRef:""});
-  const [manual,setManual]=useState({sku:"",name:"",qty:""});
+  const [manual,setManual]=useState({sku:"",name:"",qty:"",unitPrice:"",amount:"",adCost:"",currency:SITE_CURRENCIES[actor.site as keyof typeof SITE_CURRENCIES]||"MYR"});
   const addManual=async()=>{
     const result=await act("salesImport",{...form,rows:[{...manual,qty:Number(manual.qty)}],fileName:"手工录入",importKey:`manual|${form.businessDate}|${form.site}|${form.channel}|${crypto.randomUUID()}`},"销售已录入并统一扣减库存");
     if(!result)return;
-    setManual({sku:"",name:"",qty:""});
+    setManual({...manual,sku:"",name:"",qty:"",unitPrice:"",amount:"",adCost:""});
   };
   const reverse=async(row:Row)=>{const reason=window.prompt("请输入冲销原因（将恢复对应库存并保留审计记录）");if(reason)await act("reverseSalesImport",{importId:row.id,reason},"错误导入已冲销，库存已恢复");};
   const canImport=hasPermission(actor.role,"sales.import");
-  const totalToday=data.salesScopeStatus.reduce((sum,row)=>sum+Number(row.salesToday||0),0);
-  const total7=data.salesScopeStatus.reduce((sum,row)=>sum+Number(row.sales7Qty||0),0);
   const updated=data.salesScopeStatus.filter(row=>row.updatedToday).length;
   return <>
     <PageHead title={canImport?"每日销售数据导入":"销售数据监控"} desc={canImport?`${actor.site} · ${actor.channel}｜由当前站点运营每日批量导入，系统自动扣减库存并更新补货建议`:"销售数据仅由各站点运营每日导入；当前页面为只读监控，可用于提前安排备货与产能"}>
-      <Pill tone={updated===data.salesScopeStatus.length?"green":"amber"}>今日已更新 {updated}/{data.salesScopeStatus.length}</Pill>
+      <Pill tone={updated===data.salesScopeStatus.length?"green":"red"}>今日已更新 {updated}/{data.salesScopeStatus.length}</Pill>
     </PageHead>
-    <div className="metrics">
-      <div className="metric"><div className="label">今日销量</div><div className="value">{fmt(totalToday)}</div><div className="foot">按站点渠道实时汇总</div></div>
-      <div className="metric"><div className="label">近7天销量</div><div className="value">{fmt(total7)}</div><div className="foot">供应链与工厂共用数据口径</div></div>
-      <div className="metric"><div className="label">今日已更新</div><div className="value">{updated}/{data.salesScopeStatus.length}</div><div className="foot">未更新站点自动暴露</div></div>
-      <div className="metric"><div className="label">活跃SKU</div><div className="value">{fmt(data.salesTopSkus.length)}</div><div className="foot">近7天产生销量</div></div>
-    </div>
-    <div className="grid-2">
-      <Panel title="五站销售更新状态" desc="当天未导入的数据会直接显示为待更新">
-        <div className="sales-scope-grid">{data.salesScopeStatus.map(row=><div className={classNames("sales-scope-card",row.updatedToday&&"updated")} key={`${row.site}-${row.channel}`}><div><strong>{row.site}</strong><span>{row.channel}</span></div><Pill tone={row.updatedToday?"green":"amber"}>{row.updatedToday?"今日已更新":"今日待更新"}</Pill><b>今日 {fmt(row.salesToday)}件</b><small>7天 {fmt(row.sales7Qty)}件｜最近 {row.lastSaleDate||"无记录"}</small></div>)}</div>
-      </Panel>
-      <Panel title="近7天热销SKU" desc="工厂可据此提前检查材料、产能和排产">
-        <div className="table-wrap"><table><thead><tr><th>站点/渠道</th><th>SKU</th><th className="num">7天销量</th></tr></thead><tbody>{data.salesTopSkus.length===0?<tr><td colSpan={3}><Empty>暂无近7天销售数据</Empty></td></tr>:data.salesTopSkus.slice(0,12).map((row,index)=><tr key={`${row.site}-${row.channel}-${row.sku}`}><td>{row.site} · {row.channel}</td><td><strong>{index+1}. {row.sku}</strong></td><td className="num">{fmt(row.qty)}</td></tr>)}</tbody></table></div>
-      </Panel>
-    </div>
+    <SalesDashboard actor={actor} refreshToken={data}/>
+    <Panel title="每日销售更新状态" desc="当天未导入的站点显示红色待更新提醒">
+      <div className="sales-scope-grid">{data.salesScopeStatus.map(row=><div className={classNames("sales-scope-card",row.updatedToday?"updated":"pending")} key={`${row.site}-${row.channel}`}><div><strong>{row.site}</strong><span>{row.channel}</span></div><Pill tone={row.updatedToday?"green":"red"}>{row.updatedToday?"今日已更新":"今日待更新"}</Pill><b>今日 {fmt(row.salesToday)}件</b><small>7天 {fmt(row.sales7Qty)}件｜最近 {row.lastSaleDate||"无记录"}</small></div>)}</div>
+    </Panel>
     {canImport&&<>
     <Panel title="导入 Excel / CSV" desc="同一文件或平台报表编号不能重复导入；错误行需全部修正后再提交">
       <div className="form-grid">
@@ -609,7 +602,7 @@ function SalesImport({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
         <Field label="渠道"><select disabled={actor.role==="运营"} value={form.channel} onChange={e=>setForm({...form,channel:e.target.value})}>{REQUIRED_CHANNELS.map(s=><option key={s}>{s}</option>)}</select></Field>
         <Field label="平台报表/订单批次号"><input value={form.sourceBatchRef} onChange={e=>setForm({...form,sourceBatchRef:e.target.value})} placeholder="必填，用于识别重复数据"/></Field>
       </div>
-      <TableImport kind="sales" busy={busy} contextKey={JSON.stringify(form)} confirmLabel="确认导入销售并扣库" description="每行填写SKU和销量，可选商品名称；数量必须为正整数。确认后整批生成销售记录和库存流水。" onApply={async(rows,meta)=>{
+      <TableImport kind="sales" busy={busy} defaults={{currency:SITE_CURRENCIES[form.site as keyof typeof SITE_CURRENCIES]}} contextKey={JSON.stringify(form)} confirmLabel="确认导入销售并扣库" description="每行填写SKU、销量、成交单价或销售额、投放成本、币种（默认站点本币）。销售额优先于单价×销量；金额使用英文小数点、最多两位小数。未提供金额或成本请留空，明确无投放填0；有投放未出单可填销量0。投放成本填写该行SKU的分摊金额，同一笔费用只计一次，勿把整店成本复制到每行。" onApply={async(rows,meta)=>{
         if(form.sourceBatchRef.trim().length<3)throw Error("请先填写至少3个字符的平台报表/订单批次号");
         return Boolean(await act("salesImport",{...form,rows,...meta,importKey:`file|${form.businessDate}|${form.site}|${form.channel}|${meta.fileHash}`},"销售已导入，库存流水同步生成"));
       }}/>
@@ -618,7 +611,11 @@ function SalesImport({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
       <div className="form-grid">
         <Field label="SKU"><input value={manual.sku} onChange={e=>setManual({...manual,sku:e.target.value})}/></Field>
         <Field label="商品名称"><input value={manual.name} onChange={e=>setManual({...manual,name:e.target.value})}/></Field>
-        <Field label="销量"><input type="number" min="1" value={manual.qty} onChange={e=>setManual({...manual,qty:e.target.value})}/></Field>
+        <Field label="销量"><input type="number" min="0" value={manual.qty} onChange={e=>setManual({...manual,qty:e.target.value})}/></Field>
+        <Field label="成交单价（选填）"><input type="number" min="0" step="0.01" value={manual.unitPrice} onChange={e=>setManual({...manual,unitPrice:e.target.value})}/></Field>
+        <Field label="实际销售额（优先于单价）"><input type="number" min="0" step="0.01" value={manual.amount} onChange={e=>setManual({...manual,amount:e.target.value})}/></Field>
+        <Field label="投放成本（无投放填0）"><input type="number" min="0" step="0.01" value={manual.adCost} onChange={e=>setManual({...manual,adCost:e.target.value})}/></Field>
+        <Field label="币种"><select value={manual.currency} onChange={e=>setManual({...manual,currency:e.target.value})}>{SALES_CURRENCIES.map(c=><option key={c}>{c}</option>)}</select></Field>
         <Field label="平台订单/汇总编号"><input value={form.sourceBatchRef} onChange={e=>setForm({...form,sourceBatchRef:e.target.value})} placeholder="必填且不可重复"/></Field>
       </div>
       <div className="form-actions"><button className="btn primary" disabled={busy||!manual.sku||!manual.qty||!form.sourceBatchRef||!actor.site&&actor.role==="运营"} onClick={addManual}>录入并扣库</button></div>
@@ -660,7 +657,7 @@ function Inventory({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
       </div>
       <div className="form-actions"><button className="btn primary" disabled={busy||!adjust.sku||adjust.reason.length<4} onClick={submitCount}>{actor.role==="管理员"?"确认修正":"提交复核"}</button></div>
     </Panel>}
-    {hasPermission(actor.role,"inventory.count.approve")&&<Panel title="待复核盘点差异" desc="批准前系统会再次核对提交时库存，防止覆盖后续变动"><div className="table-wrap"><table><thead><tr><th>站点/渠道</th><th>SKU</th><th className="num">系统数</th><th className="num">实盘数</th><th>原因</th><th>状态</th><th></th></tr></thead><tbody>{data.countRequests.length===0?<tr><td colSpan={7}><Empty>暂无盘点差异单</Empty></td></tr>:data.countRequests.map(row=><tr key={row.id}><td>{row.site} · {row.channel}</td><td>{row.sku}</td><td className="num">{fmt(row.system_qty)}</td><td className="num">{fmt(row.counted_qty)}</td><td>{row.reason}</td><td><Pill tone={row.status==="pending"?"amber":row.status==="approved"?"green":"red"}>{row.status}</Pill></td><td>{row.status==="pending"&&<><button className="btn primary" disabled={busy} onClick={()=>decide(row,"approve")}>批准</button> <button className="btn danger" disabled={busy} onClick={()=>decide(row,"reject")}>驳回</button></>}</td></tr>)}</tbody></table></div></Panel>}
+    {hasPermission(actor.role,"inventory.count.approve")&&<Panel title="待复核盘点差异" desc="批准前系统会再次核对提交时库存，防止覆盖后续变动"><div className="table-wrap"><table><thead><tr><th>站点/渠道</th><th>SKU</th><th className="num">系统数</th><th className="num">实盘数</th><th>原因</th><th>状态</th><th></th></tr></thead><tbody>{data.countRequests.length===0?<tr><td colSpan={7}><Empty>暂无盘点差异单</Empty></td></tr>:data.countRequests.map(row=><tr key={row.id}><td>{row.site} · {row.channel}</td><td>{row.sku}</td><td className="num">{fmt(row.system_qty)}</td><td className="num">{fmt(row.counted_qty)}</td><td>{row.reason}</td><td><Pill tone={row.status==="approved"?"green":"red"}>{row.status==="pending"?"待复核":row.status==="approved"?"已批准":"已驳回"}</Pill></td><td>{row.status==="pending"&&<><button className="btn primary" disabled={busy} onClick={()=>decide(row,"approve")}>批准</button> <button className="btn danger" disabled={busy} onClick={()=>decide(row,"reject")}>驳回</button></>}</td></tr>)}</tbody></table></div></Panel>}
     <Panel title="最近库存流水" desc="每一笔库存变化均可追溯到业务凭证">
       <div className="table-wrap"><table><thead><tr><th>时间</th><th>类型</th><th>站点/渠道</th><th>SKU</th><th className="num">变动</th><th className="num">变动后</th><th>凭证</th><th>说明</th></tr></thead><tbody>{data.movements.length===0?<tr><td colSpan={8}><Empty>暂无库存流水</Empty></td></tr>:data.movements.map(r=><tr key={r.id}><td>{String(r.created_at).replace("T"," ").slice(0,16)}</td><td><Pill tone={MOVEMENT_TONE[r.movement_type]||"blue"}>{r.movement_type}</Pill></td><td>{r.site} · {r.channel}</td><td>{r.sku}</td><td className="num" style={{color:r.qty_delta<0?"var(--red)":"var(--green)"}}>{r.qty_delta>0?"+":""}{fmt(r.qty_delta)}</td><td className="num">{fmt(r.balance_after)}</td><td>{r.reference_type}<br/><span style={{color:"var(--muted)"}}>{r.reference_id}</span></td><td>{r.note}</td></tr>)}</tbody></table></div>
     </Panel>
@@ -710,10 +707,10 @@ function Monthly({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
   const submitted=data.monthlyStatus.filter(r=>r.submitted).length;
   return <>
     <PageHead title="月度备货计划" desc="提交完整度是进入审批的硬门槛，不允许部分站点计划提前审批">
-      {submitted===data.monthlyStatus.length?<Pill tone="green">已全部提交</Pill>:<Pill tone="amber">待提交 {data.monthlyStatus.length-submitted} 项</Pill>}
+      {submitted===data.monthlyStatus.length?<Pill tone="green">已全部提交</Pill>:<Pill tone="red">待提交 {data.monthlyStatus.length-submitted} 项</Pill>}
     </PageHead>
     <Panel title={`${data.currentMonth} 提交矩阵`} desc="五个站点的TikTok与Shopee">
-      <div className="table-wrap"><table><thead><tr><th>站点</th><th>TikTok</th><th>Shopee</th></tr></thead><tbody>{SITES.map(site=><tr key={site}><td><strong>{site}</strong></td>{REQUIRED_CHANNELS.map(channel=>{const r=data.monthlyStatus.find(x=>x.site===site&&x.channel===channel);return <td key={channel}>{r?.submitted?<Pill tone="green">已提交</Pill>:<Pill tone="amber">未提交</Pill>}</td>})}</tr>)}</tbody></table></div>
+      <div className="table-wrap"><table><thead><tr><th>站点</th><th>TikTok</th><th>Shopee</th></tr></thead><tbody>{SITES.map(site=><tr key={site}><td><strong>{site}</strong></td>{REQUIRED_CHANNELS.map(channel=>{const r=data.monthlyStatus.find(x=>x.site===site&&x.channel===channel);return <td key={channel}>{r?.submitted?<Pill tone="green">已提交</Pill>:<Pill tone="red">未提交</Pill>}</td>})}</tr>)}</tbody></table></div>
       {hasPermission(data.actor.role,"plan.submit")&&<div className="form-actions"><button className="btn primary" disabled={busy||submitted!==data.monthlyStatus.length} onClick={()=>act("submitPlan",{month:data.currentMonth},"已按产品系列汇总并提交管理员审批")}>按系列汇总并提交审批</button></div>}
     </Panel>
     <Panel title="各站点提交记录" desc="进入审批后锁定；已批准计划通过变更审批调整">
@@ -735,7 +732,7 @@ function Approvals({data,act,busy,goWholesale}:{data:Snapshot;act:Act;busy:boole
     <PageHead title="审批中心" desc="申请人不能审批自己的计划；审批通过后按产品系列生成采购单与生产单"/>
     {hasPermission(data.actor.role,"wholesale.approve")&&<div className="notice info">印尼线下出库待审批 {data.myTasks.filter(t=>t.title==="审批线下出库").length} 笔。<button className="btn" onClick={goWholesale}>前往线下批发审批</button></div>}
     <Panel title="计划审批记录">
-      <div className="table-wrap"><table><thead><tr><th>月份</th><th>状态</th><th className="num">系列数</th><th className="num">SKU数</th><th className="num">总数量</th><th>审批意见</th><th></th></tr></thead><tbody>{data.approvals.length===0?<tr><td colSpan={7}><Empty>暂无审批记录</Empty></td></tr>:data.approvals.map(r=>{const items=r.payload?.items||[],seriesOrders=r.payload?.seriesOrders||[];return <tr key={r.id}><td>{r.month}</td><td><Pill tone={r.status==="approved"?"green":r.status==="rejected"?"red":"amber"}>{r.status==="approved"?"已批准":r.status==="rejected"?"已驳回":"待审批"}</Pill></td><td className="num">{fmt(seriesOrders.length)}</td><td className="num">{items.length}</td><td className="num">{fmt(items.reduce((s:number,x:Row)=>s+Number(x.total||0),0))}</td><td>{r.decision_comment||"—"}</td><td>{r.status==="pending"&&hasPermission(data.actor.role,"approval.decide")&&<div style={{display:"flex",gap:6}}><button disabled={busy} className="btn primary" onClick={()=>decide(r.id,"approve")}>批准</button><button disabled={busy} className="btn danger" onClick={()=>decide(r.id,"reject")}>驳回</button></div>}</td></tr>})}</tbody></table></div>
+      <div className="table-wrap"><table><thead><tr><th>月份</th><th>状态</th><th className="num">系列数</th><th className="num">SKU数</th><th className="num">总数量</th><th>审批意见</th><th></th></tr></thead><tbody>{data.approvals.length===0?<tr><td colSpan={7}><Empty>暂无审批记录</Empty></td></tr>:data.approvals.map(r=>{const items=r.payload?.items||[],seriesOrders=r.payload?.seriesOrders||[];return <tr key={r.id}><td>{r.month}</td><td><Pill tone={r.status==="approved"?"green":"red"}>{r.status==="approved"?"已批准":r.status==="rejected"?"已驳回":"待审批"}</Pill></td><td className="num">{fmt(seriesOrders.length)}</td><td className="num">{items.length}</td><td className="num">{fmt(items.reduce((s:number,x:Row)=>s+Number(x.total||0),0))}</td><td>{r.decision_comment||"—"}</td><td>{r.status==="pending"&&hasPermission(data.actor.role,"approval.decide")&&<div style={{display:"flex",gap:6}}><button disabled={busy} className="btn primary" onClick={()=>decide(r.id,"approve")}>批准</button><button disabled={busy} className="btn danger" onClick={()=>decide(r.id,"reject")}>驳回</button></div>}</td></tr>})}</tbody></table></div>
     </Panel>
   </>;
 }
@@ -757,7 +754,7 @@ function Fulfillment({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}){
   const qc=async(order:Row,decision:string)=>{const evidenceRef=window.prompt("质检报告/抽检单编号");const note=window.prompt(decision==="pass"?"质检通过说明":"不通过原因与返工要求");if(evidenceRef&&note)await act("confirmProductionQc",{productionOrderId:order.id,decision,evidenceRef,note},decision==="pass"?"质检通过，可进入发货":"质检不通过，已暂停发货");};
   return <>
     <PageHead title="系列采购与生产" desc="运营需求保留SKU，供应链和工厂按产品系列协同">
-      <Pill tone={data.metrics.readyToShipProductionOrderCount?"amber":"green"}>{data.metrics.readyToShipProductionOrderCount?`${data.metrics.readyToShipProductionOrderCount}张生产单待发货`:"生产发货衔接正常"}</Pill>
+      <Pill tone={data.metrics.readyToShipProductionOrderCount?"red":"green"}>{data.metrics.readyToShipProductionOrderCount?`${data.metrics.readyToShipProductionOrderCount}张生产单待发货`:"生产发货衔接正常"}</Pill>
     </PageHead>
     <div className="metrics">
       <div className="metric"><div className="label">系列采购单</div><div className="value">{fmt(data.purchaseOrders.length)}</div><div className="foot">按系列＋供应商合并</div></div>
@@ -766,7 +763,7 @@ function Fulfillment({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}){
       <div className="metric"><div className="label">运输主批次</div><div className="value">{fmt(data.transportBatches.length)}</div><div className="foot">可跨系列合柜，多目的地分腿</div></div>
     </div>
     <Panel title="系列采购单" desc="默认只展示系列汇总；SKU明细在生产单中追溯">
-      <div className="table-wrap"><table><thead><tr><th>月份</th><th>系列</th><th>供应商</th><th className="num">SKU数</th><th className="num">下单数量</th><th>订单/交期</th><th>状态</th><th></th></tr></thead><tbody>{data.purchaseOrders.length===0?<tr><td colSpan={8}><Empty>管理员批准月度计划后自动生成系列采购单</Empty></td></tr>:data.purchaseOrders.map(order=><tr key={order.id}><td>{order.month}</td><td><strong>{order.series_name}</strong><div className="cell-note">{order.id}</div></td><td>{order.supplier_name}</td><td className="num">{fmt(order.visibleSkuCount)}</td><td className="num">{fmt(order.visibleQty)}</td><td>{order.order_ref||"—"}<div className="cell-note">{order.expected_completion_date||"待确认"}</div></td><td><Pill tone={order.status==="draft"?"amber":order.status==="qc_rejected"?"red":"green"}>{statusLabel[order.status]||order.status}</Pill></td><td>{["draft","ordered"].includes(order.status)&&hasPermission(data.actor.role,"purchase.confirm")&&<button className="btn primary" disabled={busy} onClick={()=>confirmPurchase(order)}>确认接单</button>}<PurchaseReassign data={data} order={order} act={act} busy={busy}/></td></tr>)}</tbody></table></div>
+      <div className="table-wrap"><table><thead><tr><th>月份</th><th>系列</th><th>供应商</th><th className="num">SKU数</th><th className="num">下单数量</th><th>订单/交期</th><th>状态</th><th></th></tr></thead><tbody>{data.purchaseOrders.length===0?<tr><td colSpan={8}><Empty>管理员批准月度计划后自动生成系列采购单</Empty></td></tr>:data.purchaseOrders.map(order=><tr key={order.id}><td>{order.month}</td><td><strong>{order.series_name}</strong><div className="cell-note">{order.id}</div></td><td>{order.supplier_name}</td><td className="num">{fmt(order.visibleSkuCount)}</td><td className="num">{fmt(order.visibleQty)}</td><td>{order.order_ref||"—"}<div className="cell-note">{order.expected_completion_date||"待确认"}</div></td><td><Pill tone={order.status==="draft"?"red":order.status==="qc_rejected"?"red":"green"}>{statusLabel[order.status]||order.status}</Pill></td><td>{["draft","ordered"].includes(order.status)&&hasPermission(data.actor.role,"purchase.confirm")&&<button className="btn primary" disabled={busy} onClick={()=>confirmPurchase(order)}>确认接单</button>}<PurchaseReassign data={data} order={order} act={act} busy={busy}/></td></tr>)}</tbody></table></div>
     </Panel>
     <Panel title="系列生产单" desc="工厂登记各SKU完工数量；供应链按剩余可发量创建一个或多个海运批次">
       {data.productionOrders.length===0?<Empty>暂无系列生产单</Empty>:<div className="order-card-list">{data.productionOrders.map(order=><article className={classNames("order-card",order.producedVariance&&["completed","completed_with_variance"].includes(order.status)&&"has-warning")} key={order.id}>
@@ -869,7 +866,7 @@ function Batches({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
           <div className="batch-timeline">{BATCH_STEPS.map(([key,label],index)=><div className={stepState(batch,index)} key={key}><i>{stepState(batch,index)==="complete"?"✓":index+1}</i><span>{label}</span></div>)}</div>
           <div className="table-wrap"><table className="trace-table"><thead><tr><th>SKU</th><th>商品</th><th className="num">运营需求/下单</th><th className="num">计划生产</th><th className="num">实际完工</th><th className="num">本批发货</th><th className="num">累计到仓</th><th className="num">累计上架</th></tr></thead><tbody>{batch.items.map((item:Row)=><tr key={item.id}><td><strong>{item.sku}</strong></td><td>{item.name||"—"}</td><td className="num">{fmt(item.orderedQty)}</td><td className="num">{fmt(item.plannedQty)}</td><td className="num">{fmt(item.producedQty)}</td><td className="num">{fmt(item.visibleShipped)}</td><td className="num">{fmt(item.visibleReceived)}</td><td className="num">{fmt(item.visibleShelved)}</td></tr>)}</tbody></table></div>
           {receiving===batch.id&&<div className="inline-editor"><TableImport kind="receipt" busy={busy} contextKey={batch.id} templateRows={batch.items.filter((item:Row)=>Number(item.shipped_qty)>Number(item.received_qty||0)).map((item:Row)=>({itemId:item.id,sku:item.sku,qty:"",quarantineQty:0}))} description="下载当前批次明细，填写本次实收数量；本历史流程不支持隔离数量，请保持0。导入后补齐单号和凭证，再确认入库。" onApply={rows=>{if(rows.some(row=>row.quarantineQty>0))throw Error("历史单系列批次不支持隔离数量，请使用对应业务流程处理");const matched=matchImportItems(rows,batch.items.map((item:Row)=>({...item,remaining:Number(item.shipped_qty)-Number(item.received_qty||0)})));setReceiptDraft(Object.fromEntries(matched.map((row:Row)=>[row.itemId,String(row.qty)])));return true;}}/><h5>登记本次到仓</h5><div className="form-grid"><Field label="到仓单号"><input value={receiptNo} onChange={event=>setReceiptNo(event.target.value)}/></Field><Field label="到仓凭证"><input value={proofRef} onChange={event=>setProofRef(event.target.value)} placeholder="提货单、签收单或照片编号"/></Field></div><div className="table-wrap"><table><thead><tr><th>SKU</th><th className="num">发货</th><th className="num">已收</th><th className="num">本次实收</th></tr></thead><tbody>{batch.items.map((item:Row)=><tr key={item.id}><td>{item.sku} · {item.name}</td><td className="num">{fmt(item.shipped_qty)}</td><td className="num">{fmt(item.received_qty)}</td><td className="num"><input className="qty-input" type="number" min="0" max={Number(item.shipped_qty)-Number(item.received_qty)} value={receiptDraft[item.id]??"0"} onChange={event=>setReceiptDraft({...receiptDraft,[item.id]:event.target.value})}/></td></tr>)}</tbody></table></div><div className="form-actions"><button className="btn" onClick={()=>setReceiving("")}>取消</button><button className="btn primary" disabled={busy||!receiptNo||!proofRef||!Object.values(receiptDraft).some(value=>Number(value)>0)} onClick={()=>submitReceipt(batch)}>确认到仓并入库存</button></div></div>}
-          {batch.stage==="shelf_pending"&&<div className="sku-allocation-list"><h5>站点SKU上架确认</h5>{batch.items.flatMap((item:Row)=>item.allocations.map((allocation:Row)=>{const confirmed=isConfirmed(item,allocation);return <div key={`${item.id}-${allocation.site}-${allocation.channel}`}><span><strong>{item.sku}</strong><small>{allocation.site} · {allocation.channel}</small></span><b>{fmt(allocation.qty)} 件</b><Pill tone={confirmed?"green":"amber"}>{confirmed?"已上架":"待确认"}</Pill>{!confirmed&&canConfirm(allocation)&&<button className="btn primary" disabled={busy} onClick={()=>confirmShelf(item,allocation)}>确认上架</button>}</div>}))}</div>}
+          {batch.stage==="shelf_pending"&&<div className="sku-allocation-list"><h5>站点SKU上架确认</h5>{batch.items.flatMap((item:Row)=>item.allocations.map((allocation:Row)=>{const confirmed=isConfirmed(item,allocation);return <div key={`${item.id}-${allocation.site}-${allocation.channel}`}><span><strong>{item.sku}</strong><small>{allocation.site} · {allocation.channel}</small></span><b>{fmt(allocation.qty)} 件</b><Pill tone={confirmed?"green":"red"}>{confirmed?"已上架":"待确认"}</Pill>{!confirmed&&canConfirm(allocation)&&<button className="btn primary" disabled={busy} onClick={()=>confirmShelf(item,allocation)}>确认上架</button>}</div>}))}</div>}
         </div>}
       </article>)}</div>}
     </Panel>
@@ -955,13 +952,13 @@ function PermissionTest({data}:{data:Snapshot}) {
       <Panel title="逐用户配置检查" desc="选择成员后显示其真实岗位权限">
         {selected?<>
           <Field label="选择用户"><select value={selected.id} onChange={event=>setSelectedUserId(event.target.value)}>{data.users.map(user=><option key={user.id} value={user.id}>{user.name} · {user.role}</option>)}</select></Field>
-          <div className="permission-user-card"><div><strong>{selected.name}</strong><span>{selected.email}</span></div><Pill tone={userReady(selected)?"green":"amber"}>{userReady(selected)?"配置通过":"需要处理"}</Pill><p>{ROLE_BOUNDARY[selectedRole]||"尚未配置岗位权限"}</p><small>{selectedRole==="运营"?`操作范围：${selected.site||"未绑定站点"} · ${selected.channel||"未绑定渠道"}`:"操作范围：按岗位负责节点"}</small></div>
+          <div className="permission-user-card"><div><strong>{selected.name}</strong><span>{selected.email}</span></div><Pill tone={userReady(selected)?"green":"red"}>{userReady(selected)?"配置通过":"需要处理"}</Pill><p>{ROLE_BOUNDARY[selectedRole]||"尚未配置岗位权限"}</p><small>{selectedRole==="运营"?`操作范围：${selected.site||"未绑定站点"} · ${selected.channel||"未绑定渠道"}`:"操作范围：按岗位负责节点"}</small></div>
           <div className="permission-checks">{checks.map(check=><div className={check.pass?"pass":"fail"} key={check.label}><i>{check.pass?"✓":"!"}</i><span>{check.label}</span></div>)}</div>
         </>:<Empty>暂无成员账号，请到“用户管理”中确认账号开通方式</Empty>}
       </Panel>
       <Panel title="该用户可见与可操作范围" desc="页面可见不等于可写，写入仍以右侧动作清单为准">
         {selected?<>
-          <h5 className="permission-subtitle">可见模块</h5><div className="permission-chips">{selectedNav.map(key=><span key={key}>{key==="sales"?(selectedRole==="运营"?"每日销售导入":"销售监控"):(navLabels[key]||key)}</span>)}</div>
+          <h5 className="permission-subtitle">可见模块</h5><div className="permission-chips">{selectedNav.map(key=><span key={key}>{key==="sales"?(selectedRole==="运营"?"每日销售导入":"销售看板"):(navLabels[key]||key)}</span>)}</div>
           <h5 className="permission-subtitle">可读取数据域</h5><div className="permission-chips">{selectedDomains.map(key=><span key={key}>{(DATA_DOMAIN_LABELS as Readonly<Record<string,string>>)[key]||key}</span>)}</div>
           <h5 className="permission-subtitle">允许写入动作</h5><div className="permission-action-list">{selectedPermissions.length?selectedPermissions.map(key=><div key={key}><i>✓</i><span>{permissionLabel(key)}</span></div>):<Empty>该岗位没有写入权限</Empty>}</div>
         </>:<Empty>请选择用户</Empty>}

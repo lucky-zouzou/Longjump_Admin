@@ -377,3 +377,33 @@ tr:hover td { background:#fbfcff; }
 .table-import>p{font-size:13px;line-height:1.6}
 .table-import .form-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:16px}
 @media(max-width:700px){.table-import{padding:14px}.import-heading{flex-direction:column;gap:8px}.import-controls label{flex-direction:column;align-items:flex-start}.import-controls input[type=file]{max-width:100%;width:100%}.table-import .form-actions{flex-wrap:wrap}}
+
+/* Pending work shares one visible treatment, with text labels for accessibility. */
+.task-card,.task-card.amber,.task-card.red{border-color:#efd0d3;border-left:4px solid #ca3540;background:#fff5f5}
+.task-card strong,.task-card i{color:#ad2532}
+.task-card strong{font-size:14px}.task-card span,.task-card i{font-size:14px}
+.task-card:hover{background:#ffe9eb;border-color:#cf4b54}
+.sales-scope-card.pending{border-color:#edc6cb;background:#fff7f7}
+.sales-dashboard{min-width:0;font-size:16px}
+.sales-dashboard .panel-head p,.sales-dashboard .foot,.sales-dashboard .label,.sales-dashboard th,.sales-dashboard td{font-size:14px}
+.sales-dashboard .panel-head h4{font-size:19px}
+.report-filters{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px}
+.report-filters label,.report-search{display:grid;gap:7px;font-size:14px;color:#536079}
+.report-filters input,.report-filters select,.report-search input{width:100%;min-width:0;font-size:16px}
+.report-actions,.report-currencies{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin:18px 0 0}
+.report-currencies{margin:0 0 18px}.report-currencies>span{font-size:14px;color:#6b7790}
+.report-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-bottom:20px}
+.report-metrics .value{font-size:28px;overflow-wrap:anywhere}
+.report-metrics .metric{min-width:0}.report-metrics .foot{line-height:1.6}
+.report-search{max-width:440px;margin:0 0 18px}
+.report-secondary,.report-missing{display:block;margin-top:5px;font-size:14px;white-space:normal;color:#6b7790}
+.report-missing{color:#b32e3a}.report-toggle{display:flex;gap:10px;align-items:center;margin-bottom:18px;font-size:14px}
+.report-toggle input{width:18px;height:18px}.report-pagination{display:flex;gap:12px;align-items:center;justify-content:flex-end;flex-wrap:wrap;margin-top:16px;font-size:14px}
+.rank-medal{display:inline-grid;place-items:center;min-width:28px;height:28px;border-radius:8px;background:#edf2ff;color:#3159cc;font-weight:700}
+.sales-trend{width:100%;padding:12px 0 24px}.sales-trend svg{display:block;width:100%;height:auto;max-height:240px;font-size:14px;fill:#66748e}
+.sales-dashboard .table-wrap{max-width:100%;overflow:auto}.sales-dashboard table{min-width:620px}.sales-dashboard .panel{min-width:0}
+@media(max-width:1100px){.report-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.report-filters{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:600px){.report-metrics,.report-filters{grid-template-columns:1fr}.report-metrics .value{font-size:26px}.report-pagination{justify-content:flex-start}.report-currencies>strong{width:100%}}
+.wh-badge.wait{background:#ffe8eb;color:#b42637}
+.nav-task-count{margin-left:auto;background:#df3a48;color:#fff;border-radius:999px;padding:1px 6px;font-size:12px;line-height:20px;font-weight:700;flex-shrink:0}
+@media(max-width:760px){.mobile-nav .nav-button{position:relative}.mobile-nav .nav-task-count{position:absolute;right:1px;top:0;font-size:10px;line-height:16px;padding:0 4px}}

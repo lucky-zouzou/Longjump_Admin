@@ -17,7 +17,7 @@ const today=()=>new Date(Date.now()+7*3600000).toISOString().slice(0,10);
 function Field({label,children,wide=false}:{label:string;children:React.ReactNode;wide?:boolean}){
   const {t}=useWholesaleLanguage();return <label className={wide?"wh-field wh-wide":"wh-field"}><span>{t(label)}</span>{children}</label>;}
 function Badge({value}:{value:string}){
-  const {t}=useWholesaleLanguage();return <span className={`wh-badge ${value==="completed"||value==="已回款"?"done":value==="pending"||value==="未回款"||value==="待退款"?"wait":""}`}>{t(labels[value]||value)}</span>;}
+  const {t}=useWholesaleLanguage();return <span className={`wh-badge ${value==="completed"||value==="已回款"?"done":value==="pending"||value==="approved"||value==="partial"||value==="未回款"||value==="待退款"?"wait":""}`}>{t(labels[value]||value)}</span>;}
 function Panel({title,children,action}:{title:string;children:React.ReactNode;action?:React.ReactNode}){
   const {t}=useWholesaleLanguage();return <section className="panel wh-panel"><div className="panel-head"><h4>{t(title)}</h4>{action}</div>{children}</section>;}
 function Empty({children}:{children:React.ReactNode}){
