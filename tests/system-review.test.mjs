@@ -9,6 +9,7 @@ import {readSalesDashboard,reportToday} from '../lib/sales-dashboard.mjs';
 import {releaseMigrations} from '../lib/backup-version.mjs';
 import {projectInventory} from '../lib/inventory-projection.mjs';
 import {chartDays,chartScale} from '../lib/sales-charts.mjs';
+import {indonesiaDate} from '../lib/wholesale.mjs';
 const day=reportToday(),dateAt=n=>new Date(Date.parse(day)+n*86400000).toISOString().slice(0,10);
 async function scenario(run){const f=systemFixture();try{return await run(f)}finally{f.sqlite.close()}}
 const get=async(f,actor=f.users.admin)=>{svc.setActor(actor);const r=await svc.GET(new Request('http://localhost/api/system'));const body=await r.json();assert.equal(r.status,200,JSON.stringify(body));return body;};
@@ -56,6 +57,7 @@ test('两人并发完工只提交一次，不能覆盖已完成的数量',()=>sc
  const [first,second]=await race(f,()=>complete(0),()=>complete(10));assert.equal(second.ok,true);assert.equal(first.ok,false);assert.equal(f.sqlite.prepare('SELECT produced_qty FROM series_production_order_items WHERE id=?').get(item.id).produced_qty,10);
 }));
 test('线下需求按实际库存渠道分配计入预测，合计恰好等于实发',()=>scenario(async f=>{
+ const day=indonesiaDate();
  const id=await f.create({qty:5,businessDate:day});await f.approve(id);await f.ship(id,5,day);
  const dashboard=await readSalesDashboard(f.db,f.users.admin,{from:day,to:day}),forecast=await loadForecast(f.db,f.users.admin,day);
  const rows=forecast.suggestions.filter(r=>r.site==='印尼'&&r.sku==='BAG-A');assert.equal(dashboard.totalQty,5);assert.equal(rows.reduce((n,r)=>n+r.offlineDailySales.at(-1),0),5);assert.equal(rows.reduce((n,r)=>n+r.forecastDaily,0),5);

@@ -4,6 +4,7 @@ import {systemFixture,svc,race} from './system-fixture.mjs';
 import {parseImportGrid} from '../lib/tabular-import.mjs';
 import {normalizeSales,salesMoney} from '../lib/sales-data.mjs';
 import {readSalesDashboard,reportFilters,reportToday} from '../lib/sales-dashboard.mjs';
+import {indonesiaDate} from '../lib/wholesale.mjs';
 const day=reportToday();
 const range={from:day,to:day};
 const payload=(rows,more={})=>({site:'印尼',channel:'TikTok',businessDate:day,sourceBatchRef:crypto.randomUUID(),importKey:crypto.randomUUID(),rows,...more});
@@ -89,6 +90,7 @@ test('报表覆盖超过1000条销售及100个SKU，冲销、日期和权限范�
 });
 
 test('线下销售只统计实际发货和退货事件，不重复计订单或电商库存扣减',async()=>{
+ const day=indonesiaDate(),range={from:day,to:day};
  const f=systemFixture();try{
   const id=await f.create({qty:5,businessDate:day});await f.approve(id);assert.equal((await readSalesDashboard(f.db,f.users.admin,range)).totalQty,0);
   await f.ship(id,3,day);const r=await readSalesDashboard(f.db,f.users.admin,range);assert.equal(r.totalQty,3);assert.equal(r.currencies[0].revenue,300000);assert.equal(r.currencies[0].roas,null);
