@@ -71,6 +71,13 @@
       "when": 1789369213996,
       "tag": "0009_flimsy_thaddeus_ross",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1789734695506,
+      "tag": "0010_fancy_luminals",
+      "breakpoints": true
     }
   ]
 }
