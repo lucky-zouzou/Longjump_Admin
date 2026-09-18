@@ -7,6 +7,8 @@ COPY . .
 RUN pnpm build:server
 FROM node:24-bookworm-slim
 WORKDIR /app
+ARG LOONGJUMP_RELEASE=local
+ENV LOONGJUMP_RELEASE=${LOONGJUMP_RELEASE}
 ENV NODE_ENV=production PORT=3000 LOONGJUMP_DATA_DIR=/data LOONGJUMP_BACKUP_DIR=/backups
 COPY --from=build --chown=node:node /app /app
 RUN mkdir /data /backups && chown node:node /data /backups

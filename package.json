@@ -7,13 +7,13 @@
   },
   "scripts": {
     "dev": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext dev",
-    "build": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext build",
+    "build": "node scripts/backup-manifest.mjs && WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext build",
     "start": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext start",
     "test": "pnpm check && pnpm build:server && pnpm build && node --test tests/*.test.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate",
-    "check": "tsc --noEmit",
-    "build:server": "node server/build.mjs",
+    "check": "node scripts/backup-manifest.mjs --check && tsc --noEmit",
+    "build:server": "node scripts/backup-manifest.mjs && node server/build.mjs",
     "start:server": "NODE_ENV=production node server/index.mjs",
     "server:account": "node server/cli.mjs account:add",
     "backup:server": "node server/cli.mjs backup",
@@ -23,7 +23,7 @@
     "drizzle-orm": "0.45.2",
     "react": "19.2.6",
     "react-dom": "19.2.6",
-    "xlsx": "0.18.5"
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "1.37.1",
