@@ -21,6 +21,10 @@ const server=http.createServer(async(req,res)=>{try{
  if(req.headers.host!==origin.host){res.writeHead(400);res.end('Invalid host');return}const url=new URL(req.url,origin);
  if(!['GET','HEAD','POST'].includes(req.method)){res.writeHead(405);res.end();return}
  if(req.method==='POST'&&req.headers.origin!==origin.origin){res.writeHead(403);res.end('Invalid origin');return}
+ if(url.pathname==='/healthz'&&req.method==='GET'){
+  db.prepare('SELECT report_kind FROM sales_imports LIMIT 1').get();
+  res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({ok:true,release:process.env.LOONGJUMP_RELEASE||'local'}));return;
+ }
  const c=cookies(req);
  if(url.pathname==='/signin-with-chatgpt'){
   const csrf=randomBytes(24).toString('hex');let message='';
