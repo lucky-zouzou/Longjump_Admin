@@ -1,6 +1,7 @@
 "use client";
 
 import TableImport from "./table-import";
+import MonthlyDemandEditor from "./monthly-demand-editor";
 import {matchImportItems,groupInboundRows} from "../lib/tabular-import.mjs";
 import ForecastSettings from "./forecast-settings";
 import PlanChanges,{SupplyPicker,PurchaseReassign} from "./plan-changes";
@@ -43,7 +44,6 @@ type Snapshot = {
   shipmentBatches:Row[]; shipmentReceipts:Row[];
   transportBatches:Row[]; transportReceipts:Row[]; businessPartners:Row[]; warehouses:Row[]; countRequests:Row[]; myTasks:Row[];
 };
-type PlanDraft = { sku:string; name:string; qty:string; reason:string };
 type AllocationDraft = { site:string; channel:string; qty:string };
 type Act = (action:string,payload:Row,success:string)=>Promise<Row|null>;
 
@@ -316,17 +316,10 @@ function SupplyCoverage({rows}:{rows:Row[]}) {
 
 function Suggestions({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
   const actor=data.actor;
-  const [newDraftSku,setNewDraftSku]=useState("");
-  const [zeroDemand,setZeroDemand]=useState(false),[zeroReason,setZeroReason]=useState("");
-  const [drafts,setDrafts]=useState<PlanDraft[]>(()=>data.suggestions.filter((r)=>r.suggestedProduction>0).map((r)=>({sku:r.sku,name:r.name,qty:String(r.suggestedProduction),reason:r.alertLabel||"系统动态建议"})));
   const [selectedKey,setSelectedKey]=useState(data.suggestions[0]?supplyKey(data.suggestions[0]):"");
   const [setting,setSetting]=useState({sku:"",name:"",productSeries:"",supplierName:"",factoryName:"",productType:"老款",unitPrice:"0",productionLeadDays:"21",seaLeadDays:"35",reviewCycleDays:"7",serviceLevel:"0.95",minOrderQty:"1",orderMultiple:"1",cartonQty:"1",unitVolumeCbm:"0"});
   const selected=data.suggestions.find(row=>supplyKey(row)===selectedKey)||data.suggestions[0];
   const effectiveSelectedKey=selected?supplyKey(selected):"";
-  const submit=async()=>{
-    if(!actor.site||!actor.channel) return;
-    await act("monthlySubmit",{month:data.currentMonth,site:actor.site,channel:actor.channel,zeroDemand,zeroReason,items:drafts.filter(r=>Number(r.qty)>0).map((r)=>({...r,qty:Number(r.qty)}))},"本月备货需求已保存并进入完整度检查");
-  };
   const chooseSetting=(sku:string)=>{
     const row=data.skuSettings.find(item=>item.sku===sku);
     if(!row)return;
@@ -358,12 +351,7 @@ function Suggestions({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
       <tbody>{data.suggestions.length===0?<tr><td colSpan={10}><Empty>请先录入库存和销售数据，系统将自动形成动态建议</Empty></td></tr>:data.suggestions.map((r)=><tr key={supplyKey(r)}><td><Pill tone={ALERT_TONE[r.alertLevel]||"blue"}>{r.alertLabel}</Pill><div className="cell-note">{r.alertReason}</div></td><td>{r.site}<br/><span className="cell-note">{r.channel}</span></td><td><strong>{r.sku}</strong><br/><span className="cell-note">{r.name||"—"}</span></td><td className="num">{Number(r.avg7).toFixed(1)}</td><td className="num" style={{color:r.trendRate>=.2?"var(--blue)":r.trendRate<0?"var(--green)":undefined}}>{r.previous7>0?`${r.trendRate>=0?"+":""}${pct(r.trendRate)}`:"—"}</td><td className="num" style={{color:r.qty<0?"var(--red)":undefined}}>{fmt(r.qty)}<div className="cell-note">{days(r.stockCoverDays)}</div></td><td className="num">{fmt(r.seaInTransit)}<div className="cell-note">{r.nextSeaEta||"未填写ETA"}</div></td><td className="num">{fmt(r.productionInProgress)}</td><td className="num">{fmt(r.suggestedReplenishment)}</td><td className="num"><strong>{fmt(r.suggestedProduction)}</strong><div className="cell-note">目标 {fmt(r.targetQty)}</div></td></tr>)}</tbody></table></div>
     </Panel>
     {actor.role==="运营" && <Panel title="提交本月备货需求" desc="系统建议可调整；调整原因与最终提交量一并存档">
-      <label>增加备货SKU<select value={newDraftSku} onChange={e=>setNewDraftSku(e.target.value)}><option value="">请选择SKU</option>{data.skuSettings.filter(r=>!drafts.some(d=>d.sku===r.sku)).map(r=><option key={r.sku} value={r.sku}>{r.sku} · {r.name}</option>)}</select><button className="btn" disabled={!newDraftSku} onClick={()=>{const r=data.skuSettings.find(r=>r.sku===newDraftSku);if(r)setDrafts([...drafts,{sku:r.sku,name:r.name,qty:"1",reason:"运营补充需求"}]);setNewDraftSku("");}}>增加</button></label>
-      <label><input type="checkbox" checked={zeroDemand} onChange={e=>setZeroDemand(e.target.checked)}/>确认本月无需备货</label>{zeroDemand&&<label>确认说明<input value={zeroReason} onChange={e=>setZeroReason(e.target.value)}/><button className="btn primary" disabled={busy||zeroReason.length<4} onClick={submit}>提交无需备货</button></label>}
-      {!zeroDemand&&(drafts.length===0?<Empty>当前没有建议启动生产的SKU，可提交无需备货确认</Empty>:<>
-        <div className="table-wrap"><table><thead><tr><th>SKU</th><th>商品</th><th className="num">提交数量</th><th>调整原因</th></tr></thead><tbody>{drafts.map((r,i)=><tr key={r.sku}><td>{r.sku}</td><td>{r.name}</td><td><input aria-label={`${r.sku}提交数量`} value={r.qty} onChange={e=>setDrafts(drafts.map((x,j)=>j===i?{...x,qty:e.target.value}:x))} style={{width:90,border:"1px solid var(--line)",borderRadius:7,padding:6,textAlign:"right"}}/></td><td><input aria-label={`${r.sku}调整原因`} value={r.reason} onChange={e=>setDrafts(drafts.map((x,j)=>j===i?{...x,reason:e.target.value}:x))} style={{width:"100%",border:"1px solid var(--line)",borderRadius:7,padding:6}}/></td></tr>)}</tbody></table></div>
-        <div className="form-actions"><button className="btn primary" disabled={busy||!actor.site} onClick={submit}>提交 {data.currentMonth} 需求</button></div>
-      </>)}
+      <MonthlyDemandEditor key={`${actor.id}|${data.currentMonth}|${actor.site}|${actor.channel}`} actor={actor} month={data.currentMonth} submissions={data.submissions} suggestions={data.suggestions} skuSettings={data.skuSettings} act={act} busy={busy}/>
     </Panel>}
     {hasPermission(actor.role,"sku.manage")&&<Panel title="SKU系列与供应参数" desc="产品系列是供应链合并下单、工厂合并生产的必要依据">
       {data.skuSettings.some(row=>!row.product_series||row.product_series==="待归类")&&<div className="notice warn">还有 <strong>{data.skuSettings.filter(row=>!row.product_series||row.product_series==="待归类").length}</strong> 个SKU未归入产品系列。涉及这些SKU的月度计划会暂停进入审批。</div>}

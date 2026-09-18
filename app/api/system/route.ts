@@ -740,9 +740,11 @@ function normalizePlanItems(raw:unknown): PlanItem[] {
   if (!Array.isArray(raw) || raw.length === 0 || raw.length > 1000) throw new HttpError(400, "备货明细需为1—1000行");
   const map = new Map<string,PlanItem>();
   for (const item of raw) {
-    const sku = cleanSku(item.sku), qty = int(item.qty);
-    if (!sku || !Number.isInteger(qty) || qty <= 0) throw new HttpError(400, "备货明细存在空SKU或非正整数数量");
+    if (!item || typeof item !== "object" || !["string","number"].includes(typeof item.qty)) throw new HttpError(400, "备货明细格式无效");
+    const sku = cleanSku(item.sku), qty = Number(item.qty);
+    if (!sku || sku.length > 120 || !Number.isSafeInteger(qty) || qty <= 0 || qty > 1_000_000_000) throw new HttpError(400, "备货明细存在空SKU或无效数量，数量须为1—1,000,000,000的整数");
     const previous = map.get(sku);
+    if ((previous?.qty??0)+qty > 1_000_000_000) throw new HttpError(400, "同一SKU备货总量不能超过1,000,000,000");
     map.set(sku,{ sku,name:cleanText(item.name,120)||previous?.name||"",qty:(previous?.qty??0)+qty,reason:cleanText(item.reason,240)||previous?.reason||"" });
   }
   return [...map.values()];
@@ -785,6 +787,9 @@ async function monthlySubmit(actor:Actor, payload:AnyRow) {
   for(const item of items)if(!forecasts.suggestions.some(r=>r.sku===item.sku))forecasts.suggestions.push({sku:item.sku,site,channel,name:item.name,suggestedProduction:0,forecastDaily:0,confidence:"无销量历史",forecastVersion:"7-21-56-v1",note:"运营人工追加SKU，无历史数据可生成系统建议"});
   const snapshots=forecasts.suggestions.filter((r:AnyRow)=>r.site===site&&r.channel===channel).map((r:AnyRow)=>db.prepare("INSERT INTO forecast_snapshots (id,month,sku,site,channel,system_qty,forecast_sales,operator_qty,model_json,created_at) VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(month,sku,site,channel) DO UPDATE SET system_qty=excluded.system_qty,forecast_sales=excluded.forecast_sales,operator_qty=excluded.operator_qty,model_json=excluded.model_json,created_at=excluded.created_at").bind(makeId("forecast"),month,r.sku,site,channel,r.suggestedProduction,r.forecastDaily*new Date(Number(month.slice(0,4)),Number(month.slice(5,7)),0).getDate(),items.find(i=>i.sku===r.sku)?.qty||0,JSON.stringify(r),timestamp));
   await atomicBatch(db,[
+    // Removed manual-only SKUs may no longer occur in the current forecast rows.
+    // Clear their previous operator demand along with the replaced submission.
+    db.prepare("UPDATE forecast_snapshots SET operator_qty=0 WHERE month=? AND site=? AND channel=?").bind(month,site,channel),
     ...snapshots,
     guardStatement(db,actor,"monthlySubmit","NOT EXISTS (SELECT 1 FROM approval_requests WHERE type='monthly_plan' AND month=? AND status IN ('pending','approved'))",[month]),
     db.prepare("INSERT INTO monthly_submissions (id,month,site,channel,items_json,total_qty,actor_id,submitted_at,zero_demand,zero_reason) VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(month,site,channel) DO UPDATE SET items_json=excluded.items_json,total_qty=excluded.total_qty,actor_id=excluded.actor_id,submitted_at=excluded.submitted_at,zero_demand=excluded.zero_demand,zero_reason=excluded.zero_reason,version=monthly_submissions.version+1")
