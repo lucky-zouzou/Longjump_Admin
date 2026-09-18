@@ -377,3 +377,24 @@ tr:hover td { background:#fbfcff; }
 .table-import>p{font-size:13px;line-height:1.6}
 .table-import .form-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:16px}
 @media(max-width:700px){.table-import{padding:14px}.import-heading{flex-direction:column;gap:8px}.import-controls label{flex-direction:column;align-items:flex-start}.import-controls input[type=file]{max-width:100%;width:100%}.table-import .form-actions{flex-wrap:wrap}}
+
+/* Operators review imported monthly demand before the existing submit action. */
+.monthly-demand-context,.monthly-demand-summary,.monthly-demand-notice{display:flex;align-items:center;flex-wrap:wrap;gap:12px;font-size:14px;line-height:1.6}
+.monthly-demand-context>span{color:var(--muted)}
+.monthly-import-mode{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:18px;font-size:14px}
+.monthly-import-mode select,.monthly-demand-tools select,.monthly-zero-reason input{min-height:40px;border:1px solid var(--line);background:#fff;color:var(--ink);border-radius:9px;padding:8px 10px;font:inherit;max-width:100%}
+.monthly-demand-tools{display:flex;align-items:end;gap:12px;flex-wrap:wrap;margin:22px 0 16px}
+.monthly-demand-tools>label:first-child{flex:1;min-width:220px;display:grid;gap:8px;font-size:14px}
+.monthly-demand-tools .btn{min-height:40px;font-size:14px}
+.monthly-zero-check{display:flex;align-items:center;gap:8px;min-height:40px;font-size:14px;margin-left:8px}
+.monthly-zero-check input{width:17px;height:17px}
+.monthly-demand-notice{padding:12px 14px;border:1px solid var(--line);border-radius:9px;background:#f7faff;margin:12px 0;justify-content:space-between}
+.monthly-demand-summary{margin:18px 0 12px;color:var(--muted)}
+.monthly-demand-summary strong{color:var(--ink)}
+.monthly-demand-table{min-width:680px}
+.monthly-demand-table th:last-child,.monthly-demand-table td:last-child{width:80px;text-align:center}
+.monthly-demand-table .qty-input{font-size:14px;width:112px;min-height:38px}
+.monthly-reason-input{width:100%;min-width:180px;min-height:38px;border:1px solid var(--line);border-radius:7px;padding:7px 10px;font-size:14px}
+.monthly-zero-reason{display:grid;gap:10px;font-size:14px;max-width:640px;margin-top:18px}
+.monthly-demand-editor>.form-actions .btn{font-size:14px;min-height:42px}
+@media(max-width:700px){.monthly-demand-tools{align-items:stretch}.monthly-demand-tools>label:first-child{min-width:0;flex-basis:100%}.monthly-zero-check{margin-left:0}.monthly-import-mode{align-items:stretch;flex-direction:column}.monthly-demand-context{align-items:start;flex-direction:column;gap:5px}}
