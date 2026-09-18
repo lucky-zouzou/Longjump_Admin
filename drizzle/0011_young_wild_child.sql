@@ -1,0 +1,1 @@
+ALTER TABLE `sales_imports` ADD `report_kind` text DEFAULT 'partial' NOT NULL;
