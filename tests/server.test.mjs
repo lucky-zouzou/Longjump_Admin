@@ -58,6 +58,17 @@ test('独立服务器：公司登录、禁止伪造身份、岗位隔离、出�
  assert.equal((await request('newops','/api/system',salesImport)).status,200);
  assert.equal((await request('newops','/api/system',salesImport)).status,409);
  assert.equal((await request('newops','/api/system')).body.inventory.find(r=>r.sku==='HTTP-IMPORT').qty,10);
+
+ // Sales dashboard retains authentication and site scope through the actual router.
+ assert.equal((await fetch(origin+'/api/sales-dashboard')).status,401);
+ for(const who of ['sales','finance'])assert.equal((await request(who,'/api/sales-dashboard')).status,403);
+ assert.equal((await request('newops','/api/sales-dashboard?site='+encodeURIComponent('印尼'))).status,403);
+ const performance=await request('newops','/api/system',{...salesImport,sourceBatchRef:'HTTP-PRICE-002',importKey:'http-file-price-002',rows:[{sku:'HTTP-IMPORT',qty:2,amount:50.25,adCost:10,currency:'MYR'},{sku:'HTTP-AD-ONLY',qty:0,adCost:5,currency:'MYR'}]});assert.equal(performance.status,200,JSON.stringify(performance.body));
+ const dashboard=await request('newops','/api/sales-dashboard');assert.equal(dashboard.status,200,JSON.stringify(dashboard.body));assert.equal(dashboard.body.totalQty,4);assert.equal(dashboard.body.currencies[0].revenue,50.25);assert.equal(dashboard.body.currencies[0].roas,null);assert.equal(dashboard.body.roiRanking.find(r=>r.sku==='HTTP-AD-ONLY').roas,0);
+ assert.ok(dashboard.body.scopes.every(r=>r.site==='马来西亚'&&r.channel==='Shopee'));
+ assert.equal((await request('newops','/api/sales-dashboard?from=2026-02-30')).status,400);
+ const reversal=await request('admin','/api/system',{action:'reverseSalesImport',importId:performance.body.importId,reason:'接口测试纠正重复报表'});assert.equal(reversal.status,200,JSON.stringify(reversal.body));
+ assert.equal((await request('newops','/api/sales-dashboard')).body.totalQty,2);
  const crossImport=await fetch(origin+'/api/system',{method:'POST',headers:{cookie:cookies.admin,origin:'https://attacker.test','content-type':'application/json'},body:JSON.stringify({action:'bulkImport',kind:'inventory',rows:stockRows,...importMeta})});assert.equal(crossImport.status,403);
  const c=await request('sales','/api/wholesale',{action:'customerCreate',name:'HTTP客户',contact:'Sari',phone:'08123456',city:'Jakarta',address:'Warehouse 1'});assert.equal(c.status,200,JSON.stringify(c.body));const day=new Date(Date.now()+7*3600000).toISOString().slice(0,10);
  const o=await request('sales','/api/wholesale',{action:'orderCreate',customerId:c.body.id,businessDate:day,paymentTerms:'credit',dueDate:'2027-01-01',items:[{sku:'HTTP-BAG',qty:5,unitPrice:100000}]});assert.equal(o.status,200);let view=await request('sales','/api/wholesale'),order=view.body.orders[0];
