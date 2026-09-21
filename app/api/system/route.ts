@@ -149,7 +149,12 @@ export async function GET(request:Request) {
       actor.role === "管理员" ? all("SELECT * FROM users ORDER BY created_at") : actor.role==="供应链" ? all("SELECT id,email,name,role,responsibility_unit,active FROM users WHERE active=1 AND role IN ('供应链','工厂','海运') ORDER BY role,name") : all("SELECT * FROM users WHERE id=?", [actor.id]),
       canReadDomain(actor.role,"master") ? all("SELECT * FROM business_partners ORDER BY type,name") : all("SELECT * FROM business_partners WHERE 1=0"),
       canReadDomain(actor.role,"master")||canReadDomain(actor.role,"transport") ? all("SELECT * FROM warehouses ORDER BY site,channel,name") : all("SELECT * FROM warehouses WHERE 1=0"),
-      canReadDomain(actor.role,"inventory") ? (actor.role==="运营"?all("SELECT * FROM inventory_count_requests WHERE site=? AND channel=? AND (status='pending' OR id IN (SELECT id FROM inventory_count_requests ORDER BY created_at DESC LIMIT 300)) ORDER BY created_at DESC",[actor.site,actor.channel]):all("SELECT * FROM inventory_count_requests WHERE status='pending' OR id IN (SELECT id FROM inventory_count_requests ORDER BY created_at DESC LIMIT 300) ORDER BY created_at DESC")) : all("SELECT * FROM inventory_count_requests WHERE 1=0"),
+      canReadDomain(actor.role,"inventory") ? all(`SELECT r.*,COALESCE(b.qty,0) current_qty,u.name creator_name,d.name reviewer_name
+        FROM inventory_count_requests r
+        LEFT JOIN inventory_balances b ON b.site=r.site AND b.channel=r.channel AND b.sku=r.sku
+        LEFT JOIN users u ON u.id=r.creator_id LEFT JOIN users d ON d.id=r.decided_by
+        WHERE (r.status='pending' OR r.id IN (SELECT id FROM inventory_count_requests ORDER BY created_at DESC LIMIT 300))
+        ${actor.role==="运营"?"AND r.site=? AND r.channel=?":""} ORDER BY r.created_at DESC`,actor.role==="运营"?[actor.site,actor.channel]:[]) : all("SELECT * FROM inventory_count_requests WHERE 1=0"),
       canReadDomain(actor.role,"transport") ? all("SELECT * FROM transport_batches WHERE status<>'completed' OR id IN (SELECT id FROM transport_batches ORDER BY updated_at DESC LIMIT 200) ORDER BY updated_at DESC") : all("SELECT * FROM transport_batches WHERE 1=0"),
       canReadDomain(actor.role,"transport") ? all("SELECT * FROM transport_batch_items WHERE batch_id IN (SELECT id FROM transport_batches WHERE status<>'completed' OR id IN (SELECT id FROM transport_batches ORDER BY updated_at DESC LIMIT 200)) ORDER BY updated_at DESC") : all("SELECT * FROM transport_batch_items WHERE 1=0"),
       canReadDomain(actor.role,"transport") ? all("SELECT * FROM transport_legs WHERE stage<>'on_shelf' OR id IN (SELECT id FROM transport_legs ORDER BY updated_at DESC LIMIT 400) ORDER BY updated_at DESC") : all("SELECT * FROM transport_legs WHERE 1=0"),
@@ -679,17 +684,18 @@ async function submitInventoryCount(actor:Actor,payload:AnyRow,staged?:D1Prepare
 async function decideInventoryCount(actor:Actor,payload:AnyRow){
   requireBusinessPermission(actor,"inventory.count.approve");
   const requestId=cleanText(payload.requestId,120),decision=cleanText(payload.decision,20),comment=cleanText(payload.comment,500);
-  if(!["approve","reject"].includes(decision)||comment.length<3) throw new HttpError(400,"请选择复核结果并填写意见");
+  if(!["approve","reject"].includes(decision)) throw new HttpError(400,"请选择批准或驳回");
+  if(comment.length<3) throw new HttpError(400,"请填写至少3个字的复核意见，例如：已核对盘点表");
   const db=database(),request=await db.prepare("SELECT * FROM inventory_count_requests WHERE id=? AND status='pending'").bind(requestId).first<AnyRow>();
   if(!request) throw new HttpError(404,"待复核盘点差异不存在或已处理");
   const timestamp=nowIso();
   if(decision==="reject"){
-    await db.batch([db.prepare("UPDATE inventory_count_requests SET status='rejected',decision_comment=?,decided_by=?,updated_at=? WHERE id=? AND status='pending'").bind(comment,actor.id,timestamp,requestId),audit(actor,"驳回库存盘点差异","inventory_count",requestId,{comment})]);
+    await db.batch([guardStatement(db,actor,"盘点驳回校验","EXISTS(SELECT 1 FROM inventory_count_requests WHERE id=? AND status='pending')",[requestId]),db.prepare("UPDATE inventory_count_requests SET status='rejected',decision_comment=?,decided_by=?,updated_at=? WHERE id=? AND status='pending'").bind(comment,actor.id,timestamp,requestId),audit(actor,"驳回库存盘点差异","inventory_count",requestId,{comment})]);
     return Response.json({ok:true,status:"rejected"});
   }
   const current=await db.prepare("SELECT qty,name FROM inventory_balances WHERE site=? AND channel=? AND sku=?").bind(request.site,request.channel,request.sku).first<AnyRow>();
   const currentQty=Number(current?.qty??0);
-  if(currentQty!==Number(request.system_qty)) throw new HttpError(409,`提交后库存已从${request.system_qty}变为${currentQty}，请运营重新盘点，系统已阻止覆盖`);
+  if(currentQty!==Number(request.system_qty)) throw new HttpError(409,`提交后库存已从${request.system_qty}变为${currentQty}，系统已阻止覆盖。请驳回此单并让运营按最新库存重新提交盘点`);
   const delta=Number(request.counted_qty)-currentQty;
   await db.batch([
     ...countStatements(db,{site:request.site,channel:request.channel,sku:request.sku,name:cleanText(current?.name,120),from:currentQty,to:Number(request.counted_qty),reference:requestId,actorId:actor.id,reason:comment,timestamp,requestId}),

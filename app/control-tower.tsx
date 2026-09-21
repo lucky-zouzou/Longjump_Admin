@@ -1,5 +1,6 @@
 "use client";
 import SalesDashboard from "./sales-dashboard";
+import InventoryCountReview,{type CountRequest} from "./inventory-count-review";
 import {SITE_CURRENCIES,SALES_CURRENCIES} from "../lib/sales-data.mjs";
 
 import TableImport from "./table-import";
@@ -44,10 +45,10 @@ type Snapshot = {
   users:ManagedUser[]; suggestions:Row[]; monthlyStatus:Row[]; issues:Row[]; newProductProjects:Row[];
   salesScopeStatus:Row[]; salesTopSkus:Row[]; purchaseOrders:Row[]; productionOrders:Row[];
   shipmentBatches:Row[]; shipmentReceipts:Row[];
-  transportBatches:Row[]; transportReceipts:Row[]; businessPartners:Row[]; warehouses:Row[]; countRequests:Row[]; myTasks:Row[];
+  transportBatches:Row[]; transportReceipts:Row[]; businessPartners:Row[]; warehouses:Row[]; countRequests:CountRequest[]; myTasks:Row[];
 };
 type AllocationDraft = { site:string; channel:string; qty:string };
-type Act = (action:string,payload:Row,success:string)=>Promise<Row|null>;
+type Act = (action:string,payload:Row,success:string,onError?:(message:string)=>void)=>Promise<Row|null>;
 
 const navItems = [
   ["overview","总览","◫"], ["users","用户管理","♙"], ["wholesale","印尼线下批发","▣"], ["suggestions","补货驾驶舱","◎"], ["new-products","新品孵化","◇"], ["sales","销售数据","↗"], ["inventory","库存流水","▦"],
@@ -103,16 +104,17 @@ export default function ControlTower({ identity }: { identity:Identity }) {
 
   useEffect(()=>{const timer=window.setInterval(()=>{if(document.visibilityState==="visible")void refresh().catch(()=>{});},30000);return ()=>window.clearInterval(timer);},[refresh]);
 
-  const act = useCallback(async (action:string,payload:Row,success:string) => {
+  const act = useCallback(async (action:string,payload:Row,success:string,onError?:(message:string)=>void) => {
     setBusy(true);
     try {
-      const response = await fetch("/api/system", { method:"POST", headers:{"content-type":"application/json"}, body:JSON.stringify({action,...payload}) });
+      const response = await fetch("/api/system", { method:"POST", headers:{"content-type":"application/json"}, body:JSON.stringify({action,...payload}), signal:AbortSignal.timeout(20000) });
       const result = await parseResponse(response);
       setToast(success);
-      await refresh();
+      try { await refresh(); } catch { setToast(`${success}；列表刷新失败，请刷新页面查看最新结果，勿重复提交`); }
       return result;
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "操作失败");
+      const message=error instanceof Error&&error.name==="TimeoutError"?"请求超时，尚未确认结果；请刷新页面核对该单状态，勿重复提交":error instanceof Error ? error.message : "操作失败";
+      setToast(message);onError?.(message);
       return null;
     } finally { setBusy(false); }
   },[refresh]);
@@ -630,7 +632,6 @@ function Inventory({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
   const [adjust,setAdjust]=useState({site:actor.site||SITES[0],channel:actor.channel||"TikTok",sku:"",countedQty:"",reason:""});
   const select=(r:Row)=>setAdjust({site:r.site,channel:r.channel,sku:r.sku,countedQty:String(Math.max(0,Number(r.qty))),reason:""});
   const submitCount=()=>act(actor.role==="管理员"?"inventoryAdjust":"submitInventoryCount",{...adjust,countedQty:Number(adjust.countedQty)},actor.role==="管理员"?"管理员库存修正已写入审计流水":"盘点差异已提交供应链复核");
-  const decide=async(request:Row,decision:string)=>{const comment=window.prompt(decision==="approve"?"请输入复核意见":"请输入驳回原因");if(comment)await act("decideInventoryCount",{requestId:request.id,decision,comment},decision==="approve"?"盘点差异已批准并修正库存":"盘点差异已驳回");};
   const resolve=async(row:Row,resolution:string)=>{const qty=window.prompt(`本次处理数量（最多${row.quarantine_qty}）`,String(row.quarantine_qty));const reason=window.prompt(resolution==="release"?"请输入质检放行依据":"请输入报损原因");if(qty&&reason)await act("resolveInventoryHold",{site:row.site,channel:row.channel,sku:row.sku,qty:Number(qty),resolution,reason},resolution==="release"?"质检放行已记录：退货恢复可售，运输隔离品进入待上架":"隔离库存已报损");};
   const canSubmit=hasPermission(actor.role,"inventory.count.submit")||hasPermission(actor.role,"inventory.adjust");
   return <>
@@ -655,7 +656,7 @@ function Inventory({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
       </div>
       <div className="form-actions"><button className="btn primary" disabled={busy||!adjust.sku||adjust.reason.length<4} onClick={submitCount}>{actor.role==="管理员"?"确认修正":"提交复核"}</button></div>
     </Panel>}
-    {hasPermission(actor.role,"inventory.count.approve")&&<Panel title="待复核盘点差异" desc="批准前系统会再次核对提交时库存，防止覆盖后续变动"><div className="table-wrap"><table><thead><tr><th>站点/渠道</th><th>SKU</th><th className="num">系统数</th><th className="num">实盘数</th><th>原因</th><th>状态</th><th></th></tr></thead><tbody>{data.countRequests.length===0?<tr><td colSpan={7}><Empty>暂无盘点差异单</Empty></td></tr>:data.countRequests.map(row=><tr key={row.id}><td>{row.site} · {row.channel}</td><td>{row.sku}</td><td className="num">{fmt(row.system_qty)}</td><td className="num">{fmt(row.counted_qty)}</td><td>{row.reason}</td><td><Pill tone={row.status==="approved"?"green":"red"}>{row.status==="pending"?"待复核":row.status==="approved"?"已批准":"已驳回"}</Pill></td><td>{row.status==="pending"&&<><button className="btn primary" disabled={busy} onClick={()=>decide(row,"approve")}>批准</button> <button className="btn danger" disabled={busy} onClick={()=>decide(row,"reject")}>驳回</button></>}</td></tr>)}</tbody></table></div></Panel>}
+    {hasPermission(actor.role,"inventory.count.approve")&&<InventoryCountReview rows={data.countRequests} busy={busy} act={act}/>}
     <Panel title="最近库存流水" desc="每一笔库存变化均可追溯到业务凭证">
       <div className="table-wrap"><table><thead><tr><th>时间</th><th>类型</th><th>站点/渠道</th><th>SKU</th><th className="num">变动</th><th className="num">变动后</th><th>凭证</th><th>说明</th></tr></thead><tbody>{data.movements.length===0?<tr><td colSpan={8}><Empty>暂无库存流水</Empty></td></tr>:data.movements.map(r=><tr key={r.id}><td>{String(r.created_at).replace("T"," ").slice(0,16)}</td><td><Pill tone={MOVEMENT_TONE[r.movement_type]||"blue"}>{r.movement_type}</Pill></td><td>{r.site} · {r.channel}</td><td>{r.sku}</td><td className="num" style={{color:r.qty_delta<0?"var(--red)":"var(--green)"}}>{r.qty_delta>0?"+":""}{fmt(r.qty_delta)}</td><td className="num">{fmt(r.balance_after)}</td><td>{r.reference_type}<br/><span style={{color:"var(--muted)"}}>{r.reference_id}</span></td><td>{r.note}</td></tr>)}</tbody></table></div>
     </Panel>
