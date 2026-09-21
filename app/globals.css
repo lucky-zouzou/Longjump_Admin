@@ -470,3 +470,14 @@ tr:hover td { background:#fbfcff; }
 .monthly-zero-reason{display:grid;gap:10px;font-size:14px;max-width:640px;margin-top:18px}
 .monthly-demand-editor>.form-actions .btn{font-size:14px;min-height:42px}
 @media(max-width:700px){.monthly-demand-tools{align-items:stretch}.monthly-demand-tools>label:first-child{min-width:0;flex-basis:100%}.monthly-zero-check{margin-left:0}.monthly-import-mode{align-items:stretch;flex-direction:column}.monthly-demand-context{align-items:start;flex-direction:column;gap:5px}}
+
+.count-basis { margin-bottom:16px; padding:12px 14px; border:1px solid var(--line); border-radius:10px; color:var(--muted); font-size:12px; line-height:1.7; }
+.count-basis summary { cursor:pointer; color:var(--ink); font-weight:600; }
+.count-basis p { margin:8px 0 0; }
+.count-actions { display:flex; gap:6px; margin-top:8px; }
+.count-conflict { margin-top:6px; max-width:180px; color:var(--red); font-size:11px; white-space:normal; }
+.count-decision { padding:16px; border:1px solid #d9e4ff; border-radius:10px; background:#f7faff; white-space:normal; }
+.count-decision p { margin:8px 0 14px; line-height:1.6; }
+.count-decision label { display:block; font-size:12px; }
+.count-decision textarea { display:block; width:100%; min-height:80px; margin:8px 0 12px; padding:10px; border:1px solid var(--line); border-radius:8px; background:var(--paper); }
+.count-review .panel-head { flex-wrap:wrap; }
