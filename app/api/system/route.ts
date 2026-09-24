@@ -131,7 +131,7 @@ export async function GET(request:Request) {
         : all("SELECT r.*, GROUP_CONCAT(a.site||'|'||a.channel||'|'||a.qty, ';;') allocations FROM inbound_receipts r LEFT JOIN inbound_allocations a ON a.receipt_id=r.id GROUP BY r.id ORDER BY r.received_at DESC LIMIT 200"),
       actor.role === "运营" ? all("SELECT * FROM monthly_submissions WHERE site=? AND channel=? ORDER BY month DESC", [actor.site, actor.channel]) : all("SELECT * FROM monthly_submissions ORDER BY month DESC,site,channel"),
       all("SELECT month,site,channel FROM monthly_submissions ORDER BY month DESC"),
-      ["管理员","供应链"].includes(actor.role) ? all("SELECT * FROM approval_requests WHERE status='pending' OR id IN (SELECT id FROM approval_requests ORDER BY created_at DESC LIMIT 100) ORDER BY created_at DESC") : all("SELECT id,type,month,status,stage,decision_comment,created_at,updated_at FROM approval_requests WHERE 1=0"),
+      ["管理员","供应链"].includes(actor.role) ? all("SELECT r.*,u.name creator_name FROM approval_requests r LEFT JOIN users u ON u.id=r.creator_id WHERE r.status IN ('pending','withdrawn','rejected') OR r.id IN (SELECT id FROM approval_requests ORDER BY created_at DESC LIMIT 100) ORDER BY r.updated_at DESC") : all("SELECT id,type,month,status,stage,decision_comment,created_at,updated_at FROM approval_requests WHERE 1=0"),
       all("SELECT * FROM production_batches WHERE stage NOT IN ('arrived','completed','on_shelf') OR id IN (SELECT id FROM production_batches ORDER BY updated_at DESC LIMIT 300) ORDER BY updated_at DESC"),
       all("SELECT * FROM new_product_projects WHERE status NOT IN ('completed','abandoned') OR id IN (SELECT id FROM new_product_projects ORDER BY updated_at DESC LIMIT 200) ORDER BY updated_at DESC"),
       all("SELECT * FROM new_product_stage_records ORDER BY submitted_at DESC"),
@@ -430,7 +430,19 @@ export async function GET(request:Request) {
     }
     if(actor.role==="工厂") for(const order of productionOrders.filter((row)=>["awaiting_factory","in_production","pending"].includes(row.status))) myTasks.push({level:order.promised_completion_date&&String(order.promised_completion_date)<today?"red":"amber",title:order.status==="in_production"?"更新生产进度":"确认生产接单",detail:`${order.series_name} · ${order.total_planned_qty}件`,tab:"fulfillment"});
     if(actor.role==="海运") for(const leg of transportLegViews.filter((row)=>row.stage_owner==="海运"&&row.stage!=="on_shelf")) myTasks.push({level:leg.exceptions.some((item:AnyRow)=>item.level==="red")?"red":"amber",title:"更新运输节点",detail:`${leg.leg_no} · ${leg.site} · ${leg.channel}`,tab:"batches"});
-    if(actor.role==="管理员") for(const approval of approvals.filter((row)=>row.status==="pending")) myTasks.push({level:"red",title:"审批月度备货",detail:`${approval.month} 计划待审批`,tab:"approval"});
+    if(actor.role==="管理员") for(const approval of approvals.filter((row)=>row.status==="pending")) myTasks.push({level:"red",title:approval.creator_id===actor.id?"撤回本人送审计划":"审批月度备货",detail:`${approval.month} ${approval.creator_id===actor.id?"请先撤回，再由供应链重新送审":"计划待审批"}`,tab:"approval"});
+    if(actor.role==="供应链") for(const approval of approvals.filter(row=>["withdrawn","rejected"].includes(row.status))) myTasks.push({level:"red",title:"重新送审月度计划",detail:`${approval.month} ${approval.status==="withdrawn"?"已撤回":"已驳回"}，请核对需求后重新送审`,tab:"approval"});
+    // Only the two roles that can read approval records receive their timeline.
+    const approvalHistory=new Map<string,AnyRow[]>();
+    if(["管理员","供应链"].includes(actor.role)&&approvals.length){
+      const history=await all("SELECT a.id,a.entity_id,a.action,a.actor_id,a.actor_name,a.created_at,a.detail_json FROM audit_logs a JOIN approval_requests r ON r.id=a.entity_id WHERE a.entity_type='approval' AND r.type='monthly_plan' AND (r.status IN ('pending','withdrawn','rejected') OR r.id IN (SELECT id FROM approval_requests ORDER BY created_at DESC LIMIT 100)) ORDER BY a.created_at,a.id");
+      for(const entry of history){
+        const detail=parseJson<AnyRow>(entry.detail_json,{}),events=approvalHistory.get(entry.entity_id)||[];
+        events.push({id:entry.id,action:entry.action,actorName:entry.actor_name,createdAt:entry.created_at,version:detail.version??null,comment:detail.comment||"",seriesCount:detail.seriesCount??null,skuCount:detail.skuCount??null,totalQty:detail.totalQty??null});
+        approvalHistory.set(entry.entity_id,events);
+      }
+      for(const events of approvalHistory.values())events.sort((a,b)=>a.version!==null&&b.version!==null?a.version-b.version:String(a.createdAt).localeCompare(String(b.createdAt)));
+    }
 
     const visibleNewProductProjects=canReadDomain(actor.role,"new_product")?newProductProjects.map((project)=>({
       ...project,
@@ -447,7 +459,7 @@ export async function GET(request:Request) {
       forecastHistory:canReadDomain(actor.role,"planning")?await all(`SELECT f.*,COALESCE((SELECT SUM(s.qty) FROM sales_records s WHERE s.sku=f.sku AND s.site=f.site AND s.channel=f.channel AND substr(s.business_date,1,7)=f.month AND s.reversed_at IS NULL),0)-COALESCE((SELECT SUM(c.return_qty) FROM sales_demand_corrections c WHERE c.sku=f.sku AND c.site=f.site AND c.channel=f.channel AND substr(c.business_date,1,7)=f.month),0) actual_sales FROM forecast_snapshots f${actor.role==="运营"?" WHERE f.site=? AND f.channel=?":""} ORDER BY month DESC`,actor.role==="运营"?[actor.site,actor.channel]:[]):[],
       planChanges: ["管理员","供应链"].includes(actor.role)?(await all("SELECT * FROM plan_changes ORDER BY created_at DESC")).map(r=>({...r,old:parseJson(r.old_json,{}),next:parseJson(r.new_json,{})})):[],
       submissions:canReadDomain(actor.role,"planning")?submissions.map((r) => ({ ...r, items:parseJson(r.items_json, []) })):[],
-      approvals:canReadDomain(actor.role,"planning")?approvals.map((r) => ({ ...r, payload:parseJson(r.payload_json, {}) })):[],
+      approvals:canReadDomain(actor.role,"planning")?approvals.map((r) => ({ ...r, payload:parseJson(r.payload_json, {}),history:approvalHistory.get(r.id)||[] })):[],
       batches:canReadDomain(actor.role,"transport")?visibleBatches:[],
       purchaseOrders:canReadDomain(actor.role,"fulfillment")?(actor.role==="工厂"?purchaseOrders.filter((order)=>productionOrders.some((production)=>production.purchase_order_id===order.id)):purchaseOrders):[],
       productionOrders:canReadDomain(actor.role,"fulfillment")?productionOrders:[],
@@ -491,6 +503,7 @@ export async function POST(request:Request) {
     if (action === "monthlySubmit") return await monthlySubmit(actor, payload);
     if (action === "submitPlan") return await submitPlan(actor, payload);
     if (action === "decideApproval") return await decideApproval(actor, payload);
+    if (action === "withdrawPlan") return await withdrawPlan(actor, payload);
     if (action === "confirmPurchaseOrder") return await confirmPurchaseOrder(actor,payload);
     if (action === "acceptProductionOrder") return await acceptProductionOrder(actor,payload);
     if (action === "updateProductionProgress") return await updateProductionProgress(actor,payload);
@@ -807,7 +820,7 @@ async function monthlySubmit(actor:Actor, payload:AnyRow) {
   const items = zeroDemand?[]:normalizePlanItems(payload.items);
   const db = database();
   const locked = await db.prepare("SELECT status FROM approval_requests WHERE type='monthly_plan' AND month=? AND status IN ('pending','approved')").bind(month).first();
-  if (locked) throw new HttpError(409,"该月计划已进入审批或已批准，不能直接覆盖；请走变更审批");
+  if (locked) throw new HttpError(409,"该月计划已锁定：待审批计划请原申请人先撤回，已批准计划请走变更审批");
   const idValue = `monthly_${month}_${site}_${channel}`, timestamp=nowIso(), totalQty=items.reduce((s,r)=>s+r.qty,0);
   const forecasts=await loadForecast(db,{...actor,role:"运营",site,channel});
   for(const item of items)if(!forecasts.suggestions.some(r=>r.sku===item.sku))forecasts.suggestions.push({sku:item.sku,site,channel,name:item.name,suggestedProduction:0,forecastDaily:0,confidence:"无销量历史",forecastVersion:"7-21-56-v1",note:"运营人工追加SKU，无历史数据可生成系统建议"});
@@ -826,6 +839,7 @@ async function monthlySubmit(actor:Actor, payload:AnyRow) {
 }
 
 async function submitPlan(actor:Actor,payload:AnyRow) {
+  if(actor.role!=="供应链") throw new HttpError(403,"月度计划须由供应链账号送审，管理员负责审批；本人旧计划可先撤回");
   requireBusinessPermission(actor,"plan.submit");
   const month=cleanText(payload.month,7);
   if (!/^\d{4}-\d{2}$/.test(month)) throw new HttpError(400,"月份无效");
@@ -846,7 +860,8 @@ async function submitPlan(actor:Actor,payload:AnyRow) {
   const db=database(), timestamp=nowIso();
   const seriesOrders=buildSeriesOrders(items,await all("SELECT sku,product_series,supplier_name,factory_name FROM sku_settings"));
   const existing=await db.prepare("SELECT * FROM approval_requests WHERE type='monthly_plan' AND month=?").bind(month).first<AnyRow>();
-  if(existing && existing.status!=="rejected") throw new HttpError(409,"该月计划已经提交审批");
+  if(existing && !["rejected","withdrawn"].includes(existing.status)) throw new HttpError(409,"该月计划已经提交审批");
+  if(existing && Number(payload.version)!==Number(existing.version)) throw new HttpError(409,"计划版本已变化，请刷新后重新送审");
   const approvalId=existing?.id??makeId("approval");
   const sql=existing
     ? "UPDATE approval_requests SET version=version+1,status='pending',stage='admin_review',creator_id=?,creator_role=?,payload_json=?,decision_comment='',approved_by=NULL,updated_at=? WHERE id=?"
@@ -854,16 +869,41 @@ async function submitPlan(actor:Actor,payload:AnyRow) {
   const statement=existing
     ? db.prepare(sql).bind(actor.id,actor.role,JSON.stringify({items,seriesOrders}),timestamp,approvalId)
     : db.prepare(sql).bind(approvalId,month,actor.id,actor.role,JSON.stringify({items,seriesOrders}),timestamp,timestamp);
-  await atomicBatch(db,[...submissions.map(row=>guardStatement(db,actor,"submitPlan","EXISTS (SELECT 1 FROM monthly_submissions WHERE id=? AND version=?)",[row.id,row.version])),guardStatement(db,actor,"submitPlan",existing?"EXISTS (SELECT 1 FROM approval_requests WHERE id=? AND version=? AND status='rejected')":"NOT EXISTS (SELECT 1 FROM approval_requests WHERE type='monthly_plan' AND month=?)",existing?[existing.id,existing.version]:[month]),statement,audit(actor,"按系列提交月度计划审批","approval",approvalId,{month,seriesCount:seriesOrders.length,skuCount:items.length,totalQty:items.reduce((s,r)=>s+r.total,0)})]);
-  return Response.json({ok:true,approvalId,seriesCount:seriesOrders.length,skuCount:items.length});
+  await atomicBatch(db,[...submissions.map(row=>guardStatement(db,actor,"submitPlan","EXISTS (SELECT 1 FROM monthly_submissions WHERE id=? AND version=?)",[row.id,row.version])),guardStatement(db,actor,"submitPlan",existing?"EXISTS (SELECT 1 FROM approval_requests WHERE id=? AND version=? AND status IN ('rejected','withdrawn'))":"NOT EXISTS (SELECT 1 FROM approval_requests WHERE type='monthly_plan' AND month=?)",existing?[existing.id,existing.version]:[month]),statement,audit(actor,existing?"重新提交月度计划审批":"按系列提交月度计划审批","approval",approvalId,{month,fromStatus:existing?.status??null,fromVersion:existing?.version??null,status:"pending",version:Number(existing?.version||0)+1,creatorId:actor.id,creatorRole:actor.role,seriesCount:seriesOrders.length,skuCount:items.length,totalQty:items.reduce((s,r)=>s+r.total,0),plan:{items,seriesOrders}})]);
+  return Response.json({ok:true,approvalId,version:Number(existing?.version||0)+1,seriesCount:seriesOrders.length,skuCount:items.length});
+}
+
+function planDecisionRecord(approval:AnyRow,status:string,comment:string) {
+  const plan=parseJson<AnyRow>(approval.payload_json,{items:[],seriesOrders:[]});
+  return {month:approval.month,fromStatus:approval.status,fromVersion:approval.version,status,version:Number(approval.version)+1,comment,
+    creatorId:approval.creator_id,creatorRole:approval.creator_role,plan,
+    seriesCount:plan.seriesOrders?.length??0,skuCount:plan.items?.length??0,totalQty:(plan.items||[]).reduce((sum:number,item:AnyRow)=>sum+Number(item.total||0),0)};
+}
+
+async function withdrawPlan(actor:Actor,payload:AnyRow) {
+  requireBusinessPermission(actor,"approval.withdraw");
+  const approvalId=cleanText(payload.approvalId,80),reason=cleanText(payload.reason,300);
+  if(reason.length<4) throw new HttpError(400,"请填写至少4个字的撤回原因");
+  const db=database(),approval=await db.prepare("SELECT * FROM approval_requests WHERE id=? AND type='monthly_plan'").bind(approvalId).first<AnyRow>();
+  if(!approval) throw new HttpError(404,"月度计划不存在");
+  if(approval.creator_id!==actor.id) throw new HttpError(403,"只有原申请人可以撤回本人提交的计划");
+  if(approval.status!=="pending") throw new HttpError(409,"仅待审批计划可以撤回；已批准计划请走变更审批");
+  if(Number(payload.version)!==Number(approval.version)) throw new HttpError(409,"计划版本已变化，请刷新后再操作");
+  await atomicBatch(db,[
+    guardStatement(db,actor,"withdrawPlan","EXISTS (SELECT 1 FROM approval_requests WHERE id=? AND type='monthly_plan' AND status='pending' AND creator_id=? AND version=?) AND NOT EXISTS (SELECT 1 FROM series_purchase_orders WHERE approval_id=?)",[approvalId,actor.id,approval.version,approvalId]),
+    db.prepare("UPDATE approval_requests SET status='withdrawn',stage='withdrawn',decision_comment=?,approved_by=NULL,updated_at=?,version=version+1 WHERE id=?").bind(reason,nowIso(),approvalId),
+    audit(actor,"撤回月度计划","approval",approvalId,planDecisionRecord(approval,"withdrawn",reason)),
+  ]);
+  return Response.json({ok:true,status:"withdrawn",version:Number(approval.version)+1});
 }
 
 async function decideApproval(actor:Actor,payload:AnyRow) {
   requireBusinessPermission(actor,"approval.decide");
   const approvalId=cleanText(payload.approvalId,80), decision=cleanText(payload.decision,12), comment=cleanText(payload.comment,300);
-  if(!["approve","reject"].includes(decision)||comment.length<3) throw new HttpError(400,"请选择审批结果并填写审批意见");
+  if(!["approve","reject"].includes(decision)||comment.length<3) throw new HttpError(400,"请选择审批结果并填写至少3个字的审批意见");
   const db=database(), approval=await db.prepare("SELECT * FROM approval_requests WHERE id=?").bind(approvalId).first<AnyRow>();
-  if(!approval||approval.status!=="pending") throw new HttpError(404,"待审批记录不存在或已经处理");
+  if(!approval||approval.type!=="monthly_plan"||approval.status!=="pending") throw new HttpError(409,"待审批计划已撤回或已处理，请刷新后核对");
+  if(Number(payload.version)!==Number(approval.version)) throw new HttpError(409,"计划版本已变化，请刷新后核对新送审内容");
   if(approval.creator_id===actor.id) throw new HttpError(403,"申请人不能审批自己提交的计划");
   const timestamp=nowIso(), status=decision==="approve"?"approved":"rejected";
   const statements=[
@@ -904,7 +944,7 @@ async function decideApproval(actor:Actor,payload:AnyRow) {
       }
     }
   }
-  statements.push(audit(actor,decision==="approve"?"批准计划并生成系列采购生产单":"驳回月度计划","approval",approvalId,{comment,status}));
+  statements.push(audit(actor,decision==="approve"?"批准计划并生成系列采购生产单":"驳回月度计划","approval",approvalId,planDecisionRecord(approval,status,comment)));
   await atomicBatch(db,statements);
   return Response.json({ok:true,status});
 }
