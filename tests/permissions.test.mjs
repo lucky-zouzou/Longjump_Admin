@@ -2,9 +2,9 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { canReadDomain, hasPermission, navigationForRole, PERMISSION_LABELS, ROLE_PERMISSIONS } from "../lib/permissions.mjs";
 
-test("管理员拥有最高管理权限，但销售导入保持运营专属", () => {
+test("管理员审批与供应链送审分工，销售导入保持运营专属", () => {
   for (const permission of Object.keys(PERMISSION_LABELS)) {
-    assert.equal(hasPermission("管理员",permission),permission!=="sales.import",permission);
+    assert.equal(hasPermission("管理员",permission),!["sales.import","plan.submit"].includes(permission),permission);
   }
   assert.equal(navigationForRole("管理员").includes("permissions"),true);
 });

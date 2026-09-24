@@ -5,6 +5,7 @@ import {SITE_CURRENCIES,SALES_CURRENCIES} from "../lib/sales-data.mjs";
 
 import TableImport from "./table-import";
 import MonthlyDemandEditor from "./monthly-demand-editor";
+import MonthlyApprovals from "./monthly-approvals";
 import {matchImportItems,groupInboundRows} from "../lib/tabular-import.mjs";
 import ForecastSettings from "./forecast-settings";
 import PlanChanges,{SupplyPicker,PurchaseReassign} from "./plan-changes";
@@ -704,13 +705,18 @@ function Receipt({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
 
 function Monthly({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
   const submitted=data.monthlyStatus.filter(r=>r.submitted).length;
+  const currentPlan=data.approvals.find(r=>r.type==="monthly_plan"&&r.month===data.currentMonth);
+  const locked=currentPlan&&["pending","approved"].includes(currentPlan.status);
+  const [submitError,setSubmitError]=useState("");
   return <>
     <PageHead title="月度备货计划" desc="提交完整度是进入审批的硬门槛，不允许部分站点计划提前审批">
       {submitted===data.monthlyStatus.length?<Pill tone="green">已全部提交</Pill>:<Pill tone="red">待提交 {data.monthlyStatus.length-submitted} 项</Pill>}
     </PageHead>
     <Panel title={`${data.currentMonth} 提交矩阵`} desc="五个站点的TikTok与Shopee">
       <div className="table-wrap"><table><thead><tr><th>站点</th><th>TikTok</th><th>Shopee</th></tr></thead><tbody>{SITES.map(site=><tr key={site}><td><strong>{site}</strong></td>{REQUIRED_CHANNELS.map(channel=>{const r=data.monthlyStatus.find(x=>x.site===site&&x.channel===channel);return <td key={channel}>{r?.submitted?<Pill tone="green">已提交</Pill>:<Pill tone="red">未提交</Pill>}</td>})}</tr>)}</tbody></table></div>
-      {hasPermission(data.actor.role,"plan.submit")&&<div className="form-actions"><button className="btn primary" disabled={busy||submitted!==data.monthlyStatus.length} onClick={()=>act("submitPlan",{month:data.currentMonth},"已按产品系列汇总并提交管理员审批")}>按系列汇总并提交审批</button></div>}
+      <div className="notice info" style={{marginTop:14}}>月度计划由供应链账号送审、管理员审批。{locked?currentPlan.status==="pending"?"本月已送审；需要调整时，请原申请人到审批中心撤回。":"本月已批准，后续调整请提交变更审批。":"五站双渠道全部提交后，由供应链核对需求并送审。"}</div>
+      {submitError&&<div className="notice error" role="alert">{submitError}</div>}
+      {hasPermission(data.actor.role,"plan.submit")&&!locked&&<div className="form-actions"><button className="btn primary" disabled={busy||submitted!==data.monthlyStatus.length} onClick={()=>{setSubmitError("");void act("submitPlan",{month:data.currentMonth,version:currentPlan?.version},"已按产品系列汇总并提交管理员审批",setSubmitError);}}>{currentPlan?"按最新需求重新送审":"按系列汇总并提交审批"}</button></div>}
     </Panel>
     <Panel title="各站点提交记录" desc="进入审批后锁定；已批准计划通过变更审批调整">
       <div className="table-wrap"><table><thead><tr><th>月份</th><th>站点/渠道</th><th className="num">SKU数</th><th className="num">备货量</th><th>提交时间</th></tr></thead><tbody>{data.submissions.length===0?<tr><td colSpan={5}><Empty>暂无月度提交记录</Empty></td></tr>:data.submissions.map(r=><tr key={r.id}><td>{r.month}</td><td>{r.site} · {r.channel}</td><td className="num">{r.items.length}</td><td className="num">{fmt(r.total_qty)}</td><td>{String(r.submitted_at).replace("T"," ").slice(0,16)}</td></tr>)}</tbody></table></div>
@@ -720,19 +726,10 @@ function Monthly({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
 }
 
 function Approvals({data,act,busy,goWholesale}:{data:Snapshot;act:Act;busy:boolean;goWholesale:()=>void}) {
-  const [supplyUserId,setSupplyUserId]=useState("");
-  const decide=async(id:string,decision:string)=>{
-    const comment=window.prompt(decision==="approve"?"请输入批准意见":"请输入驳回原因");
-    if(!comment) return;
-    await act("decideApproval",{approvalId:id,decision,comment,supplyUserId},decision==="approve"?"计划已批准并生成系列采购单与生产单":"计划已驳回");
-  };
   return <>
-    <SupplyPicker users={data.users} value={supplyUserId} onChange={setSupplyUserId}/>
-    <PageHead title="审批中心" desc="申请人不能审批自己的计划；审批通过后按产品系列生成采购单与生产单"/>
+    <PageHead title="审批中心" desc="供应链送审，管理员独立审批；撤回、驳回和重新送审全程留痕"/>
     {hasPermission(data.actor.role,"wholesale.approve")&&<div className="notice info">印尼线下出库待审批 {data.myTasks.filter(t=>t.title==="审批线下出库").length} 笔。<button className="btn" onClick={goWholesale}>前往线下批发审批</button></div>}
-    <Panel title="计划审批记录">
-      <div className="table-wrap"><table><thead><tr><th>月份</th><th>状态</th><th className="num">系列数</th><th className="num">SKU数</th><th className="num">总数量</th><th>审批意见</th><th></th></tr></thead><tbody>{data.approvals.length===0?<tr><td colSpan={7}><Empty>暂无审批记录</Empty></td></tr>:data.approvals.map(r=>{const items=r.payload?.items||[],seriesOrders=r.payload?.seriesOrders||[];return <tr key={r.id}><td>{r.month}</td><td><Pill tone={r.status==="approved"?"green":"red"}>{r.status==="approved"?"已批准":r.status==="rejected"?"已驳回":"待审批"}</Pill></td><td className="num">{fmt(seriesOrders.length)}</td><td className="num">{items.length}</td><td className="num">{fmt(items.reduce((s:number,x:Row)=>s+Number(x.total||0),0))}</td><td>{r.decision_comment||"—"}</td><td>{r.status==="pending"&&hasPermission(data.actor.role,"approval.decide")&&<div style={{display:"flex",gap:6}}><button disabled={busy} className="btn primary" onClick={()=>decide(r.id,"approve")}>批准</button><button disabled={busy} className="btn danger" onClick={()=>decide(r.id,"reject")}>驳回</button></div>}</td></tr>})}</tbody></table></div>
-    </Panel>
+    <MonthlyApprovals data={data} act={act} busy={busy}/>
   </>;
 }
 

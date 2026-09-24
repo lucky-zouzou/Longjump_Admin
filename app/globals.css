@@ -481,3 +481,32 @@ tr:hover td { background:#fbfcff; }
 .count-decision label { display:block; font-size:12px; }
 .count-decision textarea { display:block; width:100%; min-height:80px; margin:8px 0 12px; padding:10px; border:1px solid var(--line); border-radius:8px; background:var(--paper); }
 .count-review .panel-head { flex-wrap:wrap; }
+
+/* Monthly plan ownership, decisions and audit trail. */
+.monthly-approvals { font-size:13px; }
+.approval-flow { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; }
+.approval-flow span { padding:14px; border:1px solid #d9e4ff; border-radius:10px; background:#edf3ff; color:#2450ad; font-weight:600; }
+.approval-flow-note { color:var(--muted); line-height:1.7; margin:12px 0 20px; }
+.approval-header { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; flex-wrap:wrap; }
+.approval-header h3 { margin:0 0 10px; font-size:18px; }
+.approval-header p { margin:0; color:var(--muted); }
+.approval-header p span { margin-left:14px; }
+.approval-totals { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; padding:20px 0; }
+.approval-totals span { color:var(--muted); }
+.approval-totals strong { display:block; color:var(--ink); font-size:23px; margin-top:6px; }
+.approval-comment { overflow-wrap:anywhere; }
+.approval-actions { display:flex; flex-wrap:wrap; gap:10px; margin-top:16px; }
+.approval-editor { margin-top:16px; padding:20px; background:#f7faff; border:1px solid #d9e4ff; border-radius:12px; }
+.approval-editor h4 { font-size:15px; margin:0 0 12px; }
+.approval-editor p { line-height:1.7; }
+.approval-editor label { display:block; margin:14px 0; }
+.approval-editor textarea,.approval-editor select { display:block; width:100%; padding:12px; margin-top:8px; background:var(--paper); border:1px solid var(--line); border-radius:8px; }
+.approval-editor textarea { min-height:86px; resize:vertical; }
+.approval-detail { margin-top:16px; border-top:1px solid var(--line); padding-top:14px; }
+.approval-detail summary { cursor:pointer; font-weight:600; padding:6px 0; }
+.approval-detail .table-wrap { margin-top:12px; }
+.approval-history ol { list-style:none; padding:0 0 0 16px; border-left:2px solid #d9e4ff; }
+.approval-history li { padding:12px 0; overflow-wrap:anywhere; }
+.approval-history li>div { display:flex; flex-wrap:wrap; gap:12px; align-items:center; }
+.approval-history time,.approval-history p { color:var(--muted); font-size:12px; margin:6px 0 0; }
+@media(max-width:760px) { .approval-flow { grid-template-columns:1fr 1fr; gap:8px; }.approval-flow span{padding:10px}.approval-totals { gap:8px; }.approval-totals strong { font-size:18px; }.approval-editor { padding:14px; } }
