@@ -571,7 +571,7 @@ function Field({label,children,span}:{label:string;children:React.ReactNode;span
 
 function SalesImport({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
   const actor=data.actor;
-  const [form,setForm]=useState({businessDate:new Date(Date.parse(localDate())-86400000).toISOString().slice(0,10),site:actor.site||SITES[0],channel:actor.channel||"TikTok",sourceBatchRef:"",reportKind:"partial"});
+  const [form,setForm]=useState({businessDate:new Date(Date.parse(localDate())-86400000).toISOString().slice(0,10),site:actor.site||SITES[0],channel:actor.channel||"TikTok",sourceBatchRef:"",reportKind:"complete"});
   const [dayConfirmed,setDayConfirmed]=useState(false),[dayNote,setDayNote]=useState("");
   useEffect(()=>{setDayConfirmed(false);setDayNote("");},[form.businessDate,form.site,form.channel]);
   const [manual,setManual]=useState({sku:"",name:"",qty:"",unitPrice:"",amount:"",adCost:"",currency:SITE_CURRENCIES[actor.site as keyof typeof SITE_CURRENCIES]||"MYR"});
@@ -593,7 +593,7 @@ function SalesImport({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
     {canImport&&<>
     <Panel title="导入 Excel / CSV" desc="同一文件或平台报表编号不能重复导入；错误行需全部修正后再提交">
       <div className="form-grid">
-        <Field label="文件覆盖范围"><select value={form.reportKind} onChange={e=>setForm({...form,reportKind:e.target.value})}><option value="partial">部分 / 增量销售（默认）</option><option value="complete">完整销售日报（该日首次导入）</option><option value="cost">仅广告费用补录</option></select></Field>
+        <Field label="文件覆盖范围"><select value={form.reportKind} onChange={e=>setForm({...form,reportKind:e.target.value})}><option value="complete">完整销售日报（默认，该日首次导入）</option><option value="partial">部分 / 增量销售</option><option value="cost">仅广告费用补录</option></select></Field>
         <Field label="销售日期"><input type="date" value={form.businessDate} onChange={e=>setForm({...form,businessDate:e.target.value})}/></Field>
         <Field label="站点"><select disabled={actor.role==="运营"} value={form.site} onChange={e=>setForm({...form,site:e.target.value})}>{SITES.map(s=><option key={s}>{s}</option>)}</select></Field>
         <Field label="渠道"><select disabled={actor.role==="运营"} value={form.channel} onChange={e=>setForm({...form,channel:e.target.value})}>{REQUIRED_CHANNELS.map(s=><option key={s}>{s}</option>)}</select></Field>
