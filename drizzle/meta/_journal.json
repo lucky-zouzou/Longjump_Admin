@@ -85,6 +85,13 @@
       "when": 1789745653481,
       "tag": "0011_young_wild_child",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1790474053311,
+      "tag": "0012_woozy_skullbuster",
+      "breakpoints": true
     }
   ]
 }
