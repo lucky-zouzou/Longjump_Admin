@@ -77,6 +77,17 @@ test('独立服务器：公司登录、禁止伪造身份、岗位隔离、出�
  assert.equal((await request('newops','/api/sales-dashboard')).body.totalQty,2);
  const crossImport=await fetch(origin+'/api/system',{method:'POST',headers:{cookie:cookies.admin,origin:'https://attacker.test','content-type':'application/json'},body:JSON.stringify({action:'bulkImport',kind:'inventory',rows:stockRows,...importMeta})});assert.equal(crossImport.status,403);
  const c=await request('sales','/api/wholesale',{action:'customerCreate',name:'HTTP客户',contact:'Sari',phone:'08123456',city:'Jakarta',address:'Warehouse 1'});assert.equal(c.status,200,JSON.stringify(c.body));const day=new Date(Date.now()+7*3600000).toISOString().slice(0,10);
+ // Field workspace uses the real production router, authentication and file storage.
+ assert.equal((await fetch(origin+'/api/field-sales')).status,401);
+ assert.equal((await request('supply','/api/field-sales')).status,403);
+ const field=await request('sales','/api/field-sales',{action:'create',kind:'visit',customerId:c.body.id,businessDate:day,visitType:'cold',note:'Discussed wholesale products in the shop.'});assert.equal(field.status,200,JSON.stringify(field.body));
+ const fieldId=field.body.id,png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aB5sAAAAASUVORK5CYII=','base64');
+ const upload=async who=>{const body=new FormData();body.set('recordId',fieldId);body.set('file',new File([png],'shop.png',{type:'image/png'}));return fetch(origin+'/api/field-sales/files',{method:'POST',headers:{cookie:cookies[who],origin},body})};
+ assert.equal((await upload('finance')).status,403);const uploaded=await upload('sales');assert.equal(uploaded.status,200);const fileId=(await uploaded.json()).id;
+ const image=await fetch(origin+'/api/field-sales/files?id='+fileId,{headers:{cookie:cookies.sales}});assert.equal(image.status,200);assert.equal(image.headers.get('content-type'),'image/svg+xml');assert.match(await image.text(),/Uploaded \/ Waktu unggah: .* WIB/);
+ assert.equal((await fetch(origin+'/api/field-sales/files?id='+fileId)).status,401);assert.equal((await fetch(origin+'/api/field-sales/files?id='+fileId,{headers:{cookie:cookies.supply}})).status,403);
+ let fieldView=await request('sales','/api/field-sales');assert.equal(fieldView.body.records[0].version,2);assert.equal((await request('sales','/api/field-sales',{action:'submit',id:fieldId,version:2})).status,200);
+ assert.equal((await upload('sales')).status,409);fieldView=await request('finance','/api/field-sales');assert.equal(fieldView.body.records[0].status,'valid');assert.equal(fieldView.body.contributions.find(r=>r.id==='sales').visits,1);
  const o=await request('sales','/api/wholesale',{action:'orderCreate',customerId:c.body.id,businessDate:day,paymentTerms:'credit',dueDate:'2027-01-01',items:[{sku:'HTTP-BAG',qty:5,unitPrice:100000}]});assert.equal(o.status,200);let view=await request('sales','/api/wholesale'),order=view.body.orders[0];
  assert.equal((await request('sales','/api/wholesale',{action:'orderApprove',orderId:o.body.id,version:order.version,supplyUserId:'supply',stockBasisConfirmed:true,reason:'申请人不得自行审批'})).status,403);
  assert.equal((await request('admin','/api/wholesale',{action:'orderApprove',orderId:o.body.id,version:order.version,supplyUserId:'supply',stockBasisConfirmed:true,reason:'核对库存允许出库'})).status,200);

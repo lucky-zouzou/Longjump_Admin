@@ -1,0 +1,6 @@
+import {database,ensureSchema} from '../../../lib/database';
+import {requireActor} from '../../../lib/auth';
+import {mutateField,readField,fieldToday} from '../../../lib/field-sales.mjs';
+export function fieldError(error:unknown){const e=error as {status?:number;message?:string};if(e.status)return Response.json({error:e.message},{status:e.status});console.error('Field sales request failed',error);return Response.json({error:'保存或读取失败，请保留填写内容后重试'},{status:500});}
+export async function GET(request:Request){try{await ensureSchema();return Response.json(await readField(database(),await requireActor(request),new URL(request.url).searchParams.get('month')||fieldToday().slice(0,7)),{headers:{'Cache-Control':'private, no-store'}});}catch(e){return fieldError(e);}}
+export async function POST(request:Request){try{if(request.headers.get('origin')&&request.headers.get('origin')!==new URL(request.url).origin)return Response.json({error:'请求来源无效'},{status:403});const body=await request.text();if(body.length>16000)return Response.json({error:'请求过大'},{status:413});await ensureSchema();return Response.json(await mutateField(database(),await requireActor(request),JSON.parse(body)));}catch(e){return fieldError(e);}}

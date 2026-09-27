@@ -581,3 +581,5 @@ export const salesAdSpend = sqliteTable("sales_ad_spend", {
   amount: real("amount").notNull(), note: text("note").notNull(), version: integer("version").notNull().default(1),
   actorId: text("actor_id").notNull(), updatedAt: text("updated_at").notNull(), deletedAt: text("deleted_at"),
 }, t => [uniqueIndex("idx_sales_ad_scope_date").on(t.site,t.channel,t.businessDate,t.currency)]);
+
+export * from "./field-sales-schema";
