@@ -30,7 +30,7 @@ export default function SalesDashboard({actor,refreshToken}:{actor:Row;refreshTo
   const exportReport=async()=>{if(!report)return;setExporting(true);try{const XLSX=await import('xlsx'),book=XLSX.utils.book_new();
     const add=(name:string,rows:Row[])=>XLSX.utils.book_append_sheet(book,XLSX.utils.json_to_sheet(rows),name);
     const financialRows=(rows:Row[])=>rows.map(r=>({日期:r.date||'',站点:r.site||'',渠道:r.channel||'',SKU:r.sku||'',币种:r.currency,销量:r.qty,已填报销售额:r.revenue,已填报投放成本:r.adCost,缺销售额记录:r.revenueMissing,缺成本记录:r.costMissing,ROAS:r.roas,状态:status(r)}));
-    add('统计口径',[{起始日期:report.filters.from,截止日期:report.filters.to,站点:report.filters.site||'全部可见站点',渠道:report.filters.channel||'全部可见渠道',总销量:report.totalQty,说明:'ROAS=销售额÷广告成本；不同币种不相加，金额为已填报部分；缺金额或成本不排名；旧估算价格不计销售额；不代表利润率。'}]);
+    add('统计口径',[{起始日期:report.filters.from,截止日期:report.filters.to,站点:report.filters.site||'全部可见站点',渠道:report.filters.channel||'全部可见渠道',总销量:report.totalQty,说明:'ROAS=销售额÷广告成本；不同币种不相加，金额为已填报部分；缺金额或成本不排名；旧估算价格不计销售额；不代表利润率。渠道日总费用优先于同日SKU成本，不重复相加；SKU排名只用可归属的实际成本。'}]);
     add('全站SKU销量',report.skuRanking.map((r:Row)=>({排名:r.rank,SKU:r.sku,商品:r.name,销售总数量:r.qty,站点数:r.siteCount,销量占比:r.share})));
     add('币种汇总',financialRows(report.currencies));add('SKU投产比',financialRows(report.roiRanking));add('站点渠道',financialRows(report.scopes));add('每日明细',financialRows(report.daily));
     XLSX.writeFile(book,`销售看板_${report.filters.from}_${report.filters.to}.xlsx`);
@@ -43,12 +43,13 @@ export default function SalesDashboard({actor,refreshToken}:{actor:Row;refreshTo
     </Panel>
     {loading&&<p className="notice info" role="status">{report?"正在更新，当前展示上次成功汇总的数据…":"正在汇总销售数据…"}</p>}{error&&<p className="notice warn" role="alert">{error}</p>}
     {report&&<>
+      <p className="notice info">广告费用口径：同日、同站点、同渠道、同币种优先使用渠道总费用，不与 SKU 成本重复相加。SKU 成本未知不参与 SKU 投产比排名。</p>
       <div className="report-currencies" aria-label="金额统计币种"><strong>金额币种</strong>{report.currencies.map((r:Row)=><button key={r.currency} className={`btn ${selected===r.currency?'primary':''}`} aria-pressed={selected===r.currency} onClick={()=>setCurrency(r.currency)}>{r.currency==='UNKNOWN'?'历史未标币种':r.currency}</button>)}{!report.currencies.length&&<span>暂无销售数据</span>}<span>切换币种只影响金额、投产比和金额明细；销量榜保持所选站点总计。</span></div>
       {report.currencies.some((r:Row)=>r.currency==="UNKNOWN")&&<p className="notice info">包含未标币种的历史记录：这些记录仅计入销量，不混入当前币种的销售额或投产比。可切换“历史未标币种”查看。</p>}
       <div className="report-metrics">
         <Card label="销售总数量" value={`${number(report.totalQty)} 件`} note="当前日期、站点及渠道范围 · 全币种"/><Card label="产生销量的SKU" value={number(report.skuCount)} note="同一SKU跨站点合并后去重"/>
         <Card label={`销售额 · ${selected==='UNKNOWN'?'币种未标':selected}`} value={money(financial?.revenue)} note={financial?.revenueMissing?`有 ${number(financial.revenueMissing)} 条未填报；这里只计已填报金额`:'按实际成交金额统计'}/>
-        <Card label={`投放成本 · ${selected==='UNKNOWN'?'币种未标':selected}`} value={money(financial?.adCost)} note={financial?.costMissing?`有 ${number(financial.costMissing)} 条未填报；这里只计已填报成本`:'明确填写0才视为无投放'}/>
+        <Card label={`投放成本 · ${selected==='UNKNOWN'?'币种未标':selected}`} value={money(financial?.adCost)} note={financial?.costMissing?`有 ${number(financial.costMissing)} 条未填报；这里只计已填报成本`:financial?.channelCostDays?`已使用 ${number(financial.channelCostDays)} 个渠道日的总费用`:'明确填写0才视为无投放'}/>
         <Card label="整体投产比 ROAS" value={financial?ratio(financial):'暂无数据'} note="同币种全量金额与成本齐全后计算"/>
         <Card label="成交均价" value={financial?.averagePrice!=null?`${money(financial.averagePrice)} ${selected}`:'资料不完整'} note="该币种销售额 ÷ 该币种销量"/>
       </div>
@@ -67,7 +68,7 @@ export default function SalesDashboard({actor,refreshToken}:{actor:Row;refreshTo
         <label className="report-search">搜索SKU或商品<input type="search" placeholder="输入SKU或商品名称" value={search} onChange={e=>setSearch(e.target.value)}/></label>
         <ReportTable rows={rankings} columns={[{label:'排名',render:r=><span className={r.rank<=3?'rank-medal':''}>{r.rank}</span>},{label:'SKU / 商品',render:r=><><strong>{r.sku}</strong><small className="report-secondary">{r.name}</small></>},{label:'销售总数量',numeric:true,render:r=><strong>{number(r.qty)}</strong>},{label:'销量占比',numeric:true,render:r=>r.share==null?'—':`${number(r.share*100)}%`},{label:'覆盖站点',numeric:true,render:r=>number(r.siteCount)}]}/></details>
       </Panel>
-      <Panel title={`SKU投产比排名 · ${selected==='UNKNOWN'?'历史未标币种':selected}`} desc="按同一SKU在所选范围的销售额合计 ÷ 投放成本合计排序；没有投放的SKU不显示无限大。">
+      <Panel title={`SKU投产比排名 · ${selected==='UNKNOWN'?'历史未标币种':selected}`} desc="按同一SKU在所选范围的销售额合计 ÷ 投放成本合计排序；只有准确归属到SKU的成本用于此榜；成本未知不排名，渠道总费用不分摊。">
         <RankingBars rows={roiRows.filter((r:Row)=>r.roas!==null)} valueKey="roas" unit="×" color="teal"/>
         <details className="chart-details"><summary>查看完整投产比与未排名商品</summary>
         <label className="report-toggle"><input type="checkbox" checked={showUnranked} onChange={e=>setShowUnranked(e.target.checked)}/>同时显示未填报和无投放SKU（不排名）</label>

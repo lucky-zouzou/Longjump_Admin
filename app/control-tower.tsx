@@ -1,4 +1,5 @@
 "use client";
+import SalesAdSpend from "./sales-ad-spend";
 import SalesDashboard from "./sales-dashboard";
 import InventoryCountReview,{type CountRequest} from "./inventory-count-review";
 import {SITE_CURRENCIES,SALES_CURRENCIES} from "../lib/sales-data.mjs";
@@ -6,6 +7,7 @@ import {SITE_CURRENCIES,SALES_CURRENCIES} from "../lib/sales-data.mjs";
 import TableImport from "./table-import";
 import MonthlyDemandEditor from "./monthly-demand-editor";
 import MonthlyApprovals from "./monthly-approvals";
+import SalesImportHistory from "./sales-import-history";
 import {matchImportItems,groupInboundRows} from "../lib/tabular-import.mjs";
 import ForecastSettings from "./forecast-settings";
 import PlanChanges,{SupplyPicker,PurchaseReassign} from "./plan-changes";
@@ -569,7 +571,7 @@ function Field({label,children,span}:{label:string;children:React.ReactNode;span
 
 function SalesImport({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
   const actor=data.actor;
-  const [form,setForm]=useState({businessDate:localDate(),site:actor.site||SITES[0],channel:actor.channel||"TikTok",sourceBatchRef:"",reportKind:"partial"});
+  const [form,setForm]=useState({businessDate:new Date(Date.parse(localDate())-86400000).toISOString().slice(0,10),site:actor.site||SITES[0],channel:actor.channel||"TikTok",sourceBatchRef:"",reportKind:"partial"});
   const [dayConfirmed,setDayConfirmed]=useState(false),[dayNote,setDayNote]=useState("");
   useEffect(()=>{setDayConfirmed(false);setDayNote("");},[form.businessDate,form.site,form.channel]);
   const [manual,setManual]=useState({sku:"",name:"",qty:"",unitPrice:"",amount:"",adCost:"",currency:SITE_CURRENCIES[actor.site as keyof typeof SITE_CURRENCIES]||"MYR"});
@@ -578,16 +580,15 @@ function SalesImport({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
     if(!result)return;
     setManual({...manual,sku:"",name:"",qty:"",unitPrice:"",amount:"",adCost:""});
   };
-  const reverse=async(row:Row)=>{const reason=window.prompt("请输入冲销原因（将恢复对应库存并保留审计记录）");if(reason)await act("reverseSalesImport",{importId:row.id,reason},"错误导入已冲销，库存已恢复");};
   const canImport=hasPermission(actor.role,"sales.import");
-  const updated=data.salesScopeStatus.filter(row=>row.updatedToday).length;
+  const updated=data.salesScopeStatus.filter(row=>row.updatedExpected).length;
   return <>
-    <PageHead title={canImport?"每日销售数据导入":"销售数据监控"} desc={canImport?`${actor.site} · ${actor.channel}｜由当前站点运营每日批量导入，系统自动扣减库存并更新补货建议`:"销售数据仅由各站点运营每日导入；当前页面为只读监控，可用于提前安排备货与产能"}>
-      <Pill tone={updated===data.salesScopeStatus.length?"green":"red"}>今日已更新 {updated}/{data.salesScopeStatus.length}</Pill>
+    <PageHead title={canImport?"每日销售数据导入":"销售数据监控"} desc={canImport?`${actor.site} · ${actor.channel}｜由当前站点运营每日批量导入，系统自动扣减库存并更新补货建议`:"销售数据仅由各站点运营每日导入；可在此查看销售和投产比，并按岗位权限维护错误批次"}>
+      <Pill tone={updated===data.salesScopeStatus.length?"green":"red"}>昨日报完整 {updated}/{data.salesScopeStatus.length}</Pill>
     </PageHead>
     <SalesDashboard actor={actor} refreshToken={data}/>
     <Panel title="每日销售更新状态" desc="完整日报或零销售确认后才完成；部分销售和费用补录仍显示待核对">
-      <div className="sales-scope-grid">{data.salesScopeStatus.map(row=><div className={classNames("sales-scope-card",row.updatedToday?"updated":"pending")} key={`${row.site}-${row.channel}`}><div><strong>{row.site}</strong><span>{row.channel}</span></div><Pill tone={row.updatedToday?"green":"red"}>{row.updatedToday?"日报已完整":row.lastImportDate===localDate()?"已导入 · 待核对":"今日待更新"}</Pill><b>今日 {fmt(row.salesToday)}件</b><small>7天 {fmt(row.sales7Qty)}件｜最近 {row.lastSaleDate||"无记录"}</small></div>)}</div>
+      <div className="sales-scope-grid">{data.salesScopeStatus.map(row=><div className={classNames("sales-scope-card",row.updatedExpected?"updated":"pending")} key={`${row.site}-${row.channel}`}><div><strong>{row.site}</strong><span>{row.channel}</span></div><Pill tone={row.updatedExpected?"green":"red"}>{row.updatedExpected?"日报已完整":row.importedExpected?"已导入 · 待核对":"昨日待导入"}</Pill><b>{row.expectedDate} · {fmt(row.salesExpected)}件</b><small>7天 {fmt(row.sales7Qty)}件｜最近 {row.lastSaleDate||"无记录"}</small></div>)}</div>
     </Panel>
     {canImport&&<>
     <Panel title="导入 Excel / CSV" desc="同一文件或平台报表编号不能重复导入；错误行需全部修正后再提交">
@@ -598,7 +599,7 @@ function SalesImport({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
         <Field label="渠道"><select disabled={actor.role==="运营"} value={form.channel} onChange={e=>setForm({...form,channel:e.target.value})}>{REQUIRED_CHANNELS.map(s=><option key={s}>{s}</option>)}</select></Field>
         <Field label="平台报表/订单批次号"><input value={form.sourceBatchRef} onChange={e=>setForm({...form,sourceBatchRef:e.target.value})} placeholder="必填，用于识别重复数据"/></Field>
       </div>
-      <TableImport kind="sales" busy={busy} defaults={{currency:SITE_CURRENCIES[form.site as keyof typeof SITE_CURRENCIES]}} contextKey={JSON.stringify(form)} confirmLabel="确认导入销售并扣库" description="每行填写SKU、销量、成交单价或销售额、投放成本、币种（默认站点本币）。销售额优先于单价×销量；金额使用英文小数点、最多两位小数。未提供金额或成本请留空，明确无投放填0；有投放未出单可填销量0。投放成本填写该行SKU的分摊金额，同一笔费用只计一次，勿把整店成本复制到每行。" onApply={async(rows,meta)=>{
+      <TableImport kind="sales" busy={busy} defaults={{currency:SITE_CURRENCIES[form.site as keyof typeof SITE_CURRENCIES]}} contextKey={JSON.stringify(form)} confirmLabel="确认导入销售并扣库" description="每行填写SKU、销量、成交单价或销售额、投放成本、币种（默认站点本币）。销售额优先于单价×销量；金额使用英文小数点、最多两位小数。未提供金额或成本请留空，明确无投放填0；有投放未出单可填销量0。无法取得SKU广告成本时留空，在下方“渠道广告总费用”登记当天总费用。SKU成本只填写可准确归属的费用，不要把整店成本复制到每行。" onApply={async(rows,meta)=>{
         if(form.sourceBatchRef.trim().length<3)throw Error("请先填写至少3个字符的平台报表/订单批次号");
         return Boolean(await act("salesImport",{...form,rows,...meta,importKey:`file|${form.businessDate}|${form.site}|${form.channel}|${meta.fileHash}`},"销售已导入，库存流水同步生成"));
       }}/>
@@ -622,9 +623,9 @@ function SalesImport({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
       <div className="form-actions"><button className="btn primary" disabled={busy||!manual.sku||!manual.qty||!form.sourceBatchRef||!actor.site&&actor.role==="运营"} onClick={addManual}>录入并扣库</button></div>
     </Panel>
     </>}
-    <Panel title="最近导入批次" desc="唯一导入标识可追溯">
-      <div className="table-wrap"><table><thead><tr><th>日期</th><th>站点/渠道</th><th>来源编号</th><th>文件</th><th className="num">SKU数</th><th className="num">销量</th><th>状态/导入时间</th><th></th></tr></thead><tbody>{data.imports.length===0?<tr><td colSpan={8}><Empty>暂无导入记录</Empty></td></tr>:data.imports.map(r=><tr key={r.id}><td>{r.business_date}</td><td>{r.site} · {r.channel}</td><td>{r.source_batch_ref||"—"}</td><td>{r.file_name}</td><td className="num">{r.row_count}</td><td className="num">{fmt(r.total_qty)}</td><td><Pill tone={r.reversed_at?"red":"green"}>{r.reversed_at?"已冲销":"有效"}</Pill><div className="cell-note">{readableDate(r.created_at)}</div></td><td>{!r.reversed_at&&hasPermission(actor.role,"sales.reverse")&&<button className="btn danger" disabled={busy} onClick={()=>reverse(r)}>冲销</button>}</td></tr>)}</tbody></table></div>
-    </Panel>
+    <SalesAdSpend data={data} act={act} busy={busy}/>
+    <SalesImportHistory data={data} act={act} busy={busy}/>
+
   </>;
 }
 

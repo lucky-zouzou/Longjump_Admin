@@ -510,3 +510,51 @@ tr:hover td { background:#fbfcff; }
 .approval-history li>div { display:flex; flex-wrap:wrap; gap:12px; align-items:center; }
 .approval-history time,.approval-history p { color:var(--muted); font-size:12px; margin:6px 0 0; }
 @media(max-width:760px) { .approval-flow { grid-template-columns:1fr 1fr; gap:8px; }.approval-flow span{padding:10px}.approval-totals { gap:8px; }.approval-totals strong { font-size:18px; }.approval-editor { padding:14px; } }
+
+/* Sales maintenance and forecast forms: shared, scoped layout without altering other pages. */
+.maintenance-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:18px;margin:18px 0}
+.maintenance-grid>label,.month-control{display:flex;flex-direction:column;gap:8px;font-size:13px;color:var(--muted,#66758e);font-weight:600;min-width:0}
+.maintenance-grid input,.maintenance-grid select,.maintenance-grid textarea,.month-control input,.maintenance-editor input,.maintenance-editor select,.maintenance-editor textarea{width:100%;min-width:0;border:1px solid #dce3ee;border-radius:9px;padding:11px 12px;background:#fff;color:#17243c;font:inherit;min-height:42px;box-sizing:border-box}
+.maintenance-grid textarea,.maintenance-editor textarea{min-height:84px;resize:vertical}
+.maintenance-grid :is(input,select,textarea):focus,.maintenance-editor :is(input,select,textarea):focus{outline:2px solid #adc4ff;outline-offset:1px}
+.maintenance-grid .wide{grid-column:1/-1}
+.maintenance-actions{display:flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap;margin-top:18px}
+.maintenance-actions .btn{white-space:nowrap}
+.maintenance-actions>.muted{margin-right:auto;font-size:12px}
+.sales-maintenance small,.forecast-review td small{display:block;margin-top:6px;color:#738098;font-size:12px;overflow-wrap:anywhere}
+.sales-maintenance td .maintenance-actions{margin:0;justify-content:flex-start;flex-wrap:nowrap}
+.import-history-table{max-height:460px;overflow:auto}
+.import-history-table th{position:sticky;top:0;z-index:1;background:#f5f7fa}
+.maintenance-editor{margin-top:24px;padding:24px;background:#f7f9fd;border:1px solid #d4e0fa;border-radius:14px;scroll-margin-top:100px}
+.maintenance-editor h3{font-size:18px}.maintenance-editor>p{font-size:13px;color:#66758e}
+.maintenance-editor>.field{display:flex;flex-direction:column;gap:10px;margin-top:20px;font-size:13px}
+.maintenance-editor td input{min-width:110px}.maintenance-editor td:first-child input{min-width:190px}
+.ad-spend-panel .panel-head{display:flex;align-items:flex-start;gap:20px;justify-content:space-between}
+.ad-spend-panel .panel-head .pill{white-space:nowrap}
+.ad-spend-panel p{font-size:13px;line-height:1.8}.ad-spend-panel h4{font-size:18px}
+.forecast-settings{padding:28px!important;min-width:0}
+.forecast-heading{display:flex;justify-content:space-between;gap:20px;align-items:flex-start}
+.forecast-heading h3{font-size:22px;margin:8px 0 10px}.forecast-heading h4{font-size:19px;margin:0 0 8px}
+.forecast-heading p,.forecast-section-body>p{font-size:13px;line-height:1.8;color:#6b7891;margin:0}
+.section-eyebrow{color:#3263b8;font-size:11px;font-weight:700;letter-spacing:.08em}
+.forecast-scope{background:#f5f8ff;border:1px solid #dce6fa;border-radius:12px;padding:20px;margin:24px 0}
+.forecast-scope .scope-sku{grid-column:span 2}
+.forecast-section{border:1px solid #e0e6f0;border-radius:12px;margin:16px 0;overflow:hidden}
+.forecast-section>summary{display:flex;align-items:center;gap:14px;padding:18px 20px;cursor:pointer;background:#fafbfe;font-weight:700;font-size:15px;list-style:none}
+.forecast-section>summary:after{content:'＋';margin-left:auto;color:#3263b8;font-size:18px}.forecast-section[open]>summary:after{content:'−'}
+.forecast-section>summary small{font-weight:400;color:#6b7891;font-size:12px}
+.forecast-section-body{padding:4px 22px 22px}.forecast-section-body>p.notice{margin-top:18px}
+.forecast-section fieldset{border:0;border-bottom:1px solid #e7ecf3;padding:20px 0 6px;min-width:0;margin:0}
+.forecast-section legend{float:left;width:100%;font-size:14px;font-weight:700;color:#253955;margin-bottom:6px}
+.forecast-section fieldset>p{clear:both;color:#758299;font-size:12px;margin:0 0 12px}
+.forecast-toggles{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:20px 0}
+.forecast-toggles>label{display:flex;gap:12px;align-items:center;background:#f7f9fc;border:1px solid #e1e7f1;padding:16px;border-radius:10px;cursor:pointer}
+.forecast-toggles input{width:18px;height:18px;flex-shrink:0;accent-color:#3263ed}
+.forecast-toggles strong{display:block;font-size:14px}.forecast-toggles small{display:block;font-size:12px;color:#758299;margin-top:5px}
+.forecast-review{border-top:1px solid #e7ecf3;padding-top:28px;margin-top:28px}
+.forecast-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin:20px 0}
+.forecast-metrics article{padding:20px;background:#f7f9fc;border:1px solid #e1e7f1;border-radius:12px}
+.forecast-metrics small{font-size:13px;color:#6b7891}.forecast-metrics strong{display:block;font-size:30px;line-height:1.4;color:#2d5fe0;margin:8px 0}
+.forecast-metrics em{font-size:13px;font-weight:400;font-style:normal}.forecast-metrics p{font-size:12px;color:#758299;margin:0}
+@media(max-width:1200px){.maintenance-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.forecast-scope .scope-sku{grid-column:1/-1}}
+@media(max-width:640px){.maintenance-grid,.forecast-toggles,.forecast-metrics{grid-template-columns:1fr}.forecast-settings{padding:18px!important}.forecast-heading,.ad-spend-panel .panel-head{flex-direction:column}.forecast-section>summary{align-items:flex-start;flex-wrap:wrap;gap:6px}.forecast-section>summary small{width:85%}.forecast-section>summary:after{position:absolute;right:28px}.forecast-section-body{padding:0 14px 18px}.maintenance-editor{padding:14px}.forecast-scope{padding:14px}.month-control{width:100%}}
