@@ -604,8 +604,8 @@ async function salesImport(actor:Actor, payload:AnyRow, staged?:{statements:D1Pr
   if(sourceBatchRef.length<3) throw new HttpError(400,"请填写平台订单批次、日报编号或唯一手工凭证号");
   if (importKey.length < 12) throw new HttpError(400, "缺少有效的导入唯一标识");
   const db = database();
-  const exists = await db.prepare("SELECT id FROM sales_imports WHERE import_key=?").bind(importKey).first();
-  if (exists) throw new HttpError(409, "该文件或记录已经导入，系统已阻止重复扣库存");
+  const exists = await db.prepare("SELECT id,reversed_at FROM sales_imports WHERE import_key=?").bind(importKey).first<AnyRow>();
+  if (exists && !exists.reversed_at) throw new HttpError(409, "该文件或记录已经导入，系统已阻止重复扣库存");
   if(await db.prepare("SELECT id FROM sales_imports WHERE site=? AND channel=? AND business_date=? AND source_batch_ref=? AND reversed_at IS NULL AND id<>?").bind(site,channel,businessDate,sourceBatchRef,staged?.replacesId||"").first()) throw new HttpError(409,"该平台批次或手工凭证号已经导入，系统已阻止重复扣库存");
   const importId = makeId("sale_import"), timestamp = nowIso();
   const totalQty = rows.reduce((sum,r) => sum + r.qty, 0);
@@ -615,6 +615,10 @@ async function salesImport(actor:Actor, payload:AnyRow, staged?:{statements:D1Pr
   const settings = await all("SELECT sku,unit_price,name FROM sku_settings");
   const settingMap = new Map<string, AnyRow>(settings.map((r:AnyRow) => [r.sku, r]));
   const statements = [
+    // Keep the reversed batch and its audit history, while atomically freeing its
+    // unique file key. The new INSERT still rejects concurrent duplicate imports.
+    ...(exists ? [db.prepare("UPDATE sales_imports SET import_key=? WHERE id=? AND import_key=? AND reversed_at IS NOT NULL")
+      .bind(`reversed|${exists.id}|${makeId("archive")}`,exists.id,importKey)] : []),
     ...(totalQty>0?[db.prepare("UPDATE sales_imports SET report_kind='partial' WHERE site=? AND channel=? AND business_date=? AND report_kind IN ('complete','zero') AND reversed_at IS NULL").bind(site,channel,businessDate)]:[]),
     db.prepare("INSERT INTO sales_imports (id,import_key,business_date,site,channel,file_name,source_batch_ref,row_count,total_qty,actor_id,created_at,report_kind) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)")
       .bind(importId, importKey, businessDate, site, channel, cleanText(payload.fileName, 180),sourceBatchRef, new Set(rows.map(row=>row.sku)).size, totalQty, actor.id, timestamp,reportKind),
