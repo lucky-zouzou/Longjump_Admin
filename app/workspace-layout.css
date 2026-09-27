@@ -1,0 +1,157 @@
+/* Shared workspace rhythm: readable data, compact chrome and room for the task. */
+.app-shell { font-size:14px; line-height:1.55; }
+.content { padding:24px clamp(18px,2vw,32px) 48px; }
+.page-head { align-items:center; margin-bottom:20px; }
+.page-head h3 { font-size:24px; line-height:1.3; }
+.page-head p { font-size:13px; line-height:1.65; max-width:85ch; }
+.panel { min-width:0; border-radius:12px; padding:20px; box-shadow:0 2px 8px rgb(27 39 68 / 2%); }
+.panel-head { flex-wrap:wrap; align-items:flex-start; }
+.panel-head>div { min-width:0; flex:1 1 240px; }
+.panel-head h4 { font-size:16px; line-height:1.4; }
+.panel-head p { font-size:12px; line-height:1.65; max-width:85ch; }
+.btn { min-height:38px; font-size:13px; line-height:1.4; }
+.pill,.status-pill { font-size:12px; }
+.metric { padding:16px 18px; border-radius:12px; }
+.metric .label { font-size:13px; }
+.metric .value { font-size:28px; line-height:1.25; overflow-wrap:anywhere; }
+.metric .foot { font-size:12px; line-height:1.5; }
+.grid-2 { align-items:start; }
+.form-grid { grid-template-columns:repeat(4,minmax(0,1fr)); gap:16px; }
+.field { min-width:0; }
+.field label { font-size:13px; line-height:1.5; color:#53627a; }
+.field label>input,.field label>select,.field label>textarea { display:block; margin-top:6px; }
+.field input,.field select,.field textarea { min-height:40px; font-size:14px; }
+.form-actions { flex-wrap:wrap; }
+/* A two-column card has two input columns, not four miniature fields. */
+.grid-2 .form-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.grid-2 .field.span-4 { grid-column:1/-1; }
+.master-create-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.wholesale :is(input,select,textarea):not([type=checkbox]):not([type=radio]):not([type=file]) {
+ border:1px solid #d7dfeb; border-radius:8px; padding:9px 11px; background:#fff; color:var(--ink); min-height:40px;
+}
+.wh-field :is(input,select,textarea) { width:100%; min-width:0; }
+.wholesale textarea { resize:vertical; }
+.app-shell :is(button,a,input,select,textarea,summary):focus-visible { outline:3px solid #8aacf5; outline-offset:2px; }
+.table-wrap { max-height:560px; overflow:auto; overscroll-behavior-x:contain; scrollbar-width:thin; background:white; }
+.table-wrap th { position:sticky; top:0; z-index:2; background:#f5f7fa; box-shadow:0 1px 0 var(--line); }
+.table-wrap table { min-width:680px; }
+.table-wrap .supply-table { min-width:1180px; }
+.table-wrap th { font-size:12px; padding:11px 12px; }
+.table-wrap td { font-size:13px; padding:12px; line-height:1.6; }
+.table-wrap td :is(input,select) { min-height:36px; }
+.cell-note { font-size:11px; line-height:1.5; }
+.notice { font-size:13px; }
+.task-grid { grid-template-columns:repeat(auto-fit,minmax(min(100%,230px),1fr)); max-height:440px; overflow:auto; padding:2px; }
+.task-card { padding:13px; }
+.task-card span,.task-card i { font-size:12px; }
+/* Native disclosures retain input state while keeping secondary tools out of the way. */
+.disclosure-panel { padding:0; }
+.disclosure-panel>summary { display:flex; align-items:center; gap:14px; padding:18px 20px; cursor:pointer; list-style:none; }
+.disclosure-panel>summary::-webkit-details-marker { display:none; }
+.disclosure-panel>summary::before { content:'›'; font-size:22px; color:var(--blue); transition:transform .15s; }
+.disclosure-panel[open]>summary::before { transform:rotate(90deg); }
+.disclosure-panel>summary>span:first-of-type { flex:1; min-width:0; }
+.disclosure-panel summary strong { font-size:15px; }
+.disclosure-panel summary small { display:block; color:var(--muted); font-size:12px; margin-top:4px; line-height:1.6; }
+.disclosure-hint { color:var(--muted); font-size:12px; white-space:nowrap; }
+.disclosure-panel[open]>summary { border-bottom:1px solid var(--line); }
+.disclosure-body { padding:20px; }
+.disclosure-body>.sales-dashboard>.panel:first-child { border:0; padding:0; box-shadow:none; }
+/* Tabs come before summaries so switching tasks doesn't require scrolling past cards. */
+.wh-head h3 { font-size:24px; }
+.wh-head { gap:12px; margin-bottom:16px; }
+.wh-head .wh-actions { gap:8px; margin:0; }
+.wh-tabs { gap:4px; margin-bottom:16px; }
+.wh-tabs button { padding:9px 12px; font-size:14px; }
+.wh-metrics { grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin-bottom:16px; }
+.wh-metrics article { padding:14px 16px; border-top-width:2px; }
+.wh-metrics span { font-size:12px; }
+.wh-metrics strong { font-size:23px; margin-top:5px; }
+.wh-sales-rule { font-size:12px; margin:8px 0 12px; }
+.wh-language-row { margin-bottom:10px; }
+.wh-language button { padding:6px 12px; min-height:34px; font-size:13px; }
+.field-sales { margin-top:16px; }
+.field-heading { margin:16px 0; gap:12px; }
+.field-heading h3 { font-size:21px; margin:0 0 4px; }
+.field-heading .wh-eyebrow { display:none; }
+.field-heading p { margin:4px 0; font-size:13px; }
+.field-panel { padding:20px; margin-bottom:16px; }
+.field-panel>h4 { font-size:17px; margin-bottom:14px; }
+.field-nav { gap:6px; }
+.field-nav button { padding:9px 13px; font-size:14px; }
+.field-goals { margin:14px 0; }
+.field-goals article { padding:14px; gap:6px; }
+.field-panel .wh-actions>span { font-size:13px; }
+.field-quick-actions { max-width:640px; }
+.field-sync { font-size:12px; }
+.sales-dashboard { font-size:14px; }
+.sales-dashboard .panel { padding:20px; }
+.sales-dashboard .panel-head h4 { font-size:17px; }
+.sales-dashboard .panel-head p,.sales-dashboard .foot { font-size:12px; }
+.sales-dashboard .report-metrics .value { font-size:25px; }
+.import-heading strong { font-size:15px; }
+.table-import { padding:16px; border-radius:10px; }
+.import-controls { align-items:flex-end; }
+.import-controls input[type=file] { width:100%; }
+.import-controls label { min-width:0; }
+@media(max-width:1200px) {
+ .form-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+ .field.span-4 { grid-column:1/-1; }
+ .master-create-grid { grid-template-columns:1fr; }
+ .report-filters { grid-template-columns:repeat(2,minmax(0,1fr)); }
+}
+@media(max-width:760px) {
+ .content { padding:16px 12px calc(100px + env(safe-area-inset-bottom)); }
+ .topbar { height:auto; min-height:62px; padding:10px 14px; gap:8px; flex-wrap:wrap; }
+ .topbar h2 { font-size:16px; }
+ .topbar p { display:none; }
+ .topbar>div:last-child { flex-wrap:wrap; }
+ .status-pill { font-size:11px; }
+ .page-head h3 { font-size:21px; }
+ .page-head { align-items:flex-start; }
+ .panel,.sales-dashboard .panel,.field-panel { padding:16px; }
+ .panel-head { gap:10px; }
+ .panel-head>div { flex-basis:auto; }
+ .form-grid,.grid-2 .form-grid { grid-template-columns:1fr; }
+ .field.span-2,.field.span-4 { grid-column:1/-1; }
+ .app-shell :is(input,select,textarea):not([type=checkbox]):not([type=radio]) { font-size:16px; max-width:100%; min-height:44px; }
+ .app-shell .btn { min-height:44px; }
+ .form-actions { justify-content:stretch; }
+ .form-actions .btn { flex:1 1 auto; }
+ .table-wrap { max-height:65vh; }
+ .table-wrap th { font-size:12px; }
+ .table-wrap td { font-size:13px; }
+ .metric .value { font-size:23px; }
+ .metric { padding:14px; }
+ .task-grid { grid-template-columns:1fr; }
+ .disclosure-panel { padding:0; }
+ .disclosure-panel>summary { padding:15px; gap:10px; }
+ .disclosure-body { padding:16px; }
+ .disclosure-hint { display:none; }
+ .wh-head { align-items:stretch; }
+ .wh-head .wh-actions { width:100%; }
+ .wh-tabs { overflow-x:auto; flex-wrap:nowrap; }
+ .wh-tabs button { flex:0 0 auto; min-height:44px; }
+ .wh-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); }
+ .wh-metrics article { padding:12px; }
+ .wh-metrics strong { font-size:19px; }
+ .field-nav { display:flex!important; flex-wrap:nowrap; overflow-x:auto; padding-bottom:6px; }
+ .field-nav button { flex:0 0 auto; min-height:44px; }
+ .field-quick-actions { max-width:none; }
+ .field-heading { margin:12px 0; }
+ .field-heading h3 { font-size:20px; }
+ .import-controls,.import-controls label { width:100%; }
+ .import-controls label { align-items:stretch; }
+ .mobile-nav { bottom:calc(8px + env(safe-area-inset-bottom)); }
+ .toast { left:12px; right:12px; bottom:calc(88px + env(safe-area-inset-bottom)); max-width:none; }
+}
+@media(prefers-reduced-motion:reduce) { .disclosure-panel>summary::before { transition:none; } }
+/* Expand master-data editors across the row instead of leaving a tall empty column. */
+.master-create-grid:has(>details[open]) { grid-template-columns:1fr; }
+.disclosure-body>.forecast-settings { border:0; box-shadow:none; padding:0!important; margin:0; }
+@media(max-width:640px) {
+ .field-sales .field-heading>.wh-actions { display:flex; width:100%; margin:0; }
+ .field-sales .field-heading>.wh-actions>.btn { display:none; }
+ .field-sales .field-heading>.wh-actions>label { display:grid; width:100%; gap:6px; }
+ .field-sales .field-heading>.wh-actions:empty { display:none; }
+}
