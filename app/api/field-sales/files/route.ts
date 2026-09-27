@@ -10,7 +10,7 @@ export async function POST(request:Request){try{
  if(request.headers.get('origin')&&request.headers.get('origin')!==new URL(request.url).origin)throw new FieldError('请求来源无效',403);
  if(Number(request.headers.get('content-length')||0)>11*1024*1024)throw new FieldError('附件不可超过10MB',413);
  await ensureSchema();const actor=await requireActor(request),db=database();await assertWritable(db);
- if(actor.role==='财务')throw new FieldError('财务仅可查看和导出',403);
+ if(['财务','供应链'].includes(actor.role))throw new FieldError('财务仅可查看和导出',403);
  const form=await request.formData(),r=await fieldRecord(db,actor,form.get('recordId')),file=form.get('file');if(r.status!=='draft'||r.kind==='leave')throw new FieldError('仅拜访或合同草稿可上传附件',409);
  if(!(file instanceof File)||file.size<=0||file.size>10*1024*1024)throw new FieldError('请选择不超过10MB的附件');
  const b=new Uint8Array(await file.arrayBuffer()),ascii=(a:number,z:number)=>String.fromCharCode(...b.slice(a,z));
