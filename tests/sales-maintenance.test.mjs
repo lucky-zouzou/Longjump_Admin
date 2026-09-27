@@ -91,3 +91,37 @@ test('费用版本冲突、权限、格式校验、备份锁阻止写入，审�
   assert.throws(()=>f.sqlite.prepare('UPDATE sales_ad_spend SET amount=1').run(),/guard_maintenance/);
  }finally{f.sqlite.close();}
 });
+
+test('删除后可原样重导同一文件；保留历史，仍阻止有效批次重复扣库',async()=>{
+ const f=systemFixture();try{
+  const p=payload(),{importId}=await (await svc.salesImport(f.users.indonesia,p)).json();
+  await svc.reverseSalesImport(f.users.indonesia,{importId,reason:'删除错误导入后重传'});assert.equal(stock(f),10);
+  const next=await (await svc.salesImport(f.users.indonesia,p)).json();assert.notEqual(next.importId,importId);assert.equal(stock(f),7);
+  const old=f.sqlite.prepare('SELECT * FROM sales_imports WHERE id=?').get(importId);assert(old.reversed_at);assert.equal(old.reversal_reason,'删除错误导入后重传');
+  assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM sales_records WHERE import_id=? AND reversed_at IS NOT NULL').get(importId).n,1);
+  await assert.rejects(svc.salesImport(f.users.indonesia,p),e=>e.status===409);assert.equal(stock(f),7);
+  await svc.reverseSalesImport(f.users.indonesia,{importId:next.importId,reason:'再次核对删除重导'});
+  await svc.salesImport(f.users.indonesia,p);assert.equal(stock(f),7);
+  assert.equal((await readSalesDashboard(f.db,f.users.admin,{from:yesterday,to:day})).totalQty,3);
+ }finally{f.sqlite.close();}
+});
+test('删除后同时重导只能成功一次；失败事务不释放文件防重标识',async()=>{
+ const f=systemFixture();try{
+  const p=payload(),{importId}=await (await svc.salesImport(f.users.indonesia,p)).json();
+  await svc.reverseSalesImport(f.users.indonesia,{importId,reason:'删除后并发重传校验'});
+  const results=await race(f,()=>svc.salesImport(f.users.indonesia,p),()=>svc.salesImport(f.users.indonesia,p));
+  assert.equal(results.filter(r=>r.ok).length,1);assert.equal(stock(f),7);
+  assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM sales_imports WHERE import_key=? AND reversed_at IS NULL').get(p.importKey).n,1);
+ }finally{f.sqlite.close();}
+});
+test('重新导入失败时保留冲销历史原键与库存，修订后的有效批次仍不可重复',async()=>{
+ const f=systemFixture();try{
+  const p=payload(),{importId}=await (await svc.salesImport(f.users.indonesia,p)).json();
+  const revision=await (await svc.correctSalesImport(f.users.indonesia,{...p,importId,reason:'修正平台销售数据',rows:[{sku:'BAG-A',qty:2}]})).json();
+  await assert.rejects(svc.salesImport(f.users.indonesia,p),e=>e.status===409);assert.equal(stock(f),8);
+  await svc.reverseSalesImport(f.users.indonesia,{importId:revision.importId,reason:'撤销修订重新上传'});
+  f.sqlite.exec("CREATE TRIGGER fail_reimport BEFORE INSERT ON sales_records BEGIN SELECT RAISE(ABORT,'test_reimport_failure'); END");
+  await assert.rejects(svc.salesImport(f.users.indonesia,p),/test_reimport_failure/);
+  assert.equal(f.sqlite.prepare('SELECT import_key FROM sales_imports WHERE id=?').get(importId).import_key,p.importKey);assert.equal(stock(f),10);
+ }finally{f.sqlite.close();}
+});
