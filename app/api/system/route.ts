@@ -1,3 +1,4 @@
+import {saveSalesAdSpend} from "../../../lib/sales-ad-spend.mjs";
 import {publicSystemSnapshot} from "../../../lib/system-response.mjs";
 import {normalizeSales,SITE_CURRENCIES} from "../../../lib/sales-data.mjs";
 import {validateImportRows,groupInboundRows} from "../../../lib/tabular-import.mjs";
@@ -117,14 +118,22 @@ export async function GET(request:Request) {
       return Response.redirect(new URL("/api/backup",request.url),307);
     }
     if(actor.role==="销售") return Response.json({actor,currentMonth:monthKey(),metrics:{},myTasks:await wholesaleTasks(database(),actor),...Object.fromEntries(["inventory", "movements", "sales", "imports", "receipts", "submissions", "approvals", "batches", "skuSettings", "audit", "users", "suggestions", "monthlyStatus", "issues", "newProductProjects", "salesScopeStatus", "salesTopSkus", "purchaseOrders", "productionOrders", "shipmentBatches", "shipmentReceipts", "transportBatches", "transportReceipts", "businessPartners", "warehouses", "countRequests"].map(key=>[key,[]]))});
+    const requestedImport=requestUrl.searchParams.get("salesImportId");
+    if(requestedImport){
+      requireBusinessPermission(actor,"sales.correct");
+      const source=await database().prepare("SELECT * FROM sales_imports WHERE id=?").bind(requestedImport).first<AnyRow>();
+      if(!source)throw new HttpError(404,"销售批次不存在");
+      requireScope(actor,source.site,source.channel);
+      return Response.json({source,rows:await all("SELECT r.*,COALESCE(s.name,'') name FROM sales_records r LEFT JOIN sku_settings s ON s.sku=r.sku WHERE r.import_id=? ORDER BY r.created_at,r.id",[source.id])});
+    }
     const scope = scoped(actor);
-    const today=chinaDate(),cutoff7=chinaDate(-6);
+    const today=chinaDate(),expectedDate=chinaDate(-1),cutoff7=chinaDate(-6);
     const results: AnyRow[][] = await Promise.all([
       all(`SELECT * FROM inventory_balances${scope.clause} ORDER BY site,channel,sku`, scope.args),
       all(`SELECT * FROM inventory_movements${scope.clause} ORDER BY created_at DESC LIMIT 500`, scope.args),
       all(`SELECT * FROM sales_records${scope.clause}${scope.clause?" AND":" WHERE"} reversed_at IS NULL ORDER BY business_date DESC,created_at DESC LIMIT 1000`, scope.args),
       all(`SELECT * FROM sales_imports${scope.clause} ORDER BY created_at DESC LIMIT 100`, scope.args),
-      all("SELECT site,channel,MAX(CASE WHEN report_kind IN ('complete','zero') THEN business_date END) last_sale_date,MAX(business_date) last_import_date,SUM(CASE WHEN business_date=? THEN total_qty ELSE 0 END) sales_today,SUM(CASE WHEN business_date>=? THEN total_qty ELSE 0 END) sales_7_qty,COUNT(DISTINCT CASE WHEN business_date>=? AND report_kind IN ('complete','zero') THEN business_date END) import_days_7 FROM sales_imports WHERE reversed_at IS NULL GROUP BY site,channel",[today,cutoff7,cutoff7]),
+      all("SELECT site,channel,MAX(CASE WHEN report_kind IN ('complete','zero') THEN business_date END) last_sale_date,MAX(business_date) last_import_date,MAX(CASE WHEN business_date=? AND report_kind IN ('complete','zero') THEN 1 ELSE 0 END) expected_complete,MAX(CASE WHEN business_date=? AND total_qty>0 THEN 1 ELSE 0 END) expected_imported,SUM(CASE WHEN business_date=? THEN total_qty ELSE 0 END) sales_expected,SUM(CASE WHEN business_date=? THEN total_qty ELSE 0 END) sales_today,SUM(CASE WHEN business_date>=? THEN total_qty ELSE 0 END) sales_7_qty,COUNT(DISTINCT CASE WHEN business_date>=? AND report_kind IN ('complete','zero') THEN business_date END) import_days_7 FROM sales_imports WHERE reversed_at IS NULL GROUP BY site,channel",[expectedDate,expectedDate,expectedDate,today,cutoff7,cutoff7]),
       all(`SELECT site,channel,sku,SUM(qty) qty FROM sales_records WHERE reversed_at IS NULL AND business_date>=?${actor.role==="运营"?" AND site=? AND channel=?":""} GROUP BY site,channel,sku ORDER BY qty DESC LIMIT 100`,actor.role==="运营"?[cutoff7,actor.site,actor.channel]:[cutoff7]),
       actor.role === "运营"
         ? all("SELECT r.*, GROUP_CONCAT(a.site||'|'||a.channel||'|'||a.qty, ';;') allocations FROM inbound_receipts r JOIN inbound_allocations a ON a.receipt_id=r.id AND a.site=? AND a.channel=? GROUP BY r.id ORDER BY r.received_at DESC LIMIT 200",[actor.site,actor.channel])
@@ -170,7 +179,7 @@ export async function GET(request:Request) {
       .filter((row)=>actor.role!=="运营"||(row.site===actor.site&&row.channel===actor.channel))
       .map((row)=>{
         const status=salesScopeMap.get(`${row.site}|${row.channel}`)??{};
-        return {...row,lastImportDate:status.last_import_date||"",lastSaleDate:status.last_sale_date||"",salesToday:Number(status.sales_today||0),sales7Qty:Number(status.sales_7_qty||0),importDays7:Number(status.import_days_7||0),updatedToday:status.last_sale_date===today};
+        return {...row,lastImportDate:status.last_import_date||"",lastSaleDate:status.last_sale_date||"",salesToday:Number(status.sales_today||0),sales7Qty:Number(status.sales_7_qty||0),importDays7:Number(status.import_days_7||0),updatedToday:status.last_sale_date===today,expectedDate,updatedExpected:Boolean(status.expected_complete),importedExpected:Boolean(status.expected_imported),salesExpected:Number(status.sales_expected||0)};
       });
 
     const batchViews:AnyRow[]=batches.map((batch):AnyRow=>{
@@ -417,7 +426,7 @@ export async function GET(request:Request) {
     const myTasks:AnyRow[]=await wholesaleTasks(database(),actor);
     if(actor.role==="运营"){
       const ownStatus=salesScopeStatus[0];
-      if(ownStatus&&!ownStatus.updatedToday) myTasks.push({level:"red",title:"导入今日销售",detail:`${actor.site} · ${actor.channel} 今日尚未更新`,tab:"sales"});
+      if(ownStatus&&!ownStatus.updatedExpected) myTasks.push({level:"red",title:"导入昨日销售",detail:`${actor.site} · ${actor.channel} ${expectedDate} ${ownStatus.importedExpected?"已导入，待确认完整":"尚未更新"}`,tab:"sales"});
       const ownMonthly=monthlyStatus.find((row)=>row.site===actor.site&&row.channel===actor.channel);
       if(ownMonthly&&!ownMonthly.submitted) myTasks.push({level:"amber",title:"提交月度需求",detail:`${currentMonth} 需求尚未提交`,tab:"suggestions"});
       for(const leg of transportLegViews.filter((row)=>row.stage==="shelf_pending"&&row.pendingShelfQty>0)) myTasks.push({level:"amber",title:"确认上架",detail:`${leg.leg_no} · ${leg.pendingShelfQty}件待转可售`,tab:"batches"});
@@ -450,6 +459,7 @@ export async function GET(request:Request) {
     })):[];
     return Response.json(publicSystemSnapshot({
       actor, currentMonth, metrics, myTasks,
+      adSpend:hasPermission(actor.role,"sales.ad_spend")?await all(`SELECT * FROM sales_ad_spend${scope.clause} ORDER BY business_date DESC`,scope.args):[],
       inventory:canReadDomain(actor.role,"inventory")?inventory:[],
       movements:canReadDomain(actor.role,"inventory")?movements:[],
       sales:canReadDomain(actor.role,"sales")?sales:[],
@@ -492,12 +502,14 @@ export async function POST(request:Request) {
     if (action === "bulkImport") return await bulkImport(actor,payload);
     if (action === "confirmSalesDay") return await confirmSalesDay(actor,payload);
     if (action === "salesImport") return await salesImport(actor, payload);
+    if (action === "correctSalesImport") return await correctSalesImport(actor,payload);
     if (action === "reverseSalesImport") return await reverseSalesImport(actor,payload);
     if (action === "inventoryAdjust") return await inventoryAdjust(actor, payload);
     if (action === "submitInventoryCount") return await submitInventoryCount(actor,payload);
     if (action === "decideInventoryCount") return await decideInventoryCount(actor,payload);
     if (action === "resolveInventoryHold") return await resolveInventoryHold(actor,payload);
     if (action === "receiveInbound") return await receiveInbound(actor, payload);
+    if (["salesAdSpendSave","salesAdSpendDelete"].includes(action)) return Response.json(await saveSalesAdSpend(database(),actor,payload));
     if (["supplyPolicySave","demandCorrectionSave"].includes(action)) return Response.json(await saveForecastData(database(),actor,payload));
     if (PLAN_ACTIONS.has(action)) return Response.json(await managePlan(database(),actor,payload,{buildSeriesOrders}));
     if (action === "monthlySubmit") return await monthlySubmit(actor, payload);
@@ -578,8 +590,8 @@ async function confirmSalesDay(actor:Actor,payload:AnyRow){
   return Response.json({ok:true,zero:!rows.length});
 }
 
-async function salesImport(actor:Actor, payload:AnyRow) {
-  requireBusinessPermission(actor,"sales.import");
+async function salesImport(actor:Actor, payload:AnyRow, staged?:{statements:D1PreparedStatement[];replacesId:string}) {
+  requireBusinessPermission(actor,staged?"sales.correct":"sales.import");
   const site = cleanText(payload.site, 20), channel = cleanText(payload.channel, 20);
   validSiteChannel(site, channel); requireScope(actor, site, channel);
   if(site==="印尼"&&channel==="线下分销") throw new HttpError(409,"印尼线下销售请通过线下批发订单发货生成，禁止再次导入扣库");
@@ -594,7 +606,7 @@ async function salesImport(actor:Actor, payload:AnyRow) {
   const db = database();
   const exists = await db.prepare("SELECT id FROM sales_imports WHERE import_key=?").bind(importKey).first();
   if (exists) throw new HttpError(409, "该文件或记录已经导入，系统已阻止重复扣库存");
-  if(await db.prepare("SELECT id FROM sales_imports WHERE site=? AND channel=? AND business_date=? AND source_batch_ref=? AND reversed_at IS NULL").bind(site,channel,businessDate,sourceBatchRef).first()) throw new HttpError(409,"该平台批次或手工凭证号已经导入，系统已阻止重复扣库存");
+  if(await db.prepare("SELECT id FROM sales_imports WHERE site=? AND channel=? AND business_date=? AND source_batch_ref=? AND reversed_at IS NULL AND id<>?").bind(site,channel,businessDate,sourceBatchRef,staged?.replacesId||"").first()) throw new HttpError(409,"该平台批次或手工凭证号已经导入，系统已阻止重复扣库存");
   const importId = makeId("sale_import"), timestamp = nowIso();
   const totalQty = rows.reduce((sum,r) => sum + r.qty, 0);
   const reportKind=totalQty===0?"cost":payload.reportKind==="complete"?"complete":"partial";
@@ -626,19 +638,20 @@ async function salesImport(actor:Actor, payload:AnyRow) {
     );
   });
   statements.push(audit(actor, "销售导入并扣库", "sales_import", importId, { businessDate, site, channel, rows:rows.length, totalQty, importKey,sourceBatchRef }));
-  try { await db.batch(statements); } catch (error) {
+  try { if(staged)staged.statements.push(...statements);else await db.batch(statements); } catch (error) {
     if (String(error).includes("UNIQUE")) throw new HttpError(409, "该文件或记录已经导入");
     throw error;
   }
   return Response.json({ ok:true, importId, rows:rows.length, totalQty });
 }
 
-async function reverseSalesImport(actor:Actor,payload:AnyRow){
+async function reverseSalesImport(actor:Actor,payload:AnyRow,staged?:D1PreparedStatement[]){
   requireBusinessPermission(actor,"sales.reverse");
   const importId=cleanText(payload.importId,120),reason=cleanText(payload.reason,500);
   if(reason.length<5) throw new HttpError(400,"冲销必须填写至少5个字的原因");
   const db=database(),source=await db.prepare("SELECT * FROM sales_imports WHERE id=?").bind(importId).first<AnyRow>();
   if(!source) throw new HttpError(404,"销售导入批次不存在");
+  requireScope(actor,source.site,source.channel);
   if(source.reversed_at) throw new HttpError(409,"该销售导入批次已经冲销");
   const rows=await all("SELECT r.sku,COALESCE(s.name,'') name,r.qty FROM sales_records r LEFT JOIN sku_settings s ON s.sku=r.sku WHERE r.import_id=? AND r.reversed_at IS NULL",[importId]);
   if(!rows.length&&!String(source.import_key).startsWith("coverage|")) throw new HttpError(409,"该批次没有可冲销销售明细");
@@ -648,8 +661,24 @@ async function reverseSalesImport(actor:Actor,payload:AnyRow){
     db.prepare("UPDATE sales_imports SET reversed_at=?,reversed_by=?,reversal_reason=? WHERE id=? AND reversed_at IS NULL").bind(timestamp,actor.id,reason,importId),
     audit(actor,"冲销错误销售导入","sales_import",importId,{reason,totalQty:source.total_qty,site:source.site,channel:source.channel}),
   );
-  await db.batch(statements);
+  if(staged)staged.push(...statements);else await atomicBatch(db,statements);
   return Response.json({ok:true,importId,reversedQty:Number(source.total_qty||0)});
+}
+
+async function correctSalesImport(actor:Actor,payload:AnyRow){
+  requireBusinessPermission(actor,"sales.correct");
+  const source=await database().prepare("SELECT * FROM sales_imports WHERE id=?").bind(cleanText(payload.importId,120)).first<AnyRow>();
+  if(!source)throw new HttpError(404,"销售导入批次不存在");
+  requireScope(actor,source.site,source.channel);
+  if(String(source.import_key).startsWith("coverage|"))throw new HttpError(400,"日报确认无需修改明细，请重新核对日报");
+  const statements:D1PreparedStatement[]=[];
+  await reverseSalesImport(actor,{importId:source.id,reason:payload.reason},statements);
+  const result=await salesImport(actor,{...payload,site:source.site,channel:source.channel,reportKind:"partial",fileName:`修订：${source.file_name}`,
+    importKey:`revision|${source.id}|${makeId("edit")}`},{statements,replacesId:source.id});
+  const next=await result.json() as AnyRow;
+  statements.push(audit(actor,"修改销售导入批次","sales_import",source.id,{reason:payload.reason,originalImportId:source.id,replacementImportId:next.importId,fromDate:source.business_date,toDate:payload.businessDate}));
+  await atomicBatch(database(),statements);
+  return Response.json({...next,replacedImportId:source.id});
 }
 
 async function inventoryAdjust(actor:Actor, payload:AnyRow, staged?:D1PreparedStatement[]) {
