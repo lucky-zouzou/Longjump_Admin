@@ -2,7 +2,7 @@ import {saveSalesAdSpend} from "../../../lib/sales-ad-spend.mjs";
 import {publicSystemSnapshot} from "../../../lib/system-response.mjs";
 import {normalizeSales,SITE_CURRENCIES} from "../../../lib/sales-data.mjs";
 import {validateImportRows,groupInboundRows} from "../../../lib/tabular-import.mjs";
-import {planIntegrityGuards} from "../../../lib/plan-integrity.mjs";
+import {checkPlanInventory,confirmPlanInventory,reviewedInventoryGuards} from "../../../lib/plan-integrity.mjs";
 import {systemChecks} from "../../../lib/system-checks.mjs";
 import {saveForecastData} from "../../../lib/forecast-management.mjs";
 import {loadForecast} from "../../../lib/forecast";
@@ -447,7 +447,7 @@ export async function GET(request:Request) {
       const history=await all("SELECT a.id,a.entity_id,a.action,a.actor_id,a.actor_name,a.created_at,a.detail_json FROM audit_logs a JOIN approval_requests r ON r.id=a.entity_id WHERE a.entity_type='approval' AND r.type='monthly_plan' AND (r.status IN ('pending','withdrawn','rejected') OR r.id IN (SELECT id FROM approval_requests ORDER BY created_at DESC LIMIT 100)) ORDER BY a.created_at,a.id");
       for(const entry of history){
         const detail=parseJson<AnyRow>(entry.detail_json,{}),events=approvalHistory.get(entry.entity_id)||[];
-        events.push({id:entry.id,action:entry.action,actorName:entry.actor_name,createdAt:entry.created_at,version:detail.version??null,comment:detail.comment||"",seriesCount:detail.seriesCount??null,skuCount:detail.skuCount??null,totalQty:detail.totalQty??null});
+        events.push({id:entry.id,action:entry.action,actorName:entry.actor_name,createdAt:entry.created_at,version:detail.version??null,comment:detail.comment||"",inventoryReview:detail.inventoryReview??null,seriesCount:detail.seriesCount??null,skuCount:detail.skuCount??null,totalQty:detail.totalQty??null});
         approvalHistory.set(entry.entity_id,events);
       }
       for(const events of approvalHistory.values())events.sort((a,b)=>a.version!==null&&b.version!==null?a.version-b.version:String(a.createdAt).localeCompare(String(b.createdAt)));
@@ -498,6 +498,7 @@ export async function POST(request:Request) {
     const actor = await requireActor(request);
     const payload = await body(request);
     const action = cleanText(payload.action, 40);
+    if(action === "checkPlanApproval") return await checkPlanApproval(actor,payload);
     await assertWritable(database());
     if (action === "bulkImport") return await bulkImport(actor,payload);
     if (action === "confirmSalesDay") return await confirmSalesDay(actor,payload);
@@ -930,6 +931,14 @@ async function withdrawPlan(actor:Actor,payload:AnyRow) {
   return Response.json({ok:true,status:"withdrawn",version:Number(approval.version)+1});
 }
 
+async function checkPlanApproval(actor:Actor,payload:AnyRow) {
+  requireBusinessPermission(actor,"approval.decide");
+  const approval=await database().prepare("SELECT * FROM approval_requests WHERE id=?").bind(cleanText(payload.approvalId,80)).first<AnyRow>();
+  if(!approval||approval.type!=="monthly_plan"||approval.status!=="pending"||Number(payload.version)!==Number(approval.version)) throw new HttpError(409,"计划版本或状态已变化，请刷新后重新检查");
+  const check=await checkPlanInventory(database(),parseJson<AnyRow>(approval.payload_json,{items:[]}).items);
+  return Response.json({ok:true,...check});
+}
+
 async function decideApproval(actor:Actor,payload:AnyRow) {
   requireBusinessPermission(actor,"approval.decide");
   const approvalId=cleanText(payload.approvalId,80), decision=cleanText(payload.decision,12), comment=cleanText(payload.comment,300);
@@ -943,10 +952,13 @@ async function decideApproval(actor:Actor,payload:AnyRow) {
     guardStatement(db,actor,"decideApproval","EXISTS (SELECT 1 FROM approval_requests WHERE id=? AND status='pending' AND version=?)",[approvalId,approval.version]),
     db.prepare("UPDATE approval_requests SET status=?,stage=?,decision_comment=?,approved_by=?,updated_at=?,version=version+1 WHERE id=?").bind(status,status,comment,actor.id,timestamp,approvalId),
   ];
+  let inventoryReview:AnyRow|null=null;
   if(decision==="approve"){
     const supplyId=await resolveSupplyUser(payload.supplyUserId,approval.creator_id);
     const plan=parseJson<AnyRow>(approval.payload_json,{items:[]});
-    statements.push(...planIntegrityGuards(db,actor,plan.items||[]));
+    inventoryReview=await checkPlanInventory(db,plan.items||[]);
+    confirmPlanInventory(inventoryReview,payload);
+    statements.push(...reviewedInventoryGuards(db,actor,inventoryReview));
     statements.push(db.prepare("UPDATE forecast_snapshots SET approved_qty=0,approval_id=? WHERE month=?").bind(approvalId,approval.month));
     for(const r of plan.items||[])for(const a of r.allocations||[])statements.push(db.prepare("UPDATE forecast_snapshots SET approved_qty=?,approval_id=? WHERE month=? AND sku=? AND site=? AND channel=?").bind(a.qty,approvalId,approval.month,r.sku,a.site,a.channel));
     const seriesOrders:Array<AnyRow>=Array.isArray(plan.seriesOrders)&&plan.seriesOrders.length?plan.seriesOrders:buildSeriesOrders(plan.items??[],await all("SELECT sku,product_series,supplier_name,factory_name FROM sku_settings"));
@@ -977,8 +989,11 @@ async function decideApproval(actor:Actor,payload:AnyRow) {
       }
     }
   }
-  statements.push(audit(actor,decision==="approve"?"批准计划并生成系列采购生产单":"驳回月度计划","approval",approvalId,planDecisionRecord(approval,status,comment)));
-  await atomicBatch(db,statements);
+  statements.push(audit(actor,decision==="approve"?"批准计划并生成系列采购生产单":"驳回月度计划","approval",approvalId,{...planDecisionRecord(approval,status,comment),inventoryReview:inventoryReview?{issues:inventoryReview.issues,acknowledged:payload.inventoryAcknowledged===true}:null}));
+  try { await atomicBatch(db,statements); } catch(error) {
+    if(error instanceof Error && (error as AnyRow).status===409) throw new HttpError(409,"审批期间计划或库存发生变化，本次批准/驳回未生效。请刷新计划并重新检查库存；若反复出现，请查看审计日志定位。");
+    throw error;
+  }
   return Response.json({ok:true,status});
 }
 
