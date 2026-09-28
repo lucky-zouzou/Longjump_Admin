@@ -240,7 +240,8 @@ function BrandWelcome({leaving,ready,onEnter}:{leaving:boolean;ready:boolean;onE
 function PageHead({title,desc,children}:{title:string;desc:string;children?:React.ReactNode}) {
   return <div className="page-head"><div><h3>{title}</h3><p>{desc}</p></div>{children}</div>;
 }
-function Panel({title,desc,children,action}:{title:string;desc?:string;children:React.ReactNode;action?:React.ReactNode}) {
+function Panel({title,desc,children,action,collapsible=false}:{title:string;desc?:string;children:React.ReactNode;action?:React.ReactNode;collapsible?:boolean}) {
+  if(collapsible)return <details className="panel disclosure-panel"><summary><span><strong>{title}</strong>{desc&&<small>{desc}</small>}</span><span className="disclosure-hint" aria-hidden="true">展开 / 收起</span></summary><div className="disclosure-body">{action}{children}</div></details>;
   return <section className="panel"><div className="panel-head"><div><h4>{title}</h4>{desc&&<p>{desc}</p>}</div>{action}</div>{children}</section>;
 }
 function Pill({children,tone="blue"}:{children:React.ReactNode;tone?:string}) { return <span className={`pill ${tone}`}>{children}</span>; }
@@ -351,6 +352,9 @@ function Suggestions({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
       <div className="metric"><div className="label">生产中</div><div className="value">{fmt(m.productionInProgressQty)}</div><div className="foot">尚未进入海运的批次</div></div>
       <div className="metric"><div className="label">建议启动生产</div><div className="value" style={{color:m.suggestedProductionQty?"var(--amber)":undefined}}>{fmt(m.suggestedProductionQty)}</div><div className="foot">动态缺口合计</div></div>
     </div>
+    {actor.role==="运营" && <Panel title="提交本月备货需求" desc="系统建议可调整；调整原因与最终提交量一并存档">
+      <MonthlyDemandEditor key={`${actor.id}|${data.currentMonth}|${actor.site}|${actor.channel}`} actor={actor} month={data.currentMonth} submissions={data.submissions} suggestions={data.suggestions} skuSettings={data.skuSettings} act={act} busy={busy}/>
+    </Panel>}
     <Panel title="供应覆盖图" desc="横向比较最需关注的站点SKU；竖线为目标库存位">
       <div className="coverage-legend"><span><i className="stock"/>当前库存</span><span><i className="sea"/>海运在途</span><span><i className="production"/>生产中</span><span><i className="target"/>目标库存位</span></div>
       <SupplyCoverage rows={data.suggestions}/>
@@ -362,10 +366,7 @@ function Suggestions({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
       <div className="table-wrap"><table className="supply-table"><thead><tr><th>状态</th><th>站点/渠道</th><th>SKU</th><th className="num">7日日均</th><th className="num">趋势</th><th className="num">库存/可售天数</th><th className="num">海运/ETA</th><th className="num">生产中</th><th className="num">建议海运补货</th><th className="num">建议启动生产</th></tr></thead>
       <tbody>{data.suggestions.length===0?<tr><td colSpan={10}><Empty>请先录入库存和销售数据，系统将自动形成动态建议</Empty></td></tr>:data.suggestions.map((r)=><tr key={supplyKey(r)}><td><Pill tone={ALERT_TONE[r.alertLevel]||"blue"}>{r.alertLabel}</Pill><div className="cell-note">{r.alertReason}</div></td><td>{r.site}<br/><span className="cell-note">{r.channel}</span></td><td><strong>{r.sku}</strong><br/><span className="cell-note">{r.name||"—"}</span></td><td className="num">{Number(r.avg7).toFixed(1)}</td><td className="num" style={{color:r.trendRate>=.2?"var(--blue)":r.trendRate<0?"var(--green)":undefined}}>{r.previous7>0?`${r.trendRate>=0?"+":""}${pct(r.trendRate)}`:"—"}</td><td className="num" style={{color:r.qty<0?"var(--red)":undefined}}>{fmt(r.qty)}<div className="cell-note">{days(r.stockCoverDays)}</div></td><td className="num">{fmt(r.seaInTransit)}<div className="cell-note">{r.nextSeaEta||"未填写ETA"}</div></td><td className="num">{fmt(r.productionInProgress)}</td><td className="num">{fmt(r.suggestedReplenishment)}</td><td className="num"><strong>{fmt(r.suggestedProduction)}</strong><div className="cell-note">目标 {fmt(r.targetQty)}</div></td></tr>)}</tbody></table></div>
     </Panel>
-    {actor.role==="运营" && <Panel title="提交本月备货需求" desc="系统建议可调整；调整原因与最终提交量一并存档">
-      <MonthlyDemandEditor key={`${actor.id}|${data.currentMonth}|${actor.site}|${actor.channel}`} actor={actor} month={data.currentMonth} submissions={data.submissions} suggestions={data.suggestions} skuSettings={data.skuSettings} act={act} busy={busy}/>
-    </Panel>}
-    {hasPermission(actor.role,"sku.manage")&&<Panel title="SKU系列与供应参数" desc="产品系列是供应链合并下单、工厂合并生产的必要依据">
+    {hasPermission(actor.role,"sku.manage")&&<Panel collapsible title="SKU系列与供应参数" desc="产品系列是供应链合并下单、工厂合并生产的必要依据">
       {data.skuSettings.some(row=>!row.product_series||row.product_series==="待归类")&&<div className="notice warn">还有 <strong>{data.skuSettings.filter(row=>!row.product_series||row.product_series==="待归类").length}</strong> 个SKU未归入产品系列。涉及这些SKU的月度计划会暂停进入审批。</div>}
       <div className="form-grid">
         <Field label="选择已有SKU"><select value={data.skuSettings.some(row=>row.sku===setting.sku)?setting.sku:""} onChange={event=>chooseSetting(event.target.value)}><option value="">选择后自动带出参数</option>{data.skuSettings.map(row=><option key={row.sku} value={row.sku}>{row.sku} · {row.product_series||"待归类"}</option>)}</select></Field>
@@ -387,7 +388,7 @@ function Suggestions({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
       </div>
       <div className="form-actions"><button className="btn primary" disabled={busy||!setting.sku||!setting.productSeries||!setting.supplierName||!setting.factoryName} onClick={()=>act("saveSkuSetting",{...setting,unitPrice:Number(setting.unitPrice),productionLeadDays:Number(setting.productionLeadDays),seaLeadDays:Number(setting.seaLeadDays),reviewCycleDays:Number(setting.reviewCycleDays),serviceLevel:Number(setting.serviceLevel),minOrderQty:Number(setting.minOrderQty),orderMultiple:Number(setting.orderMultiple),cartonQty:Number(setting.cartonQty),unitVolumeCbm:Number(setting.unitVolumeCbm)},"SKU系列与供应参数已保存")}>保存参数</button></div>
     </Panel>}
-    <ForecastSettings data={data} act={act} busy={busy}/>
+    {["管理员","供应链","运营","运营主管"].includes(actor.role)&&<Panel collapsible title="供应参数与预测复盘" desc="按SKU维护交期、需求修正与复盘结果"><ForecastSettings data={data} act={act} busy={busy}/></Panel>}
   </>;
 }
 
@@ -442,7 +443,7 @@ function NewProducts({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
       <Pill tone={thisMonthCount?"green":"red"}>{thisMonthCount?`本月已发起 ${thisMonthCount} 款`:"本月待发起"}</Pill>
     </PageHead>
     <div className="notice info"><strong>固定节奏：</strong>7号发起 → 选款3天 → 调研3天与种草7天并行 → 财务2天 → 打板10天 → 首批生产30天＋交付确认。种草差或毛利不达标时必须提前止损。</div>
-    {actor.role==="管理员"&&<Panel title="发起本月新品测试" desc="同一SKU每月只能发起一次；首批计划默认3000件，可按实际调整">
+    {actor.role==="管理员"&&<Panel collapsible title="发起本月新品测试" desc="同一SKU每月只能发起一次；首批计划默认3000件，可按实际调整">
       <div className="form-grid">
         <Field label="测试月份"><input type="month" value={start.cycleMonth} disabled/></Field>
         <Field label="新品SKU"><input value={start.sku} onChange={event=>setStart({...start,sku:event.target.value})}/></Field>
@@ -586,7 +587,7 @@ function SalesImport({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
     <PageHead title={canImport?"每日销售数据导入":"销售数据监控"} desc={canImport?`${actor.site} · ${actor.channel}｜由当前站点运营每日批量导入，系统自动扣减库存并更新补货建议`:"销售数据仅由各站点运营每日导入；可在此查看销售和投产比，并按岗位权限维护错误批次"}>
       <Pill tone={updated===data.salesScopeStatus.length?"green":"red"}>昨日报完整 {updated}/{data.salesScopeStatus.length}</Pill>
     </PageHead>
-    <SalesDashboard actor={actor} refreshToken={data}/>
+    {!canImport&&<SalesDashboard actor={actor} refreshToken={data}/>}
     <Panel title="每日销售更新状态" desc="完整日报或零销售确认后才完成；部分销售和费用补录仍显示待核对">
       <div className="sales-scope-grid">{data.salesScopeStatus.map(row=><div className={classNames("sales-scope-card",row.updatedExpected?"updated":"pending")} key={`${row.site}-${row.channel}`}><div><strong>{row.site}</strong><span>{row.channel}</span></div><Pill tone={row.updatedExpected?"green":"red"}>{row.updatedExpected?"日报已完整":row.importedExpected?"已导入 · 待核对":"昨日待导入"}</Pill><b>{row.expectedDate} · {fmt(row.salesExpected)}件</b><small>7天 {fmt(row.sales7Qty)}件｜最近 {row.lastSaleDate||"无记录"}</small></div>)}</div>
     </Panel>
@@ -609,7 +610,7 @@ function SalesImport({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
       <label className="report-toggle"><input type="checkbox" checked={dayConfirmed} onChange={e=>setDayConfirmed(e.target.checked)}/>我已核对该日全部销售；无销售时确认该日为零销售</label>
       <div className="form-actions"><button className="btn primary" disabled={busy||!dayConfirmed||dayNote.trim().length<4} onClick={async()=>{if(await act("confirmSalesDay",{...form,confirmed:dayConfirmed,note:dayNote},"该日销售完整度已确认")){setDayConfirmed(false);setDayNote("");}}}>确认该日销售完整</button></div>
     </Panel>
-    <Panel title="单条销售录入" desc="与批量导入一致：销售记录、库存余额和库存流水同时写入">
+    <Panel collapsible title="单条销售录入" desc="与批量导入一致：销售记录、库存余额和库存流水同时写入">
       <div className="form-grid">
         <Field label="SKU"><input value={manual.sku} onChange={e=>setManual({...manual,sku:e.target.value})}/></Field>
         <Field label="商品名称"><input value={manual.name} onChange={e=>setManual({...manual,name:e.target.value})}/></Field>
@@ -625,6 +626,7 @@ function SalesImport({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
     </>}
     <SalesAdSpend data={data} act={act} busy={busy}/>
     <SalesImportHistory data={data} act={act} busy={busy}/>
+    {canImport&&<Panel collapsible title="销售经营看板" desc="展开查看趋势、SKU排名和投产比；日常导入优先展示"><SalesDashboard actor={actor} refreshToken={data}/></Panel>}
 
   </>;
 }
@@ -638,7 +640,7 @@ function Inventory({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
   const canSubmit=hasPermission(actor.role,"inventory.count.submit")||hasPermission(actor.role,"inventory.adjust");
   return <>
     <PageHead title="库存余额与流水" desc="预留是可售账面中的锁定部分；可用等于账面可售减预留；运营盘点差异须经供应链复核"/>
-    {canSubmit&&<Panel title={actor.role==="管理员"?"批量导入期初库存 / 盘点修正":"批量导入盘点实数"} desc={actor.role==="管理员"?"按站点、渠道、SKU设置实盘数，直接修正可售库存；同一文件仅可成功导入一次":"只提交当前账号站点渠道的盘点差异，供应链复核后生效"}>
+    {canSubmit&&<Panel collapsible title={actor.role==="管理员"?"批量导入期初库存 / 盘点修正":"批量导入盘点实数"} desc={actor.role==="管理员"?"按站点、渠道、SKU设置实盘数，直接修正可售库存；同一文件仅可成功导入一次":"只提交当前账号站点渠道的盘点差异，供应链复核后生效"}>
       <TableImport kind="inventory" busy={busy} defaults={{site:actor.site||"",channel:actor.channel||""}} contextKey={actor.id} templateRows={data.inventory.map(r=>({site:r.site,channel:r.channel,sku:r.sku,name:r.name,countedQty:"",reason:""}))} confirmLabel={actor.role==="管理员"?"确认批量修正库存":"确认批量提交复核"} description="盘点实数是目标可售库存，不是新增数量；0代表清零。请填写调整原因，预留、待上架和隔离数量保持原业务口径。每次最多200行，整批成功或整批撤销。" onApply={async(rows,meta)=>{
         const result=await act("bulkImport",{kind:"inventory",rows,...meta},actor.role==="管理员"?"库存文件已导入":"盘点文件已提交复核");
         if(result)window.alert(`已处理 ${result.imported} 条，${result.skipped} 条与系统数量一致，无需调整。`);
@@ -853,7 +855,7 @@ function Batches({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
     </div>
     <TransportControl data={data} act={act} busy={busy}/>
     <div className="batch-toolbar"><div className="segmented"><button className={filter==="all"?"active":""} onClick={()=>setFilter("all")}>全部</button><button className={filter==="exceptions"?"active":""} onClick={()=>setFilter("exceptions")}>异常优先</button><button className={filter==="active"?"active":""} onClick={()=>setFilter("active")}>进行中</button><button className={filter==="completed"?"active":""} onClick={()=>setFilter("completed")}>已上架</button></div><input aria-label="搜索批次或SKU" value={query} onChange={event=>setQuery(event.target.value)} placeholder="搜索批次号、系列或SKU"/></div>
-    <Panel title="历史单系列海运批次" desc="旧版本记录继续保留并可完成原流程；新发货请使用上方跨系列运输主批次">
+    <Panel collapsible title="历史单系列海运批次" desc="旧版本记录继续保留并可完成原流程；新发货请使用上方跨系列运输主批次">
       {visible.length===0?<Empty>{data.shipmentBatches.length?"没有符合筛选条件的批次":"系列生产完工后，由供应链创建第一个多SKU海运批次"}</Empty>:<div className="batch-card-list">{visible.map(batch=><article className={classNames("batch-card","shipment-card",batch.exceptions.some((row:Row)=>row.level==="red")&&"stalled",batch.exceptions.length>0&&"has-warning")} key={batch.id}>
         <header><div><span>{batch.batch_no}</span><h4>{batch.series_name}</h4><p>{fmt(batch.visibleSkuCount)} 个SKU｜{fmt(batch.visibleShippedQty)} 件｜{fmt(batch.destinationCount)} 个目的站点渠道</p></div><div><Pill tone={batch.stage==="on_shelf"?"green":batch.exceptions.some((row:Row)=>row.level==="red")?"red":batch.exceptions.length?"amber":"blue"}>{BATCH_LABEL[batch.stage]||batch.stage}</Pill>{batch.exceptions.length>0&&<small>{batch.exceptions.length} 项异常</small>}</div></header>
         <div className="batch-facts"><span>当前负责人<strong>{batch.stage_owner}</strong></span><span>预计到仓<strong>{batch.estimated_arrival_date||"待填写"}</strong></span><span>到仓进度<strong>{fmt(batch.visibleReceivedQty)} / {fmt(batch.visibleShippedQty)}</strong></span><span>上架进度<strong>{fmt(batch.visibleShelvedQty)} / {fmt(batch.visibleShippedQty)}</strong></span></div>
@@ -867,7 +869,7 @@ function Batches({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
         </div>}
       </article>)}</div>}
     </Panel>
-    {data.batches.length>0&&<Panel title="历史单SKU批次" desc="旧版本产生的批次继续保留并可完成原流程；新计划不再生成此类记录">
+    {data.batches.length>0&&<Panel collapsible title="历史单SKU批次" desc="旧版本产生的批次继续保留并可完成原流程；新计划不再生成此类记录">
       <div className="table-wrap"><table><thead><tr><th>批次</th><th>SKU</th><th className="num">数量</th><th>节点</th><th>负责人</th><th>更新时间</th><th></th></tr></thead><tbody>{data.batches.map(batch=><tr key={batch.id}><td>{batch.id}</td><td>{batch.sku} · {batch.name}</td><td className="num">{fmt(batch.qty)}</td><td><Pill tone={batch.stalled?"red":"blue"}>{BATCH_LABEL[batch.stage]||batch.stage}</Pill></td><td>{batch.stage_owner}</td><td>{readableDate(batch.updated_at)}</td><td><div style={{display:"flex",gap:5,flexWrap:"wrap"}}>{["supply_confirm","factory_production","channel_allocation","sea_freight","port_arrived","last_mile_delivery"].includes(batch.stage)&&<button className="btn" disabled={busy||!(data.actor.role===batch.stage_owner||data.actor.role==="管理员")} onClick={()=>advanceLegacy(batch)}>继续原流程</button>}{batch.stage==="shelf_pending"&&batch.allocations.filter((allocation:Row)=>canConfirm(allocation)&&!legacyConfirmed(batch,allocation)).map((allocation:Row)=><button className="btn" key={`${allocation.site}-${allocation.channel}`} disabled={busy} onClick={()=>confirmLegacy(batch,allocation)}>{allocation.site}上架</button>)}</div></td></tr>)}</tbody></table></div>
     </Panel>}
   </>;
@@ -890,11 +892,11 @@ function MasterData({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}){
   const saveWarehouse=async()=>{const result=await act("saveWarehouse",{...warehouse,capacityQty:Number(warehouse.capacityQty)},"仓库主数据已保存");if(result)setWarehouse({...warehouse,code:"",name:""});};
   return <>
     <PageHead title="供应链主数据" desc="先绑定供应商、工厂账号、承运商账号和目的仓，再允许生成采购、生产与发运单"/>
-    <div className="grid-2">
-      <Panel title="新增合作方" desc="工厂和承运商必须绑定具体责任账号">
+    <div className="grid-2 master-create-grid">
+      <Panel collapsible title="新增合作方" desc="工厂和承运商必须绑定具体责任账号">
         <div className="form-grid"><Field label="类型"><select value={partner.type} onChange={e=>setPartner({...partner,type:e.target.value,assignedUserId:""})}><option value="supplier">供应商</option><option value="factory">工厂</option><option value="carrier">承运商</option></select></Field><Field label="编码"><input value={partner.code} onChange={e=>setPartner({...partner,code:e.target.value})}/></Field><Field label="名称"><input value={partner.name} onChange={e=>setPartner({...partner,name:e.target.value})}/></Field><Field label="默认交期（天）"><input type="number" min="0" value={partner.defaultLeadDays} onChange={e=>setPartner({...partner,defaultLeadDays:e.target.value})}/></Field><Field label="联系方式" span={2}><input value={partner.contact} onChange={e=>setPartner({...partner,contact:e.target.value})}/></Field><Field label={`绑定${partnerRole}账号`} span={2}><select value={partner.assignedUserId} onChange={e=>setPartner({...partner,assignedUserId:e.target.value})}><option value="">{partner.type==="supplier"?"可不绑定":"请选择负责人"}</option>{data.users.filter(user=>user.role===partnerRole&&Number(user.active)).map(user=><option value={user.id} key={user.id}>{user.name} · {user.email}</option>)}</select></Field></div><div className="form-actions"><button className="btn primary" disabled={busy||!partner.code||!partner.name||(partner.type!=="supplier"&&!partner.assignedUserId)} onClick={savePartner}>保存合作方</button></div>
       </Panel>
-      <Panel title="新增目的仓" desc="运输按目的仓拆分独立状态，并监控容量">
+      <Panel collapsible title="新增目的仓" desc="运输按目的仓拆分独立状态，并监控容量">
         <div className="form-grid"><Field label="站点"><select value={warehouse.site} onChange={e=>setWarehouse({...warehouse,site:e.target.value})}>{SITES.map(site=><option key={site}>{site}</option>)}</select></Field><Field label="渠道"><select value={warehouse.channel} onChange={e=>setWarehouse({...warehouse,channel:e.target.value})}>{CHANNELS.map(channel=><option key={channel}>{channel}</option>)}</select></Field><Field label="仓库编码"><input value={warehouse.code} onChange={e=>setWarehouse({...warehouse,code:e.target.value})}/></Field><Field label="仓库名称"><input value={warehouse.name} onChange={e=>setWarehouse({...warehouse,name:e.target.value})}/></Field><Field label="容量（件，0为不限）"><input type="number" min="0" value={warehouse.capacityQty} onChange={e=>setWarehouse({...warehouse,capacityQty:e.target.value})}/></Field></div><div className="form-actions"><button className="btn primary" disabled={busy||!warehouse.code||!warehouse.name} onClick={saveWarehouse}>保存目的仓</button></div>
       </Panel>
     </div>
