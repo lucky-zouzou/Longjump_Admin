@@ -79,6 +79,7 @@ async function parseResponse(response:Response) {
 
 export default function ControlTower({ identity }: { identity:Identity }) {
   const wholesaleLocale=useWholesalePreference(identity.userId);
+  const [inventoryScope,setInventoryScope]=useState<Row|null>(null);
   const [selectedTab,setTab] = useState("overview");
   const [data,setData] = useState<Snapshot|null>(null);
   const [loading,setLoading] = useState(true);
@@ -200,10 +201,10 @@ export default function ControlTower({ identity }: { identity:Identity }) {
         {tab==="suggestions" && <Suggestions data={data} act={act} busy={busy}/>}
         {tab==="new-products" && <NewProducts data={data} act={act} busy={busy}/>}
         {tab==="sales" && <SalesImport data={data} act={act} busy={busy}/>}
-        {tab==="inventory" && <Inventory data={data} act={act} busy={busy}/>}
+        {tab==="inventory" && <Inventory data={data} act={act} busy={busy} scope={inventoryScope} clearScope={()=>setInventoryScope(null)}/>}
         {tab==="receipt" && <Receipt data={data} act={act} busy={busy}/>}
         {tab==="monthly" && <Monthly data={data} act={act} busy={busy}/>}
-        {tab==="approval" && <Approvals data={data} act={act} busy={busy} goWholesale={()=>setTab("wholesale")}/>}
+        {tab==="approval" && <Approvals data={data} act={act} busy={busy} goInventory={scope=>{setInventoryScope(scope);setTab("inventory");}} goWholesale={()=>setTab("wholesale")}/>}
         {tab==="fulfillment" && <Fulfillment data={data} act={act} busy={busy}/>}
         {tab==="batches" && <Batches data={data} act={act} busy={busy}/>}
         {tab==="master" && <MasterData data={data} act={act} busy={busy}/>}
@@ -631,8 +632,9 @@ function SalesImport({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
   </>;
 }
 
-function Inventory({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
+function Inventory({data,act,busy,scope,clearScope}:{data:Snapshot;act:Act;busy:boolean;scope:Row|null;clearScope:()=>void}) {
   const actor=data.actor;
+  const visibleInventory=scope?data.inventory.filter(r=>r.sku===scope.sku&&r.site===scope.site&&r.channel===scope.channel):data.inventory;
   const [adjust,setAdjust]=useState({site:actor.site||SITES[0],channel:actor.channel||"TikTok",sku:"",countedQty:"",reason:""});
   const select=(r:Row)=>setAdjust({site:r.site,channel:r.channel,sku:r.sku,countedQty:String(Math.max(0,Number(r.qty))),reason:""});
   const submitCount=()=>act(actor.role==="管理员"?"inventoryAdjust":"submitInventoryCount",{...adjust,countedQty:Number(adjust.countedQty)},actor.role==="管理员"?"管理员库存修正已写入审计流水":"盘点差异已提交供应链复核");
@@ -640,15 +642,16 @@ function Inventory({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
   const canSubmit=hasPermission(actor.role,"inventory.count.submit")||hasPermission(actor.role,"inventory.adjust");
   return <>
     <PageHead title="库存余额与流水" desc="预留是可售账面中的锁定部分；可用等于账面可售减预留；运营盘点差异须经供应链复核"/>
+    {scope&&<div className="notice info">当前定位：{scope.site} · {scope.channel} · {scope.sku} <button className="btn" onClick={clearScope}>显示全部库存</button></div>}
     {canSubmit&&<Panel collapsible title={actor.role==="管理员"?"批量导入期初库存 / 盘点修正":"批量导入盘点实数"} desc={actor.role==="管理员"?"按站点、渠道、SKU设置实盘数，直接修正可售库存；同一文件仅可成功导入一次":"只提交当前账号站点渠道的盘点差异，供应链复核后生效"}>
-      <TableImport kind="inventory" busy={busy} defaults={{site:actor.site||"",channel:actor.channel||""}} contextKey={actor.id} templateRows={data.inventory.map(r=>({site:r.site,channel:r.channel,sku:r.sku,name:r.name,countedQty:"",reason:""}))} confirmLabel={actor.role==="管理员"?"确认批量修正库存":"确认批量提交复核"} description="盘点实数是目标可售库存，不是新增数量；0代表清零。请填写调整原因，预留、待上架和隔离数量保持原业务口径。每次最多200行，整批成功或整批撤销。" onApply={async(rows,meta)=>{
+      <TableImport kind="inventory" busy={busy} defaults={{site:actor.site||"",channel:actor.channel||""}} contextKey={actor.id} templateRows={visibleInventory.map(r=>({site:r.site,channel:r.channel,sku:r.sku,name:r.name,countedQty:"",reason:""}))} confirmLabel={actor.role==="管理员"?"确认批量修正库存":"确认批量提交复核"} description="盘点实数是目标可售库存，不是新增数量；0代表清零。请填写调整原因，预留、待上架和隔离数量保持原业务口径。每次最多200行，整批成功或整批撤销。" onApply={async(rows,meta)=>{
         const result=await act("bulkImport",{kind:"inventory",rows,...meta},actor.role==="管理员"?"库存文件已导入":"盘点文件已提交复核");
         if(result)window.alert(`已处理 ${result.imported} 条，${result.skipped} 条与系统数量一致，无需调整。`);
         return Boolean(result);
       }}/>
     </Panel>}
     <Panel title="库存余额" desc="运输到仓先进入待上架或隔离；退货经质检放行后恢复原渠道可售库存">
-      <div className="table-wrap"><table><thead><tr><th>站点</th><th>渠道</th><th>SKU</th><th>商品</th><th className="num">账面可售 / 可用</th><th className="num">待上架</th><th className="num">已预留</th><th className="num">隔离</th><th>更新时间</th><th></th></tr></thead><tbody>{data.inventory.length===0?<tr><td colSpan={10}><Empty>暂无库存，请通过到仓单或管理员建立期初库存</Empty></td></tr>:data.inventory.map(r=><tr key={`${r.site}-${r.channel}-${r.sku}`}><td>{r.site}</td><td>{r.channel}</td><td><strong>{r.sku}</strong></td><td>{r.name||"—"}</td><td className="num"><strong>{fmt(r.qty)} / {fmt(Number(r.qty)-Number(r.reserved_qty||0))}</strong></td><td className="num">{fmt(r.pending_shelf_qty)}</td><td className="num">{fmt(r.reserved_qty)}</td><td className="num" style={{color:r.quarantine_qty>0?"var(--amber)":undefined}}>{fmt(r.quarantine_qty)}</td><td>{readableDate(r.updated_at)}</td><td><div style={{display:"flex",gap:5,flexWrap:"wrap"}}>{canSubmit&&<button className="btn" onClick={()=>select(r)}>盘点</button>}{r.quarantine_qty>0&&hasPermission(actor.role,"inventory.hold.resolve")&&<><button className="btn" onClick={()=>resolve(r,"release")}>质检放行</button><button className="btn danger" onClick={()=>resolve(r,"writeoff")}>报损</button></>}</div></td></tr>)}</tbody></table></div>
+      <div className="table-wrap"><table><thead><tr><th>站点</th><th>渠道</th><th>SKU</th><th>商品</th><th className="num">账面可售 / 可用</th><th className="num">待上架</th><th className="num">已预留</th><th className="num">隔离</th><th>更新时间</th><th></th></tr></thead><tbody>{visibleInventory.length===0?<tr><td colSpan={10}><Empty>暂无库存，请通过到仓单或管理员建立期初库存</Empty></td></tr>:visibleInventory.map(r=><tr key={`${r.site}-${r.channel}-${r.sku}`}><td>{r.site}</td><td>{r.channel}</td><td><strong>{r.sku}</strong></td><td>{r.name||"—"}</td><td className="num"><strong>{fmt(r.qty)} / {fmt(Number(r.qty)-Number(r.reserved_qty||0))}</strong></td><td className="num">{fmt(r.pending_shelf_qty)}</td><td className="num">{fmt(r.reserved_qty)}</td><td className="num" style={{color:r.quarantine_qty>0?"var(--amber)":undefined}}>{fmt(r.quarantine_qty)}</td><td>{readableDate(r.updated_at)}</td><td><div style={{display:"flex",gap:5,flexWrap:"wrap"}}>{canSubmit&&<button className="btn" onClick={()=>select(r)}>盘点</button>}{r.quarantine_qty>0&&hasPermission(actor.role,"inventory.hold.resolve")&&<><button className="btn" onClick={()=>resolve(r,"release")}>质检放行</button><button className="btn danger" onClick={()=>resolve(r,"writeoff")}>报损</button></>}</div></td></tr>)}</tbody></table></div>
     </Panel>
     {canSubmit&&<Panel title={actor.role==="管理员"?"管理员库存修正":"提交盘点差异"} desc={actor.role==="管理员"?"用于期初库存或经过核实的例外修正；全程记录审计":"运营只提交实盘数，供应链复核通过后才改变可售库存"}>
       <div className="form-grid">
@@ -728,11 +731,11 @@ function Monthly({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
   </>;
 }
 
-function Approvals({data,act,busy,goWholesale}:{data:Snapshot;act:Act;busy:boolean;goWholesale:()=>void}) {
+function Approvals({data,act,busy,goWholesale,goInventory}:{data:Snapshot;act:Act;busy:boolean;goWholesale:()=>void;goInventory:(scope:Row)=>void}) {
   return <>
     <PageHead title="审批中心" desc="供应链送审，管理员独立审批；撤回、驳回和重新送审全程留痕"/>
     {hasPermission(data.actor.role,"wholesale.approve")&&<div className="notice info">印尼线下出库待审批 {data.myTasks.filter(t=>t.title==="审批线下出库").length} 笔。<button className="btn" onClick={goWholesale}>前往线下批发审批</button></div>}
-    <MonthlyApprovals data={data} act={act} busy={busy}/>
+    <MonthlyApprovals data={data} act={act} busy={busy} goInventory={goInventory}/>
   </>;
 }
 
