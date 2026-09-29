@@ -1,3 +1,4 @@
+import {reviewTasks} from "../../../lib/business-reviews.mjs";
 import {saveSalesAdSpend} from "../../../lib/sales-ad-spend.mjs";
 import {publicSystemSnapshot} from "../../../lib/system-response.mjs";
 import {normalizeSales,SITE_CURRENCIES} from "../../../lib/sales-data.mjs";
@@ -117,7 +118,7 @@ export async function GET(request:Request) {
       requireBusinessPermission(actor,"backup.export");
       return Response.redirect(new URL("/api/backup",request.url),307);
     }
-    if(actor.role==="销售") return Response.json({actor,currentMonth:monthKey(),metrics:{},myTasks:await wholesaleTasks(database(),actor),...Object.fromEntries(["inventory", "movements", "sales", "imports", "receipts", "submissions", "approvals", "batches", "skuSettings", "audit", "users", "suggestions", "monthlyStatus", "issues", "newProductProjects", "salesScopeStatus", "salesTopSkus", "purchaseOrders", "productionOrders", "shipmentBatches", "shipmentReceipts", "transportBatches", "transportReceipts", "businessPartners", "warehouses", "countRequests"].map(key=>[key,[]]))});
+    if(actor.role==="销售") return Response.json({actor,currentMonth:monthKey(),metrics:{},myTasks:[...await wholesaleTasks(database(),actor),...await reviewTasks(database(),actor)],...Object.fromEntries(["inventory", "movements", "sales", "imports", "receipts", "submissions", "approvals", "batches", "skuSettings", "audit", "users", "suggestions", "monthlyStatus", "issues", "newProductProjects", "salesScopeStatus", "salesTopSkus", "purchaseOrders", "productionOrders", "shipmentBatches", "shipmentReceipts", "transportBatches", "transportReceipts", "businessPartners", "warehouses", "countRequests"].map(key=>[key,[]]))});
     const requestedImport=requestUrl.searchParams.get("salesImportId");
     if(requestedImport){
       requireBusinessPermission(actor,"sales.correct");
@@ -423,7 +424,7 @@ export async function GET(request:Request) {
       if(used>Number(warehouse.capacity_qty)) warehouseCapacityIssues.push({level:"eta",type:"仓库容量超限",detail:`${warehouse.name}：当前${used}件，容量${warehouse.capacity_qty}件`});
     }
     supplyIssues.unshift(...warehouseCapacityIssues);
-    const myTasks:AnyRow[]=await wholesaleTasks(database(),actor);
+    const myTasks:AnyRow[]=[...await wholesaleTasks(database(),actor),...await reviewTasks(database(),actor)];
     if(actor.role==="运营"){
       const ownStatus=salesScopeStatus[0];
       if(ownStatus&&!ownStatus.updatedExpected) myTasks.push({level:"red",title:"导入昨日销售",detail:`${actor.site} · ${actor.channel} ${expectedDate} ${ownStatus.importedExpected?"已导入，待确认完整":"尚未更新"}`,tab:"sales"});
