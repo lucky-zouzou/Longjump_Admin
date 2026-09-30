@@ -1,4 +1,5 @@
 "use client";
+import BusinessReviews from "./business-reviews";
 import SalesAdSpend from "./sales-ad-spend";
 import SalesDashboard from "./sales-dashboard";
 import InventoryCountReview,{type CountRequest} from "./inventory-count-review";
@@ -54,7 +55,7 @@ type AllocationDraft = { site:string; channel:string; qty:string };
 type Act = (action:string,payload:Row,success:string,onError?:(message:string)=>void)=>Promise<Row|null>;
 
 const navItems = [
-  ["overview","总览","◫"], ["users","用户管理","♙"], ["wholesale","印尼线下批发","▣"], ["suggestions","补货驾驶舱","◎"], ["new-products","新品孵化","◇"], ["sales","销售数据","↗"], ["inventory","库存流水","▦"],
+  ["overview","总览","◫"], ["reviews","周报与月度复盘","▤"], ["users","用户管理","♙"], ["wholesale","印尼线下批发","▣"], ["suggestions","补货驾驶舱","◎"], ["new-products","新品孵化","◇"], ["sales","销售数据","↗"], ["inventory","库存流水","▦"],
   ["receipt","历史到仓","↓"], ["monthly","月度计划","▤"], ["approval","审批中心","✓"], ["fulfillment","系列采购生产","▥"], ["batches","海运批次","⇢"],
   ["master","主数据","⌘"], ["audit","审计日志","◷"], ["permissions","权限测试","⊙"],
 ];
@@ -197,6 +198,7 @@ export default function ControlTower({ identity }: { identity:Identity }) {
       <div className="content">
         {actor.role==="运营" && (!actor.site || !actor.channel) && <div className="notice warn">当前账号尚未绑定站点和渠道，请联系管理员在“用户管理”中完成分配后再录入业务数据。</div>}
         {tab==="wholesale" && <WholesaleLanguageContext.Provider value={wholesaleLocale}><Wholesale onChanged={refresh}/></WholesaleLanguageContext.Provider>}
+        {tab==="reviews" && <BusinessReviews/>}
         {tab==="overview" && <Overview data={data} go={setTab}/>}
         {tab==="suggestions" && <Suggestions data={data} act={act} busy={busy}/>}
         {tab==="new-products" && <NewProducts data={data} act={act} busy={busy}/>}
