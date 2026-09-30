@@ -4,3 +4,17 @@ test('全量备份恢复数据库及凭证原文件，验证哈希并拒绝破�
 test('备份期间数据库写入受锁保护，取消下载后释放锁',async()=>{const f=fixture(),stream=await backupStream(f.db,{get:async()=>null},f.users.admin,releaseMigrations);assert.throws(()=>f.sqlite.prepare("UPDATE inventory_balances SET qty=qty+1").run(),/maintenance/);await stream.cancel();assert.equal(f.sqlite.prepare("SELECT mode FROM system_maintenance WHERE id='global'").get().mode,'normal');});
 
 test('外勤照片和合同附件随全量备份恢复，维护锁同时保护新表',async()=>{const root=mkdtempSync(join(tmpdir(),'lj-field-backup-'));try{const f=fixture(),bucket=fileBucket(join(root,'files')),bytes=new Uint8Array([1,2,3]),now=new Date().toISOString();f.sqlite.prepare('INSERT INTO field_records(id,kind,sales_user_id,business_date,end_date,data_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)').run('field-backup','visit',f.users.sales.id,'2026-09-01','2026-09-01','{}',now,now);f.sqlite.prepare('INSERT INTO field_files(id,record_id,object_key,name,content_type,size,sha256,actor_id,created_at) VALUES(?,?,?,?,?,?,?,?,?)').run('ff-backup','field-backup','field/proof','shop.png','image/png',3,'test',f.users.sales.id,now);await bucket.put('field/proof',bytes);const stream=await backupStream(f.db,bucket,f.users.admin,releaseMigrations);assert.throws(()=>f.sqlite.prepare("UPDATE field_records SET status='valid'").run(),/maintenance/);await stream.cancel();const path=join(root,'backup.tar');await createBackup({DB:f.db,WHOLESALE_FILES:bucket},path);assert.equal((await verifyArchive(path)).files.length,1);const target=join(root,'restore');await restoreBackup(path,target);const db=openDatabase(join(target,'business.sqlite'));assert.equal(db.sqlite.prepare('SELECT COUNT(*) n FROM field_records').get().n,1);db.sqlite.close();const object=await fileBucket(join(target,'files')).get('field/proof');assert.deepEqual(new Uint8Array(await new Response(object.body).arrayBuffer()),bytes);}finally{rmSync(root,{recursive:true,force:true})}});
+
+
+test('售后证据与台账随备份恢复，新表受维护锁保护',async()=>{
+ const {mutateAfterSales}=await import('../lib/after-sales.mjs');const {uploadAfterEvidence}=await import('../lib/after-sales-files.mjs');
+ const root=mkdtempSync(join(tmpdir(),'lj-after-backup-'));try{
+  const f=fixture(),bucket=fileBucket(join(root,'files'));
+  const {id}=await mutateAfterSales(f.db,f.users.indonesia,{action:'create',businessDate:'2026-09-01',caseNo:'BACKUP-AFTER',orderNo:'ORDER',sku:'BAG-A',qty:1,reason:'商品质量问题',description:'拉链损坏申请售后',refundAmount:10});
+  const bytes=new Uint8Array([255,216,255,1]);await uploadAfterEvidence(f.db,bucket,f.users.indonesia,id,new File([bytes],'proof.jpg'));
+  const stream=await backupStream(f.db,bucket,f.users.admin,releaseMigrations);assert.throws(()=>f.sqlite.prepare("UPDATE after_sales SET status='submitted'").run(),/maintenance/);await stream.cancel();
+  const path=join(root,'backup.tar');await createBackup({DB:f.db,WHOLESALE_FILES:bucket},path);assert.equal((await verifyArchive(path)).files.length,1);
+  const target=join(root,'restore');await restoreBackup(path,target);const db=openDatabase(join(target,'business.sqlite'));const file=db.sqlite.prepare('SELECT * FROM after_sales_files').get();assert.equal(db.sqlite.prepare('SELECT count(*) n FROM after_sales').get().n,1);db.sqlite.close();
+  const object=await fileBucket(join(target,'files')).get(file.object_key);assert.deepEqual(new Uint8Array(await new Response(object.body).arrayBuffer()),bytes);
+ }finally{rmSync(root,{recursive:true,force:true})}
+});

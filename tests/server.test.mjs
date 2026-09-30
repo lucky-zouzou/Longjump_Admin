@@ -33,6 +33,24 @@ test('独立服务器：公司登录、禁止伪造身份、岗位隔离、出�
  assert.equal(employeeView.body.actor.site,'马来西亚');assert.equal(employeeView.body.actor.channel,'Shopee');
  assert.ok(employeeView.body.inventory.every(row=>row.site==='马来西亚'&&row.channel==='Shopee'));
  assert.equal((await request('newops','/api/users',{...employee,email:'forbidden@example.test'})).status,403);
+ { // After-sales routes require authentication, protect draft evidence and enforce ownership.
+ const afterMonth=new Date(Date.now()+8*3600000).toISOString().slice(0,7);
+ assert.equal((await fetch(origin+'/api/after-sales?month='+afterMonth)).status,401);
+ assert.equal((await request('finance','/api/after-sales?month='+afterMonth)).status,403);
+ const afterCreated=await request('newops','/api/after-sales',{action:'create',businessDate:afterMonth+'-01',caseNo:'HTTP-AFTER-1',orderNo:'HTTP-ORDER-1',sku:'HTTP-SKU',qty:1,reason:'商品质量问题',description:'客户反馈拉链损坏',refundAmount:'5.25'});
+ assert.equal(afterCreated.status,200,JSON.stringify(afterCreated.body));const afterId=afterCreated.body.id;
+ assert.equal((await request('admin','/api/after-sales?history='+afterId)).status,404);
+ const form=new FormData();form.append('recordId',afterId);form.append('file',new File([new Uint8Array([255,216,255,1])],'proof.jpg',{type:'image/jpeg'}));
+ const uploaded=await fetch(origin+'/api/after-sales/files',{method:'POST',headers:{origin,cookie:cookies.newops},body:form});assert.equal(uploaded.status,200);const proof=await uploaded.json();
+ assert.equal((await request('admin','/api/after-sales/files?id='+proof.id)).status,404);
+ assert.equal((await request('newops','/api/after-sales/files?id='+proof.id)).status,200);
+ const afterRows=await request('newops','/api/after-sales?month='+afterMonth);const afterRow=afterRows.body.records.find(r=>r.id===afterId);
+ const crossAfter=await fetch(origin+'/api/after-sales',{method:'POST',headers:{origin:'https://attacker.test',cookie:cookies.newops,'content-type':'application/json'},body:JSON.stringify({action:'submit',id:afterId,version:afterRow.version})});assert.equal(crossAfter.status,403);
+ assert.equal((await request('newops','/api/after-sales',{action:'submit',id:afterId,version:afterRow.version})).status,200);
+ assert.equal((await request('admin','/api/after-sales/files?id='+proof.id)).status,200);
+ assert.equal((await request('finance','/api/after-sales/files?id='+proof.id)).status,403);
+ }
+
  let updatedUsers=await request('admin','/api/system');
  assert.equal(updatedUsers.body.users.find(user=>user.id===accountResult.body.userId).responsibility_unit,'运营团队');
  const creationAudit=updatedUsers.body.audit.find(row=>row.entity_id===accountResult.body.userId);
