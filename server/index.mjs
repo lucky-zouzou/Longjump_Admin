@@ -3,6 +3,7 @@ import {Readable} from 'node:stream';
 import {resolve} from 'node:path';
 import {readFileSync} from 'node:fs';
 import {randomBytes} from 'node:crypto';
+import {handleBaseline} from './inventory-baseline.mjs';
 import {env} from './env.mjs';
 import {accountSchema,verifyPassword,hashToken,setAccount} from './accounts.mjs';
 import {importServerEntryModule,tryServeStatic,sendWebResponse} from 'vinext/server/prod-server';
@@ -43,6 +44,7 @@ const server=http.createServer(async(req,res)=>{try{
  const user=c.lj_session?db.prepare('SELECT u.* FROM local_sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>? AND u.active=1').get(hashToken(c.lj_session),Date.now()):null;
  if(url.pathname==='/signout-with-chatgpt'){if(c.lj_session)db.prepare('DELETE FROM local_sessions WHERE token_hash=?').run(hashToken(c.lj_session));res.writeHead(303,{'location':'/signin-with-chatgpt','set-cookie':cookie('lj_session','',0)});res.end();return}
  if(!user){if(url.pathname.startsWith('/api/')){res.writeHead(401,{'content-type':'application/json'});res.end(JSON.stringify({error:'请登录公司账号 / Silakan masuk'}));}else{res.writeHead(303,{'location':'/signin-with-chatgpt'});res.end()}return}
+ if(url.pathname==='/admin/inventory-baseline'||url.pathname==='/api/inventory-baseline'){await handleBaseline(req,res,env,user);return}
  if(req.method==='GET'||req.method==='HEAD'){if(await tryServeStatic(req,res,resolve('dist-node/client'),url.pathname,true))return}
  if(Number(req.headers['content-length']||0)>22*1024*1024){res.writeHead(413);res.end();return}
  const h=new Headers();for(const [k,v] of Object.entries(req.headers))if(!k.startsWith('oai-')&&!k.startsWith('x-local-')&&!['host','connection','transfer-encoding','x-forwarded-host','x-forwarded-proto'].includes(k)&&v!=null)h.set(k,Array.isArray(v)?v.join(','):v);

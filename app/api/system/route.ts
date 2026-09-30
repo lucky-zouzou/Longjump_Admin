@@ -1715,6 +1715,7 @@ async function saveWarehouse(actor:Actor,payload:AnyRow){
 }
 
 function errorResponse(error:unknown) {
+  if(/inventory_baseline_date/.test(String(error))) return Response.json({error:"已启用2026-09-30期初库存，请选择2026-10-01或之后的销售／费用日期，历史销售不可再次扣库"},{status:409});
   if(/inventory_movements.balance_after|guard_|CHECK constraint|maintenance|closed finance/.test(String(error))) return Response.json({error:"库存或凭证已被更新，本次未覆盖；请刷新后重新核对"},{status:409});
   if(error instanceof HttpError || error instanceof ConflictError) return Response.json({error:error.message},{status:error.status});
   console.error(error);

@@ -12,6 +12,11 @@ test('独立服务器：公司登录、禁止伪造身份、岗位隔离、出�
  const cookies={};for(const who of ['admin','sales','supply','finance'])cookies[who]=await login(who,who==='sales');
  const request=async(who,path,payload)=>{const r=await fetch(origin+path,{method:payload?'POST':'GET',headers:{cookie:cookies[who],origin,...(payload?{'content-type':'application/json'}:{})},...(payload?{body:JSON.stringify({...payload,operationId:crypto.randomUUID()})}:{})});const text=await r.text();let body;try{body=JSON.parse(text)}catch{body=text}return {status:r.status,body}};
  const system=await request('admin','/api/system');assert.equal(system.status,200,JSON.stringify(system.body));const page=await fetch(origin+'/',{headers:{cookie:cookies.admin}});assert.equal(page.status,200);assert.ok((await page.text()).includes('LOONG'));
+ assert.equal((await fetch(origin+'/api/inventory-baseline')).status,401);
+ assert.equal((await fetch(origin+'/admin/inventory-baseline',{headers:{cookie:cookies.admin}})).status,200);
+ assert.equal((await request('sales','/api/inventory-baseline',{action:'status'})).status,403);
+ assert.deepEqual((await request('admin','/api/inventory-baseline',{action:'status'})).body,{active:false});
+ assert.equal((await fetch(origin+'/api/inventory-baseline',{method:'POST',headers:{cookie:cookies.admin,origin:'https://attacker.test','content-type':'application/json'},body:JSON.stringify({action:'apply'})})).status,403);
  // Account creation must work through the real company login and production router.
  assert.equal((await fetch(origin+'/api/users')).status,401);
  assert.deepEqual((await request('admin','/api/users')).body,{canCreate:true,loginMode:'company'});
