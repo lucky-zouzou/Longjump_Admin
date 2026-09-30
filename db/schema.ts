@@ -585,3 +585,5 @@ export const salesAdSpend = sqliteTable("sales_ad_spend", {
 export * from "./field-sales-schema";
 
 export * from "./review-schema";
+
+export * from "./after-sales-schema";
