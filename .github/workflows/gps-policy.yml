@@ -1,4 +1,4 @@
-name: Inspect GPS proxy policy
+name: Repair GPS proxy policy
 on:
   workflow_dispatch:
   push:
@@ -7,7 +7,7 @@ on:
 permissions:
   contents: read
 jobs:
-  inspect:
+  repair:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -22,16 +22,46 @@ jobs:
           47.238.71.113 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEjWaG0bPAUFRiDNga4FHhCCZ81mDLc0UwYiD69dmfOE
           EOF
 
-      - name: Inspect proxy configuration without business data
+      - name: Repair only admin GPS policy with validation and rollback
         run: |
-          ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes root@47.238.71.113 'bash -s' <<'REMOTE'
-          set -eu
-          docker ps --format '{{.Names}} {{.Image}}' | grep -i caddy || true
-          command -v caddy || true
-          for f in /etc/caddy/Caddyfile /root/loong-jump-v17/Caddyfile; do
-            if test -f "$f"; then
-              echo "CONFIG $f"
-              grep -nE 'admin[.]loongjump[.]com|Permissions-Policy|geolocation|reverse_proxy' "$f" || true
-            fi
-          done
+          ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes root@47.238.71.113 'python3 -' <<'REMOTE'
+          import json, pathlib, re, shutil, subprocess, time
+          path=pathlib.Path('/root/loong-jump-v17/Caddyfile')
+          original=path.read_text()
+          matches=list(re.finditer(r'(?ms)^admin\.loongjump\.com[ \t]*\{\n.*?^\}',original))
+          if len(matches)!=1: raise SystemExit('Expected exactly one admin site block; no change made')
+          match=matches[0]
+          block=match.group()
+          old='Permissions-Policy "camera=(), microphone=(), geolocation=()"'
+          new='Permissions-Policy "camera=(), microphone=(), geolocation=(self)"'
+          if old not in block:
+              if block.count(new)==1: print('Admin GPS policy already correct'); raise SystemExit(0)
+              raise SystemExit('Unexpected admin policy; no change made')
+          if block.count(old)!=1: raise SystemExit('Ambiguous policy; no change made')
+          container='loong-jump-v17-caddy-1'
+          mounts=json.loads(subprocess.check_output(['docker','inspect','--format','{{json .Mounts}}',container]))
+          destinations=[m['Destination'] for m in mounts if m['Source']==str(path)]
+          if len(destinations)!=1: raise SystemExit('Unexpected Caddy mount; no change made')
+          config=destinations[0]
+          backup=path.with_name('Caddyfile.pre-gps-'+str(time.time_ns()))
+          shutil.copy2(path,backup)
+          updated=original[:match.start()]+block.replace(old,new)+original[match.end():]
+          try:
+              path.write_text(updated)
+              subprocess.run(['docker','exec',container,'caddy','validate','--config',config,'--adapter','caddyfile'],check=True)
+              subprocess.run(['docker','exec',container,'caddy','reload','--config',config,'--adapter','caddyfile'],check=True)
+          except BaseException:
+              path.write_text(original)
+              subprocess.run(['docker','exec',container,'caddy','reload','--config',config,'--adapter','caddyfile'],check=False)
+              raise
+          print('Admin GPS policy repaired; other site blocks unchanged; original configuration backed up')
           REMOTE
+      - name: Verify public GPS policy
+        run: |
+          curl --fail --silent --show-error --retry 3 --max-time 20 -D /tmp/gps-headers -o /dev/null https://admin.loongjump.com/signin-with-chatgpt
+          python3 - <<'PYTHON'
+          import pathlib,re
+          policies=re.findall(r'^permissions-policy:(.*)$',pathlib.Path('/tmp/gps-headers').read_text(),re.I|re.M)
+          assert policies and all('geolocation=(self)' in p and 'geolocation=()' not in p for p in policies), 'Public policy still blocks GPS'
+          print('Public site allows GPS only for its own origin')
+          PYTHON
