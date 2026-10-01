@@ -58,7 +58,7 @@ const archiveDir=()=>resolve(process.env.LOONGJUMP_BACKUP_DIR||'backups','invent
 const now=()=>new Date().toISOString();
 function requireAdmin(actor){if(actor?.role!=='管理员')fail('仅管理员可执行期初切换',403);}
 function audit(db,actor,action,id,detail){db.prepare('INSERT INTO audit_logs(id,action,entity_type,entity_id,detail_json,actor_id,actor_name,created_at) VALUES(?,?,?,?,?,?,?,?)').run(randomUUID(),action,'inventory-baseline',id,JSON.stringify(detail),actor.id,actor.name,now());}
-function transaction(db,fn){
+export function transaction(db,fn){
  db.exec('BEGIN IMMEDIATE');try{const result=fn();if(db.prepare('PRAGMA foreign_key_check').all().length)fail('外键核验失败，操作已回滚');if(db.prepare('PRAGMA integrity_check').get().integrity_check!=='ok')fail('数据库完整性检查失败');db.exec('COMMIT');return result;}catch(e){db.exec('ROLLBACK');throw e;}
 }
 // Only delete guards for the explicitly archived sales tables are suspended inside
