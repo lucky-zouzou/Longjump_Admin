@@ -23,12 +23,12 @@ test("语言切换只改变显示格式，保留IDR值及动态SKU；偏好按�
 test("中印尼Excel所有数值逐格一致，客户姓名SKU备注不被词典改写",()=>{
   const o=order();o.customer.name="财务";o.items[0].name="待退款";o.note="已回款";o.entries[0].note="回款";
   const snapshot={actor:{name:"管理员",role:"财务"},orders:[o]},before=JSON.stringify(snapshot),opts={mode:"all",month:"2026-08",asOfDate:"2026-09-12",exportedAt:"2026-09-12T00:00:00Z"};
-  const zh=wholesaleExportSheets(snapshot,opts),id=wholesaleExportSheets(snapshot,{...opts,language:"id"});assert.equal(id.length,7);assert.equal(JSON.stringify(snapshot),before);
+  const zh=wholesaleExportSheets(snapshot,opts),id=wholesaleExportSheets(snapshot,{...opts,language:"id"});assert.equal(id.length,8);assert.equal(JSON.stringify(snapshot),before);
   for(let s=0;s<zh.length;s++){assert.equal(id[s].rows.length,zh[s].rows.length);assert.ok(id[s].name.length<=31);assert.ok(!/[\u3400-\u9fff]/.test(id[s].headers.join("")));for(let r=0;r<zh[s].rows.length;r++)for(let c=0;c<zh[s].rows[r].length;c++)if(typeof zh[s].rows[r][c]==="number")assert.equal(id[s].rows[r][c],zh[s].rows[r][c]);}
   const at=header=>id[0].rows[0][zh[0].headers.indexOf(header)];assert.equal(at("客户名称"),"财务");assert.equal(at("电话或WhatsApp"),"081200000");assert.equal(at("备注"),"已回款");assert.equal(at("当前履约状态"),"Dikirim sebagian");assert.equal(at("当前合同回款状态"),"Dibayar sebagian");
-  assert.equal(id[6].rows.find((r,index)=>zh[6].rows[index][0]==="导出人员")[1],"管理员");
-  const book=XLSX.read(XLSX.write(toWholesaleWorkbook(XLSX,id,"id"),{type:"buffer",bookType:"xlsx"}),{type:"buffer"});assert.equal(book.SheetNames[0],"Semua Pesanan");assert.equal(book.SheetNames.length,7);
-  const monthly=wholesaleExportSheets(snapshot,{...opts,mode:"month",language:"id"});assert.equal(monthly[0].name,"Rekonsiliasi Bulanan");assert.equal(monthly[0].rows[0][zh[1].headers.indexOf("期末应收IDR")],200000);
+  assert.equal(id[7].rows.find((r,index)=>zh[7].rows[index][0]==="导出人员")[1],"管理员");
+  const book=XLSX.read(XLSX.write(toWholesaleWorkbook(XLSX,id,"id"),{type:"buffer",bookType:"xlsx"}),{type:"buffer"});assert.equal(book.SheetNames[0],"Semua Pesanan");assert.equal(book.SheetNames.length,8);
+  const monthly=wholesaleExportSheets(snapshot,{...opts,mode:"month",language:"id"});assert.equal(monthly[0].name,"Rekonsiliasi Bulanan");assert.equal(monthly[0].rows[0][zh[2].headers.indexOf("期末应收IDR")],200000);
 });
 
 // Render the actual TSX components with the real locale context, without a browser or server.

@@ -6,6 +6,7 @@ import { CustomerMaintenance, FinanceCorrection, BankReceiptManager, PeriodManag
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useWholesaleLanguage,WholesaleLanguageSwitch } from "./wholesale-language";
 import { wholesaleDownloadName,wholesaleValidationMessage } from "../lib/wholesale-i18n.mjs";
+import { filterWholesaleOrders } from "../lib/wholesale-order-list.mjs";
 import { hasPermission } from "../lib/permissions.mjs";
 
 // The API returns joined, permission-scoped records from the wholesale ledger.
@@ -47,9 +48,11 @@ export default function Wholesale({onChanged}:{onChanged:()=>Promise<void>}){
   const [month,setMonth]=useState(today().slice(0,7)),[data,setData]=useState<Row|null>(null),[view,setView]=useState(""),[selected,setSelected]=useState(""),[busy,setBusy]=useState(false),[notice,setNotice]=useState(""),[loading,setLoading]=useState(true),[search,setSearch]=useState(""),[status,setStatus]=useState("all"),[create,setCreate]=useState(false),[customerForm,setCustomerForm]=useState(false);
   const [exporting,setExporting]=useState(false);
   const [orderFeedback,setOrderFeedback]=useState<OrderFeedback|null>(null);
-  const download=async(mode:"all"|"month")=>{
+  const download=async(mode:"all"|"month"|"filtered")=>{
     setExporting(true);
-    try{const response=await fetch(`/api/wholesale/export?mode=${mode}&month=${month}&lang=${language}`,{cache:"no-store"});if(!response.ok){const result=await response.json();throw new Error(result.errorKey||result.error||"导出失败");}const blob=await response.blob();const url=URL.createObjectURL(blob),anchor=document.createElement("a");anchor.href=url;anchor.download=wholesaleDownloadName(language,mode,mode==="all"?today():month);document.body.appendChild(anchor);anchor.click();anchor.remove();window.setTimeout(()=>URL.revokeObjectURL(url),60000);setNotice(mode==="all"?"全部权限内订单已导出，含客户、出库、结算及财务流水。":`${month}月度对账已导出，含期初与期末余额。`);}
+    const params=new URLSearchParams({mode,month,lang:language});
+    if(mode==="filtered"){params.set("view",view);params.set("status",status);params.set("search",search);}
+    try{const response=await fetch(`/api/wholesale/export?${params}`,{cache:"no-store"});if(!response.ok){const result=await response.json();throw new Error(result.errorKey||result.error||"导出失败");}const blob=await response.blob();const url=URL.createObjectURL(blob),anchor=document.createElement("a");anchor.href=url;anchor.download=wholesaleDownloadName(language,mode,mode==="month"?month:today());document.body.appendChild(anchor);anchor.click();anchor.remove();window.setTimeout(()=>URL.revokeObjectURL(url),60000);setNotice(mode==="filtered"?"已导出当前筛选订单及SKU明细，请打开Excel中的订单SKU明细工作表。":mode==="all"?"全部权限内订单已导出，含客户、订单SKU、出库、结算及财务流水。":`${month}月度对账已导出，含期初与期末余额。`);}
     catch(e){setNotice(e instanceof Error?e.message:"导出失败，请稍后重试");}finally{setExporting(false);}
   };
   const retry=useRef<{key:string;id:string}|null>(null),sequence=useRef(0);
@@ -68,7 +71,7 @@ export default function Wholesale({onChanged}:{onChanged:()=>Promise<void>}){
   if(!data)return <div className="wholesale" lang={language==="id"?"id":"zh-CN"}><WholesaleLanguageSwitch/><h3>{t("印尼线下批发")}</h3><p role="status">{loading?t("正在读取批发订单…"):t(notice)}</p><button className="btn" onClick={()=>load().catch(e=>setNotice(e.message))}>{t("重新读取")}</button></div>;
   const actor=data.actor,can=(p:string)=>hasPermission(actor.role,p),d=data.dashboard;
   const order=data.orders.find((o:Row)=>o.id===selected);
-  const filtered=data.orders.filter((o:Row)=>(view!=="completed"||["completed","closed"].includes(o.status))&&(status==="all"||o.status===status)&&[o.order_no,o.customer.name,o.customer.phone,o.sales_name,...o.items.map((i:Row)=>i.sku)].join(" ").toLowerCase().includes(search.toLowerCase()));
+  const filtered=filterWholesaleOrders(data.orders,{view,status,search});
   const cards=[["本月出库销售额",money(d.salesAmount)],["本月出库件数",fmt(d.quantity)],["本月客户 / SKU",`${d.customerCount} / ${d.skuCount}`],["本月回款",money(d.cashReceived)],["当前合同待收款",money(d.currentOutstanding)],["当前合同待退款",money(d.currentRefundDue)]];
   const exportOrders=()=>{const columns=["序号","订单号","订单日期","完成发货时间（印尼西部）","客户编号","客户","联系人","电话","城市","收货地址","销售负责人","SKU种类数","订单件数","已发件数","订单金额IDR","出库销售额IDR","退货金额IDR","净销售额IDR","按已出库待收款IDR","按已出库结算状态","合同待收款IDR","净回款IDR","回款状态","是否需开票","有效开票金额IDR","开票状态","履约状态"];
     const content=[columns.map(c=>t(c)),...filtered.map((o:Row,i:number)=>[i+1,o.order_no,o.business_date,stamp(o.completed_at),o.customer.code,o.customer.name,o.customer.contact,o.customer.phone,o.customer.city,o.customer.address,o.sales_name,o.items.length,o.total_qty,o.items.reduce((s:number,r:Row)=>s+r.shipped_qty,0),o.total_amount,o.financial.salesAmount,o.financial.returnAmount,o.financial.netSales,o.financial.receivable,t(o.financial.settlementStatus),o.outstanding,o.paid,t(o.paymentStatus),t(o.invoice_required?"是":"否"),o.invoiced,t(o.invoiceStatus),t(labels[o.status])])].map(row=>row.map((v:unknown)=>{const value=String(v??"");return `"${(/^[=+@\-\t\r]/.test(value)?"'":"")+value.replaceAll('"','""')}"`;}).join(",")).join("\r\n");const url=URL.createObjectURL(new Blob(["\ufeff",content],{type:"text/csv;charset=utf-8"})),a=document.createElement("a");a.href=url;a.download=language==="id"?`Pesanan-Grosir-Terfilter-${today()}.csv`:`印尼线下批发订单-${today()}.csv`;a.click();URL.revokeObjectURL(url);};
@@ -82,7 +85,8 @@ export default function Wholesale({onChanged}:{onChanged:()=>Promise<void>}){
     {view==="field"&&<FieldSales month={month}/> }
     {create&&<CreateOrder data={data} busy={busy} mutate={mutate} done={()=>setCreate(false)} newCustomer={()=>{setCustomerForm(true);setView("customers");setCreate(false);}}/>}
     {order&&<OrderDetail key={`${order.id}-${order.version}`} order={order} data={data} busy={busy} mutate={mutate} close={()=>{setSelected("");setOrderFeedback(null);setNotice("");}} refresh={load} notice={setNotice} feedback={orderFeedback?.orderId===order.id?orderFeedback:null}/>}
-    {(view==="orders"||view==="completed")&&<Panel title={view==="completed"?t("已完成发货的订单"):t("订单台账")} action={<button className="btn" onClick={exportOrders}>{t("导出筛选列表CSV")}</button>}>
+    {(view==="orders"||view==="completed")&&<Panel title={view==="completed"?t("已完成发货的订单"):t("订单台账")} action={<div className="wh-actions"><button className="btn primary" disabled={exporting||busy||loading||!filtered.length} onClick={()=>download("filtered")}>{exporting?t("正在生成Excel…"):t("导出订单及SKU明细Excel")}</button><button className="btn" disabled={busy||loading||!filtered.length} onClick={exportOrders}>{t("导出汇总CSV（无SKU）")}</button></div>}>
+      <p className="wh-copy">{t("Excel含订单总表和逐项SKU、商品、申请数量、成交单价及金额，未发货订单也可导出。CSV仅含订单汇总。")}</p>
       <div className="wh-filter"><input aria-label={t("搜索订单")} value={search} onChange={e=>setSearch(e.target.value)} placeholder={t("订单号、客户、电话、销售或 SKU")}/>{view!=="completed"&&<select aria-label={t("履约状态")} value={status} onChange={e=>setStatus(e.target.value)}><option value="all">{t("全部履约状态")}</option>{Object.entries(labels).map(([k,v])=><option key={k} value={k}>{t(v)}</option>)}</select>}<span>{filtered.length} {t("笔 · 发货完成后继续跟进回款与开票")}</span></div>
       <div className="table-wrap"><table><thead><tr><th>{t("序号 / 日期")}</th><th>{t("订单与客户")}</th><th>{t("销售 / SKU")}</th><th>{t("发货件数")}</th><th>{t("出库销售额 / 订单金额")}</th><th>{t("订单回款")}</th><th>{t("开票")}</th><th>{t("履约")}</th><th>{t("操作")}</th></tr></thead><tbody>{filtered.map((o:Row,i:number)=><tr key={o.id}><td>{i+1}<small>{o.business_date}</small></td><td><strong>{o.order_no}</strong><small>{o.customer.name} · {o.customer.contact}</small><small>{o.customer.phone} · {o.customer.city}</small></td><td>{o.sales_name}<small>{o.items.length} {t("种 SKU")}</small></td><td>{fmt(o.items.reduce((s:number,r:Row)=>s+r.shipped_qty,0))} / {fmt(o.total_qty)}<small>{t("已发 / 申请")}</small></td><td><strong>{money(o.financial.salesAmount)}</strong><small>{t("订单")}{money(o.total_amount)}</small></td><td><Badge value={o.paymentStatus}/><small>{t("已收")}{money(o.paid)}</small><small>{t("合同待收")}{money(o.outstanding)}</small></td><td><Badge value={o.invoiceStatus}/></td><td><Badge value={o.status}/><small>{o.supply_name||t("待分配供应链")}</small></td><td><button className="btn" onClick={()=>{setSelected(o.id);setCreate(false);setOrderFeedback(null);setNotice("");window.scrollTo({top:0,behavior:"smooth"});}}>{t("查看 / 处理")}</button></td></tr>)}</tbody></table></div>{!filtered.length&&<Empty>{t("暂无符合条件的订单。销售建立客户档案后即可提出出库申请。")}</Empty>}
     </Panel>}
@@ -160,7 +164,7 @@ function FinanceReconciliation({report:r,exporting,download}:{report:Row;exporti
     <p className="wh-copy">{t("期末余额 = 期初余额 + 出库销售额 − 退货金额 − 回款 + 退款。余额为正表示已出库待收，为负表示预收或待退款。各订单余额分别列示，避免不同客户互相抵消。")}</p>
     <div className="table-wrap"><table><thead><tr><th>{t("订单 / 客户")}</th><th>{t("销售")}</th><th>{t("期初余额")}</th><th>{t("本月出库销售额")}</th><th>{t("退货金额")}</th><th>{t("回款 / 退款")}</th><th>{t("结算金额净回款")}</th><th>{t("期末余额")}</th><th>{t("期末结算状态")}</th></tr></thead><tbody>{r.rows.map((o:Row)=><tr key={o.id}><td>{o.orderNo}<small>{o.customerName}</small></td><td>{o.salesName}</td><td>{money(o.openingBalance)}</td><td>{money(o.salesAmount)}</td><td>{money(o.returnAmount)}</td><td>{money(o.receipts)}<small>{t("退款")}{money(o.refunds)}</small></td><td>{money(o.netReceipts)}</td><td><strong>{money(o.closingBalance)}</strong></td><td><Badge value={o.settlementStatus}/></td></tr>)}</tbody></table></div>
     {!r.rows.length&&<Empty>{t("截至该月份暂无订单。")}</Empty>}
-  </Panel><Panel title={t("Excel对账内容")}><p className="wh-copy">{t("一份文件包含订单总表、月度对账、SKU出库明细、收款退款明细、开票明细、退货明细及对账说明与汇总。客户电话和订单编号按文本保存，印尼盾金额按数字保存，方便财务直接筛选、汇总和核对银行流水。")}</p></Panel></>;
+  </Panel><Panel title={t("Excel对账内容")}><p className="wh-copy">{t("一份文件包含订单总表、订单SKU明细、月度对账、SKU出库明细、收款退款明细、开票明细、退货明细及对账说明与汇总。客户电话和订单编号按文本保存，印尼盾金额按数字保存，方便财务直接筛选、汇总和核对银行流水。")}</p></Panel></>;
 }
 
 function Dashboard({dashboard:d}:{dashboard:Row}){
