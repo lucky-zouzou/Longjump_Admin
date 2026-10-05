@@ -61,6 +61,23 @@ test("平台已售或盘点造成预留缺货保留差异，阻止线下发货�
   const f=fixture(),id=await f.create();await f.approve(id);f.stock("BAG-A",1,1);await assert.rejects(f.ship(id,5),/库存已变化/);assert.equal(f.sqlite.prepare("SELECT COUNT(*) n FROM wholesale_shipments").get().n,0);
   const view=await readWholesale(f.db,f.users.admin,indonesiaDate().slice(0,7));assert.ok(view.checks.issues.some(i=>i.type.includes("可售账面少于预留")));
 });
+
+test("审批缺货明确SKU及印尼双渠道扣除预留后的数量，整单不产生任何预留",async()=>{
+  const f=fixture();
+  f.stock("BAG-A",2,1);
+  const reserved=await f.create({qty:3});await f.approve(reserved);
+  const id=await f.create({items:[{sku:"BAG-B",qty:2,unitPrice:100000},{sku:"BAG-A",qty:3,unitPrice:100000}]});
+  const before=f.sqlite.prepare("SELECT SUM(reserved_qty) n FROM inventory_balances").get().n;
+  await assert.rejects(f.approve(id),error=>{
+    assert.equal(error.status,409);
+    assert.equal(error.message,"SKU BAG-A 库存不足：申请3件，印尼 TikTok 可用0件，Shopee 可用0件，缺少3件。整单未批准，未新增库存预留。");
+    return true;
+  });
+  assert.equal(f.orderRow(id).status,"pending");
+  assert.equal(f.sqlite.prepare("SELECT SUM(reserved_qty) n FROM inventory_balances").get().n,before);
+  assert.equal(f.sqlite.prepare("SELECT COUNT(*) n FROM wholesale_allocations a JOIN wholesale_order_items i ON i.id=a.order_item_id WHERE i.order_id=?").get(id).n,0);
+  assert.equal(f.sqlite.prepare("SELECT COUNT(*) n FROM wholesale_operations WHERE order_id=? AND action='orderApprove'").get(id).n,0);
+});
 test("无单号时必须有属于当前订单的影像，且必须确认实物已交付",async()=>{
   const f=fixture(),id=await f.create();await f.approve(id);await assert.rejects(f.ship(id,5,indonesiaDate(),{trackingNo:""}),/照片／视频/);await assert.rejects(f.ship(id,5,indonesiaDate(),{handoverConfirmed:false}),/实际交付/);await assert.rejects(f.ship(id,5,indonesiaDate(),{trackingNo:"",proofIds:["another-order-file"]}),/不属于此订单/);
   f.sqlite.prepare("INSERT INTO wholesale_files (id,order_id,object_key,name,content_type,size,actor_id,created_at) VALUES (?,?,?,?,?,?,?,?)").run("proof1",id,"test/key","photo.jpg","image/jpeg",100,f.users.supply.id,indonesiaDate());await f.ship(id,5,indonesiaDate(),{trackingNo:"",proofIds:["proof1"]});assert.equal(f.orderRow(id).status,"completed");

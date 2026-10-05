@@ -54,3 +54,18 @@ test("所有显式界面翻译键都有印尼语文案",()=>{
     const walk=node=>{if(ts.isCallExpression(node)&&["t","shellT"].includes(node.expression.getText(source))&&node.arguments[0]&&ts.isStringLiteral(node.arguments[0]))assert.ok(Object.hasOwn(WHOLESALE_ID,node.arguments[0].text),node.arguments[0].text);ts.forEachChild(node,walk);};walk(source);
   }
 });
+
+test("审批失败在订单操作区显示可聚焦红色提示，批准成功显示下一步，中印尼均完整翻译",()=>{
+  const locale=compileComponent("../app/wholesale-language.tsx"),ui=compileComponent("../app/wholesale.tsx","\nexport {OrderDetail};",{"./wholesale-language":locale});
+  const o=order();o.status="pending";o.financial=orderFinancials(o);
+  const error="SKU BAG-A 库存不足：申请3件，印尼 TikTok 可用0件，Shopee 可用0件，缺少3件。整单未批准，未新增库存预留。";
+  const common={order:o,data:{actor:{id:"admin1",role:"管理员"},users:[{id:"supply1",role:"供应链",name:"Budi"}]},busy:false,mutate:async()=>false,close:()=>{},refresh:async()=>{},notice:()=>{}};
+  const render=(language,kind,message)=>renderToStaticMarkup(React.createElement(locale.WholesaleLanguageContext.Provider,{value:{language,setLanguage:()=>{}}},React.createElement(ui.OrderDetail,{...common,feedback:{orderId:o.id,kind,message}})));
+  const zh=render("zh","error",error);
+  assert.ok(zh.includes('tabindex="-1" class="wh-order-feedback error" role="alert"'));
+  assert.ok(zh.includes(error));assert.ok(zh.indexOf(error)<zh.indexOf("批准并锁库存"));
+  const id=render("id","error",error);assert.ok(id.includes("Stok SKU BAG-A tidak cukup"));assert.ok(id.includes("kurang 3 unit"));assert.ok(!/[\u3400-\u9fff]/.test(id));
+  o.status="approved";
+  const success=render("id","success","审批通过，已锁定库存。订单已进入待打包，等待供应链处理。");
+  assert.ok(success.includes('class="wh-order-feedback success" role="status"'));assert.ok(success.includes("menunggu pengemasan"));
+});
