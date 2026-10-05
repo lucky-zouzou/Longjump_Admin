@@ -19,12 +19,12 @@ jobs:
           47.238.71.113 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEjWaG0bPAUFRiDNga4FHhCCZ81mDLc0UwYiD69dmfOE
           EOF
 
-      - name: Read server health and resource usage
+      - name: Check authenticated SSH connectivity
         timeout-minutes: 1
         run: |
           ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes \
             -o ConnectTimeout=15 -o ConnectionAttempts=1 -o ServerAliveInterval=10 -o ServerAliveCountMax=2 \
-            root@47.238.71.113 'uptime; free -m; df -h /; ps -eo comm,pcpu,pmem --sort=-pmem | head -12; docker ps --format "{{.Names}} {{.Status}}"; curl --fail --silent --show-error --max-time 8 http://127.0.0.1:3000/healthz'
+            root@47.238.71.113 true
       - name: Read public health endpoint
         if: always()
         run: curl --fail --silent --show-error --connect-timeout 10 --max-time 20 https://admin.loongjump.com/healthz
