@@ -1,3 +1,4 @@
+import * as XLSX from "xlsx";
 import test from 'node:test';import assert from 'node:assert/strict';import {mkdtempSync,rmSync,existsSync} from 'node:fs';import {tmpdir} from 'node:os';import {join} from 'node:path';import {spawn} from 'node:child_process';import {once} from 'node:events';import net from 'node:net';
 import {openDatabase} from '../server/storage.mjs';import {setAccount,verifyPassword} from '../server/accounts.mjs';
 // Production Node build is a required gate; do not silently skip this integration test.
@@ -117,6 +118,14 @@ test('独立服务器：公司登录、禁止伪造身份、岗位隔离、出�
  let fieldView=await request('sales','/api/field-sales');assert.equal(fieldView.body.records[0].version,2);assert.equal((await request('sales','/api/field-sales',{action:'submit',id:fieldId,version:2,location:{latitude:-6.2,longitude:106.8,accuracy:15,capturedAt:Date.now()}})).status,200);
  assert.equal((await upload('sales')).status,409);fieldView=await request('finance','/api/field-sales');assert.equal(fieldView.body.records[0].status,'valid');assert.equal(fieldView.body.contributions.find(r=>r.id==='sales').visits,1);
  const o=await request('sales','/api/wholesale',{action:'orderCreate',customerId:c.body.id,businessDate:day,paymentTerms:'credit',dueDate:'2027-01-01',items:[{sku:'HTTP-BAG',qty:5,unitPrice:100000}]});assert.equal(o.status,200);let view=await request('sales','/api/wholesale'),order=view.body.orders[0];
+ // Export unshipped order items through the real authenticated endpoint.
+ const exportUrl='/api/wholesale/export?mode=filtered&month='+day.slice(0,7)+'&view=orders&status=pending&search=HTTP-BAG';
+ assert.equal((await fetch(origin+exportUrl)).status,401);
+ const exportBook=async who=>{const response=await fetch(origin+exportUrl,{headers:{cookie:cookies[who]}});assert.equal(response.status,200);assert.match(response.headers.get('content-type'),/spreadsheetml/);assert.match(response.headers.get('content-disposition'),/xlsx/);return XLSX.read(await response.arrayBuffer(),{type:'array'})};
+ const pendingBook=await exportBook('sales'),pendingRows=XLSX.utils.sheet_to_json(pendingBook.Sheets['订单SKU明细']);
+ assert.equal(pendingRows.length,1);assert.equal(pendingRows[0]['SKU'],'HTTP-BAG');assert.equal(pendingRows[0]['申请件数'],5);assert.equal(pendingRows[0]['订单商品金额IDR'],500000);assert.equal(pendingRows[0]['已出库件数'],0);
+ const unassigned=await exportBook('supply');assert.equal(XLSX.utils.sheet_to_json(unassigned.Sheets['订单SKU明细']).length,0);
+ assert.equal((await request('sales','/api/wholesale/export?mode=filtered&status=not-a-status')).status,400);
  assert.equal((await request('sales','/api/wholesale',{action:'orderApprove',orderId:o.body.id,version:order.version,supplyUserId:'supply',stockBasisConfirmed:true,reason:'申请人不得自行审批'})).status,403);
  assert.equal((await request('admin','/api/wholesale',{action:'orderApprove',orderId:o.body.id,version:order.version,supplyUserId:'supply',stockBasisConfirmed:true,reason:'核对库存允许出库'})).status,200);
  view=await request('supply','/api/wholesale');order=view.body.orders[0];assert.equal((await request('supply','/api/wholesale',{action:'orderShip',orderId:order.id,version:order.version,items:[{itemId:order.items[0].id,qty:5}],businessDate:day,warehouse:'印尼仓',carrier:'JNE',trackingNo:'HTTP001',handoverConfirmed:true})).status,200);
