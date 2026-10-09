@@ -5,6 +5,11 @@ import {openDatabase} from '../server/storage.mjs';import {setAccount,verifyPass
 test('独立服务器：公司登录、禁止伪造身份、岗位隔离、出库销售和Excel导出',async()=>{
  assert.ok(existsSync('dist-node/server/index.js'),'Run pnpm build:server before tests');const root=mkdtempSync(join(tmpdir(),'lj-http-')),sqlite=openDatabase(join(root,'business.sqlite')).sqlite,password='test-only-'+crypto.randomUUID();
  for(const [id,role] of [['admin','管理员'],['sales','销售'],['supply','供应链'],['finance','财务']])setAccount(sqlite,{id,email:`${id}@example.test`,name:id,role,site:role==='销售'?'印尼':null,password});sqlite.prepare('INSERT INTO sku_settings(sku,name,updated_at) VALUES (?,?,?)').run('HTTP-BAG','bag',new Date().toISOString());for(const ch of ['TikTok','Shopee'])sqlite.prepare('INSERT INTO inventory_balances(site,channel,sku,qty,updated_at) VALUES (?,?,?,?,?)').run('印尼',ch,'HTTP-BAG',10,new Date().toISOString());assert.ok(!sqlite.prepare('SELECT password_hash FROM local_accounts').get().password_hash.includes(password));sqlite.close();
+ const cleanFixture=openDatabase(join(root,'business.sqlite')).sqlite;
+ for(const month of ['2026-09','2026-10']){
+  cleanFixture.prepare("INSERT INTO new_product_projects(id,cycle_month,sku,stage_started_at,current_due_at,created_by,created_at,updated_at) VALUES(?,?,'HTTP-BAG','2026-09-01','2026-09-04','admin','2026-09-01','2026-09-01')").run(month,month);
+  cleanFixture.prepare("INSERT INTO new_product_stage_records(id,project_id,stage_key,data_json,actor_id,actor_name,submitted_at,updated_at) VALUES(?,?,'candidate','{}','admin','管理员','2026-09-01','2026-09-01')").run(month,month);
+ }cleanFixture.close();
  const free=net.createServer();free.listen(0,'127.0.0.1');await once(free,'listening');const port=free.address().port;await new Promise(r=>free.close(r));const origin=`http://127.0.0.1:${port}`;let logs='';const child=spawn(process.execPath,['server/index.mjs'],{env:{...process.env,NODE_ENV:'production',LOONGJUMP_DATA_DIR:root,LOONGJUMP_ORIGIN:origin,LOONGJUMP_ALLOW_HTTP:'1',PORT:String(port),HOST:'127.0.0.1'},stdio:['ignore','pipe','pipe']});child.stdout.on('data',b=>logs+=b);child.stderr.on('data',b=>logs+=b);
  try{await new Promise((res,rej)=>{const timer=setTimeout(()=>rej(Error('Server startup timeout: '+logs)),15000);child.stdout.on('data',b=>{if(String(b).includes('ready at')){clearTimeout(timer);res()}});child.once('exit',code=>{clearTimeout(timer);rej(Error(`Server exited ${code}: ${logs}`))})});
  const forged=await fetch(origin+'/api/system',{headers:{'oai-authenticated-user-id':'admin','oai-authenticated-user-email':'admin@example.test','x-local-test-user':'admin'}});assert.equal(forged.status,401);
@@ -18,6 +23,20 @@ test('独立服务器：公司登录、禁止伪造身份、岗位隔离、出�
  assert.equal((await fetch(origin+'/admin/test-cleanup',{headers:{cookie:cookies.admin}})).status,200);
  assert.equal((await request('sales','/api/test-cleanup',{action:'preview'})).status,403);
  assert.equal((await request('admin','/api/test-cleanup',{action:'preview'})).status,200);
+ const cleanupScope='september_products';
+ const cleanupPage=await request('admin','/admin/test-cleanup');assert.match(cleanupPage.body,/仅2026年9月新品孵化/);
+ assert.equal((await request('admin','/api/test-cleanup',{action:'preview',scope:'2026-10'})).status,400);
+ const targeted=await request('admin','/api/test-cleanup',{action:'preview',scope:cleanupScope});assert.equal(targeted.status,200);assert.deepEqual(targeted.body.counts,{new_product_stage_records:1,new_product_projects:1});
+ assert.equal((await request('admin','/api/test-cleanup',{action:'apply',scope:'prelaunch_all',expected:targeted.body})).status,409);
+ assert.equal((await request('sales','/api/test-cleanup',{action:'apply',scope:cleanupScope,expected:targeted.body})).status,403);
+ const cleaned=await request('admin','/api/test-cleanup',{action:'apply',scope:cleanupScope,expected:{scope:cleanupScope,fingerprint:targeted.body.fingerprint}});assert.equal(cleaned.status,200,JSON.stringify(cleaned.body));
+ assert.equal((await request('admin','/api/test-cleanup',{action:'preview',scope:cleanupScope})).body.counts.new_product_projects,0);
+ assert.equal((await request('admin','/api/test-cleanup',{action:'status',scope:cleanupScope})).body.id,cleaned.body.id);
+ assert.equal((await request('admin','/api/test-cleanup',{action:'status',scope:'prelaunch_all'})).body.id,null);
+ assert.equal((await request('admin','/api/test-cleanup',{action:'undo',scope:cleanupScope,id:cleaned.body.id})).status,200);
+ assert.equal((await request('admin','/api/test-cleanup',{action:'preview',scope:cleanupScope})).body.counts.new_product_projects,1);
+ assert.equal((await request('admin','/api/test-cleanup',{action:'status',scope:cleanupScope})).body.id,null);
+
  assert.equal((await fetch(origin+'/api/test-cleanup',{method:'POST',headers:{cookie:cookies.admin,origin:'https://attacker.test','content-type':'application/json'},body:JSON.stringify({action:'apply'})})).status,403);
  assert.equal((await fetch(origin+'/admin/inventory-baseline',{headers:{cookie:cookies.admin}})).status,200);
  assert.equal((await request('sales','/api/inventory-baseline',{action:'status'})).status,403);
