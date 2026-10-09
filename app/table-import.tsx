@@ -6,18 +6,18 @@ import {IMPORT_MAX_BYTES,IMPORT_SCHEMAS,readImportSheet} from '../lib/tabular-im
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type ImportRow=Record<string,any>;
 type Meta={fileName:string;fileHash:string};
-type Props={kind:keyof typeof IMPORT_SCHEMAS;busy?:boolean;defaults?:ImportRow;contextKey?:string;templateRows?:ImportRow[];description?:string;confirmLabel?:string;validate?:(rows:ImportRow[])=>void;onApply:(rows:ImportRow[],meta:Meta)=>Promise<boolean>|boolean};
+type Props={kind:keyof typeof IMPORT_SCHEMAS;busy?:boolean;maxRows?:number;defaults?:ImportRow;contextKey?:string;templateRows?:ImportRow[];description?:string;confirmLabel?:string;validate?:(rows:ImportRow[])=>void;onApply:(rows:ImportRow[],meta:Meta)=>Promise<boolean>|boolean};
 
-export default function TableImport({kind,busy=false,defaults={},contextKey='',templateRows=[],description,confirmLabel='确认导入到表单',validate,onApply}:Props){
+export default function TableImport({kind,busy=false,maxRows,defaults={},contextKey='',templateRows=[],description,confirmLabel='确认导入到表单',validate,onApply}:Props){
   const {t}=useWholesaleLanguage();
   const schema=IMPORT_SCHEMAS[kind],inputId=useId(),generation=useRef(0),locked=useRef(false);
   const [loading,setLoading]=useState(false),[saving,setSaving]=useState(false),[rows,setRows]=useState<ImportRow[]>([]),[errors,setErrors]=useState<Array<{row:number;message:string}>>([]),[message,setMessage]=useState(''),[meta,setMeta]=useState<Meta|null>(null),[book,setBook]=useState<import('xlsx').WorkBook|null>(null),[sheet,setSheet]=useState('');
   const reset=()=>{generation.current++;setRows([]);setErrors([]);setMeta(null);setBook(null);setSheet('');setMessage('');setLoading(false);};
-  useEffect(()=>{reset();return()=>{generation.current++;};},[kind,contextKey]); // Clear stale previews when the destination changes.
+  useEffect(()=>{reset();return()=>{generation.current++;};},[kind,contextKey,maxRows]); // Clear stale previews when the destination changes.
   const parse=async(workbook:import('xlsx').WorkBook,name:string)=>{
     setRows([]);setErrors([]);setMessage('');
     const XLSX=await import('xlsx');
-    return readImportSheet(XLSX,kind,workbook,name,defaults);
+    return readImportSheet(XLSX,kind,workbook,name,defaults,{maxRows});
   };
   const readFile=async(file:File)=>{
     reset();const current=generation.current;setLoading(true);
@@ -27,7 +27,7 @@ export default function TableImport({kind,busy=false,defaults={},contextKey='',t
       const buffer=await file.arrayBuffer(),XLSX=await import('xlsx');
       let csvText='';
       if(/\.csv$/i.test(file.name)){try{csvText=new TextDecoder('utf-8',{fatal:true}).decode(buffer);}catch{csvText=new TextDecoder('gb18030').decode(buffer);}}
-      const workbook=/\.csv$/i.test(file.name)?XLSX.read(csvText,{type:'string',raw:true,cellFormula:true,sheetRows:5002}):XLSX.read(buffer,{type:'array',raw:true,cellFormula:true,sheetRows:5002});
+      const workbook=/\.csv$/i.test(file.name)?XLSX.read(csvText,{type:'string',raw:true,cellFormula:true,sheetRows:Math.max(5002,(maxRows??0)+2)}):XLSX.read(buffer,{type:'array',raw:true,cellFormula:true,sheetRows:Math.max(5002,(maxRows??0)+2)});
       const name=workbook.SheetNames[0];if(!name)throw Error('文件没有工作表');
       const digest=await crypto.subtle.digest('SHA-256',buffer);
       if(current!==generation.current)return;

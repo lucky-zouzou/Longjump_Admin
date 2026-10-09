@@ -110,3 +110,17 @@ test('销售服务器拒绝小数，不会将1.5四舍五入成2件',()=>{
   assert.throws(()=>svc.normalizedSales([{sku:'BAG-A',qty:1.5}]),/非正整数/);
   assert.equal(svc.normalizedSales([{sku:'a',qty:2},{sku:'A',qty:3}])[0].qty,5);
 });
+
+test('订单及发货导入使用当前单据SKU上限，超过20与200行不截断，超限和重复仍拦截',()=>{
+  const input=Array.from({length:205},(_,i)=>({sku:`CAT-${i}`,qty:2,unitPrice:1000}));
+  for(const kind of ['order','shipment']){
+    const columns=IMPORT_SCHEMAS[kind].columns;
+    const ws=XLSX.utils.aoa_to_sheet([columns.map(c=>c.label),...input.map(row=>columns.map(c=>row[c.key]??''))]);
+    const book={Sheets:{明细:ws},SheetNames:['明细']};
+    const result=readImportSheet(XLSX,kind,book,'明细',{}, {maxRows:205});
+    assert.equal(result.rows.length,205);assert.equal(result.rows.at(-1).sku,'CAT-204');assert.deepEqual(result.errors,[]);
+    assert.throws(()=>readImportSheet(XLSX,kind,book,'明细',{}, {maxRows:204}),/最多导入204行/);
+  }
+  assert.equal(validateImportRows('order',[input[0],input[0]],{}, {maxRows:205}).errors.length,1);
+  assert.throws(()=>validateImportRows('order',[input[0]],{}, {maxRows:0}),/最多导入0行/);
+});
