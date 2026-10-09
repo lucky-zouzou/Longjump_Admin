@@ -133,3 +133,32 @@ test("财务导出单一数据库快照包含全部订单，责任人和其他�
 test("导出查询不完整时直接失败，不能静默生成缺少流水的报表",async()=>{
   const f=fixture();await f.create();f.db.batch=async()=>[{success:true,results:[]}];await assert.rejects(loadWholesaleExportSnapshot(f.db,f.users.finance),/不完整/);
 });
+
+test("订单上限跟随SKU档案，205个SKU完整创建、审批、发货且合计守恒",async()=>{
+  const f=fixture();try{
+    for(let n=0;n<203;n++){const sku=`CAT-${n}`;f.sqlite.prepare("INSERT INTO sku_settings(sku,name,updated_at) VALUES(?,?,?)").run(sku,sku,"2026-10-01");f.stock(sku,10,10);}
+    const items=f.sqlite.prepare("SELECT sku FROM sku_settings ORDER BY sku").all().map(({sku})=>({sku,qty:2,unitPrice:1000}));
+    assert.equal(items.length,205);
+    const id=await f.create({items});
+    assert.equal(f.orderRow(id).total_qty,410);assert.equal(f.orderRow(id).total_amount,410000);
+    assert.equal(f.sqlite.prepare("SELECT COUNT(*) n FROM wholesale_order_items WHERE order_id=?").get(id).n,205);
+    await f.approve(id);
+    assert.equal(f.sqlite.prepare("SELECT SUM(reserved_qty) n FROM inventory_balances WHERE site='印尼'").get().n,410);
+    const shipmentItems=f.sqlite.prepare("SELECT id itemId,qty FROM wholesale_order_items WHERE order_id=?").all(id);
+    await f.change(f.users.supply,id,"orderShip",{items:shipmentItems,businessDate:indonesiaDate(),carrier:"测试承运商",warehouse:"印尼仓",trackingNo:"CATALOG-SHIP",handoverConfirmed:true});
+    assert.equal(f.orderRow(id).status,"completed");
+    assert.equal(f.sqlite.prepare("SELECT SUM(qty_delta) n FROM inventory_movements WHERE movement_type='线下批发出库'").get().n,-410);
+    assert.equal(f.sqlite.prepare("SELECT SUM(reserved_qty) n FROM inventory_balances WHERE site='印尼'").get().n,0);
+  }finally{f.sqlite.close();}
+});
+test("SKU上限实时读取档案，空单、超限、重复和未建档均不创建订单",async()=>{
+  const f=fixture();try{
+    const c=await f.call(f.users.sales,"customerCreate",{name:"上限校验客户",contact:"测试",phone:"0800",city:"Jakarta",address:"测试地址"});
+    const create=items=>f.call(f.users.sales,"orderCreate",{customerId:c.id,businessDate:indonesiaDate(),items,maxRows:99999});
+    const item=sku=>({sku,qty:1,unitPrice:1000});
+    for(const [items,message] of [[[],/至少需要1/],[[item('BAG-A'),item('BAG-B'),item('UNKNOWN')],/已建档的2/],[[item('BAG-A'),item('bag-a')],/合并为一行/],[[item('UNKNOWN')],/尚未建立/]])await assert.rejects(create(items),message);
+    assert.equal(f.sqlite.prepare("SELECT COUNT(*) n FROM wholesale_orders").get().n,0);
+    f.sqlite.prepare("INSERT INTO sku_settings(sku,name,updated_at) VALUES('NEW-SKU','新增SKU','2026-10-01')").run();
+    const result=await create(['BAG-A','BAG-B','NEW-SKU'].map(item));assert.equal(f.orderRow(result.id).total_qty,3);
+  }finally{f.sqlite.close();}
+});
