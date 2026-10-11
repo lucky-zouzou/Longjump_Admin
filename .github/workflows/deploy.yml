@@ -114,3 +114,9 @@ jobs:
           done
           echo "healthcheck timeout" >&2
           exit 1
+
+      - name: Clean up old release images
+        run: |
+          ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes root@47.238.71.113 \
+            'cd /root/loong-jump-v17 && bash scripts/cleanup-images.sh --apply' \
+            || echo "cleanup skipped (non-fatal)"
