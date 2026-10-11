@@ -39,6 +39,7 @@ const cases=[
   ["withdrawPlan",["管理员","供应链"]],
   ["decideApproval",["管理员"]],
   ["completeProductionOrder",["管理员","工厂"]],
+  ["exportProductionOrder",["管理员","工厂"]],
   ["acceptProductionOrder",["管理员","工厂"]],
   ["updateProductionProgress",["管理员","工厂"]],
   ["confirmProductionQc",["管理员","供应链"]],

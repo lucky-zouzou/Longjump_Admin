@@ -54,7 +54,7 @@ test("只有管理员能查看全量审计和管理账号", () => {
   }
 });
 
-test("海运菜单只保留总览和批次，不出现收货与新品入口", () => {
-  assert.deepEqual(navigationForRole("海运"),["overview","batches"]);
+test("海运菜单包含共享生产动态，不出现收货与新品入口", () => {
+  assert.deepEqual(navigationForRole("海运"),["production-tracking","overview","batches"]);
   assert.equal(navigationForRole("供应链").includes("audit"),false);
 });
