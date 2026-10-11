@@ -460,7 +460,7 @@ export async function GET(request:Request) {
       records:project.records.map((record:AnyRow)=>record.stage_key==="finance"&&!canReadDomain(actor.role,"finance_detail")?{...record,data:{submitted:true},conclusion:"财务测算已提交"}:record),
     })):[];
     return Response.json(publicSystemSnapshot({
-      actor, currentMonth, metrics, myTasks,
+      actor, currentMonth, metrics, myTasks, generatedAt:new Date().toISOString(),
       adSpend:hasPermission(actor.role,"sales.ad_spend")?await all(`SELECT * FROM sales_ad_spend${scope.clause} ORDER BY business_date DESC`,scope.args):[],
       inventory:canReadDomain(actor.role,"inventory")?inventory:[],
       movements:canReadDomain(actor.role,"inventory")?movements:[],
