@@ -12,6 +12,7 @@ import MonthlyApprovals from "./monthly-approvals";
 import SalesImportHistory from "./sales-import-history";
 import {matchImportItems,groupInboundRows} from "../lib/tabular-import.mjs";
 import ForecastSettings from "./forecast-settings";
+import ProductionTracking,{ProductionOrders} from "./production-workflow";
 import ReplenishmentExport from "./replenishment-export";
 import PlanChanges,{SupplyPicker,PurchaseReassign} from "./plan-changes";
 import Wholesale from "./wholesale";
@@ -46,7 +47,7 @@ type Identity = { userId:string; displayName:string; email:string; fullName:stri
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Row = Record<string,any>;
 type Snapshot = {
-  actor:Row; currentMonth:string; metrics:Row; inventory:Row[]; movements:Row[]; sales:Row[]; imports:Row[];
+  productionTracking:Row[]; generatedAt:string; actor:Row; currentMonth:string; metrics:Row; inventory:Row[]; movements:Row[]; sales:Row[]; imports:Row[];
   supplyPolicies:Row[]; forecastHistory:Row[]; planChanges:Row[]; receipts:Row[]; submissions:Row[]; approvals:Row[]; batches:Row[]; skuSettings:Row[]; audit:Row[];
   users:ManagedUser[]; suggestions:Row[]; monthlyStatus:Row[]; issues:Row[]; newProductProjects:Row[];
   salesScopeStatus:Row[]; salesTopSkus:Row[]; purchaseOrders:Row[]; productionOrders:Row[];
@@ -58,7 +59,7 @@ type Act = (action:string,payload:Row,success:string,onError?:(message:string)=>
 
 const navItems = [
   ["overview","总览","◫"], ["reviews","周报与月度复盘","▤"], ["after-sales","售后反馈","↩"], ["users","用户管理","♙"], ["wholesale","印尼线下批发","▣"], ["suggestions","补货驾驶舱","◎"], ["new-products","新品孵化","◇"], ["sales","销售数据","↗"], ["inventory","库存流水","▦"],
-  ["receipt","历史到仓","↓"], ["monthly","月度计划","▤"], ["approval","审批中心","✓"], ["fulfillment","系列采购生产","▥"], ["batches","海运批次","⇢"],
+  ["receipt","历史到仓","↓"], ["monthly","月度计划","▤"], ["approval","审批中心","✓"], ["fulfillment","系列采购生产","▥"], ["production-tracking","生产动态","◉"], ["batches","海运批次","⇢"],
   ["master","主数据","⌘"], ["audit","审计日志","◷"], ["permissions","权限测试","⊙"],
 ];
 const fmt = (value:unknown) => Number(value || 0).toLocaleString("zh-CN");
@@ -210,6 +211,7 @@ export default function ControlTower({ identity }: { identity:Identity }) {
         {tab==="receipt" && <Receipt data={data} act={act} busy={busy}/>}
         {tab==="monthly" && <Monthly data={data} act={act} busy={busy}/>}
         {tab==="approval" && <Approvals data={data} act={act} busy={busy} goInventory={scope=>{setInventoryScope(scope);setTab("inventory");}} goWholesale={()=>setTab("wholesale")}/>}
+        {tab==="production-tracking" && <ProductionTracking rows={data.productionTracking||[]} generatedAt={data.generatedAt}/>}
         {tab==="fulfillment" && <Fulfillment data={data} act={act} busy={busy}/>}
         {tab==="batches" && <Batches data={data} act={act} busy={busy}/>}
         {tab==="master" && <MasterData data={data} act={act} busy={busy}/>}
@@ -745,20 +747,8 @@ function Approvals({data,act,busy,goWholesale,goInventory}:{data:Snapshot;act:Ac
 }
 
 function Fulfillment({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}){
-  const [productionEdit,setProductionEdit]=useState("");
-  const [producedDraft,setProducedDraft]=useState<Record<string,string>>({});
   const statusLabel:Record<string,string>={draft:"待供应商确认",supplier_confirmed:"供应商已接单",in_production:"生产中",awaiting_qc:"待质检",ready_to_ship:"可发货",qc_rejected:"质检不通过",awaiting_order:"待采购确认",awaiting_factory:"待工厂接单",pending:"历史待生产",completed:"已完工",completed_with_variance:"差异完工"};
-  const startProduction=(order:Row)=>{setProductionEdit(order.id);setProducedDraft(Object.fromEntries(order.items.map((item:Row)=>[item.id,String(item.planned_qty)])));};
-  const finishProduction=async(order:Row)=>{
-    const evidenceRef=window.prompt("请输入工厂生产单号或完工凭证");if(!evidenceRef)return;
-    const note=window.prompt("请输入完工说明；如有短装或超产请说明原因")||"系列生产已完成";
-    const result=await act("completeProductionOrder",{productionOrderId:order.id,evidenceRef,note,items:order.items.map((item:Row)=>({id:item.id,producedQty:Number(producedDraft[item.id]||0)}))},"系列生产完工数量已登记");
-    if(result)setProductionEdit("");
-  };
   const confirmPurchase=async(order:Row)=>{const orderRef=window.prompt("供应商订单号");const expectedCompletionDate=window.prompt("预计完工日（YYYY-MM-DD）",localDate());const note=window.prompt("接单说明")||"供应商已确认";if(orderRef&&expectedCompletionDate)await act("confirmPurchaseOrder",{purchaseOrderId:order.id,orderRef,expectedCompletionDate,note},"供应商接单已确认并推送工厂");};
-  const acceptProduction=async(order:Row)=>{const promisedCompletionDate=window.prompt("工厂承诺完工日（YYYY-MM-DD）",order.promised_completion_date||localDate());const evidenceRef=window.prompt("工厂接单凭证编号");const note=window.prompt("接单说明")||"已排产";if(promisedCompletionDate&&evidenceRef)await act("acceptProductionOrder",{productionOrderId:order.id,promisedCompletionDate,evidenceRef,note},"工厂已接单并进入生产");};
-  const updateProgress=async(order:Row)=>{const progressPct=window.prompt("最新生产进度（1—99）",String(Math.max(1,Number(order.progress_pct||1))));const evidenceRef=window.prompt("进度凭证编号");const note=window.prompt("进度说明")||"生产进度更新";if(progressPct&&evidenceRef)await act("updateProductionProgress",{productionOrderId:order.id,progressPct:Number(progressPct),evidenceRef,note},"生产进度已更新");};
-  const qc=async(order:Row,decision:string)=>{const evidenceRef=window.prompt("质检报告/抽检单编号");const note=window.prompt(decision==="pass"?"质检通过说明":"不通过原因与返工要求");if(evidenceRef&&note)await act("confirmProductionQc",{productionOrderId:order.id,decision,evidenceRef,note},decision==="pass"?"质检通过，可进入发货":"质检不通过，已暂停发货");};
   return <>
     <PageHead title="系列采购与生产" desc="运营需求保留SKU，供应链和工厂按产品系列协同">
       <Pill tone={data.metrics.readyToShipProductionOrderCount?"red":"green"}>{data.metrics.readyToShipProductionOrderCount?`${data.metrics.readyToShipProductionOrderCount}张生产单待发货`:"生产发货衔接正常"}</Pill>
@@ -769,25 +759,11 @@ function Fulfillment({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}){
       <div className="metric"><div className="label">待创建海运批次</div><div className="value">{fmt(data.metrics.readyToShipProductionOrderCount)}</div><div className="foot">可按SKU拆分发货</div></div>
       <div className="metric"><div className="label">运输主批次</div><div className="value">{fmt(data.transportBatches.length)}</div><div className="foot">可跨系列合柜，多目的地分腿</div></div>
     </div>
+    {data.actor.role==="工厂"&&<ProductionOrders data={data} act={act} busy={busy}/>}
     <Panel title="系列采购单" desc="默认只展示系列汇总；SKU明细在生产单中追溯">
       <div className="table-wrap"><table><thead><tr><th>月份</th><th>系列</th><th>供应商</th><th className="num">SKU数</th><th className="num">下单数量</th><th>订单/交期</th><th>状态</th><th></th></tr></thead><tbody>{data.purchaseOrders.length===0?<tr><td colSpan={8}><Empty>管理员批准月度计划后自动生成系列采购单</Empty></td></tr>:data.purchaseOrders.map(order=><tr key={order.id}><td>{order.month}</td><td><strong>{order.series_name}</strong><div className="cell-note">{order.id}</div></td><td>{order.supplier_name}</td><td className="num">{fmt(order.visibleSkuCount)}</td><td className="num">{fmt(order.visibleQty)}</td><td>{order.order_ref||"—"}<div className="cell-note">{order.expected_completion_date||"待确认"}</div></td><td><Pill tone={order.status==="draft"?"red":order.status==="qc_rejected"?"red":"green"}>{statusLabel[order.status]||order.status}</Pill></td><td>{["draft","ordered"].includes(order.status)&&hasPermission(data.actor.role,"purchase.confirm")&&<button className="btn primary" disabled={busy} onClick={()=>confirmPurchase(order)}>确认接单</button>}<PurchaseReassign data={data} order={order} act={act} busy={busy}/></td></tr>)}</tbody></table></div>
     </Panel>
-    <Panel title="系列生产单" desc="工厂登记各SKU完工数量；供应链按剩余可发量创建一个或多个海运批次">
-      {data.productionOrders.length===0?<Empty>暂无系列生产单</Empty>:<div className="order-card-list">{data.productionOrders.map(order=><article className={classNames("order-card",order.producedVariance&&["completed","completed_with_variance"].includes(order.status)&&"has-warning")} key={order.id}>
-        <header><div><span>{order.id}</span><h4>{order.series_name}</h4><p>{order.factory_name}｜{order.items.length} 个SKU</p></div><div><Pill tone={order.status==="completed"?"green":order.status==="completed_with_variance"?"amber":"blue"}>{statusLabel[order.status]||order.status}</Pill></div></header>
-        <div className="order-summary"><span>计划<strong>{fmt(order.visiblePlannedQty)}</strong></span><span>进度<strong>{fmt(order.progress_pct)}%</strong></span><span>完工<strong>{fmt(order.visibleProducedQty)}</strong></span><span>待发<strong>{fmt(order.remainingToShip)}</strong></span><span>质检<strong>{order.qc_status==="passed"?"通过":order.qc_status==="rejected"?"不通过":"待确认"}</strong></span></div>
-        <div className="table-wrap"><table className="trace-table"><thead><tr><th>SKU</th><th>商品</th><th className="num">下单</th><th className="num">计划生产</th><th className="num">实际完工</th><th className="num">累计发货</th><th className="num">剩余可发</th></tr></thead><tbody>{order.items.map((item:Row)=><tr key={item.id}><td><strong>{item.sku}</strong></td><td>{item.name||"—"}</td><td className="num">{fmt(item.orderedQty)}</td><td className="num">{fmt(item.visiblePlanned)}</td><td className="num">{productionEdit===order.id?<input className="qty-input" type="number" min="0" max={Number(item.planned_qty)*2} value={producedDraft[item.id]??""} onChange={event=>setProducedDraft({...producedDraft,[item.id]:event.target.value})}/>:fmt(item.visibleProduced)}</td><td className="num">{fmt(item.shippedQty)}</td><td className="num"><strong>{fmt(item.remainingToShip)}</strong></td></tr>)}</tbody></table></div>
-        {productionEdit===order.id&&<div className="inline-editor"><div className="notice info">完工数量可以与计划不同，系统会自动形成生产差异预警。</div><div className="form-actions"><button className="btn" onClick={()=>setProductionEdit("")}>取消</button><button className="btn primary" disabled={busy} onClick={()=>finishProduction(order)}>提交完工数量</button></div></div>}
-        <footer>
-          {order.status==="awaiting_factory"&&hasPermission(data.actor.role,"production.accept")&&<button className="btn primary" disabled={busy} onClick={()=>acceptProduction(order)}>工厂接单</button>}
-          {order.status==="in_production"&&hasPermission(data.actor.role,"production.progress")&&<button className="btn" disabled={busy} onClick={()=>updateProgress(order)}>更新进度</button>}
-          {["in_production","pending"].includes(order.status)&&hasPermission(data.actor.role,"production.complete")&&productionEdit!==order.id&&<button className="btn primary" disabled={busy} onClick={()=>startProduction(order)}>登记系列完工</button>}
-          {['completed','completed_with_variance'].includes(order.status)&&order.qc_status!=="passed"&&hasPermission(data.actor.role,"production.qc")&&<><button className="btn primary" disabled={busy} onClick={()=>qc(order,"pass")}>质检通过</button><button className="btn danger" disabled={busy} onClick={()=>qc(order,"reject")}>不通过</button></>}
-          {order.qc_status==="passed"&&order.remainingToShip>0&&<span className="success-text">已通过质检，请到“海运批次”跨系列合并发货</span>}
-          {order.producedVariance&&['completed','completed_with_variance'].includes(order.status)&&<span className="warning-text">计划与完工相差 {fmt(Math.abs(Number(order.total_planned_qty)-Number(order.total_produced_qty)))} 件</span>}
-        </footer>
-      </article>)}</div>}
-    </Panel>
+    {data.actor.role!=="工厂"&&<ProductionOrders data={data} act={act} busy={busy}/>}
   </>;
 }
 

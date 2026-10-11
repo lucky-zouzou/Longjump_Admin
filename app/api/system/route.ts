@@ -1,3 +1,4 @@
+import {productionTracking,productionDocument,productionFingerprint} from "../../../lib/production-workflow.mjs";
 import {afterTasks} from "../../../lib/after-sales.mjs";
 import {reviewTasks} from "../../../lib/business-reviews.mjs";
 import {saveSalesAdSpend} from "../../../lib/sales-ad-spend.mjs";
@@ -119,7 +120,7 @@ export async function GET(request:Request) {
       requireBusinessPermission(actor,"backup.export");
       return Response.redirect(new URL("/api/backup",request.url),307);
     }
-    if(actor.role==="销售") return Response.json({actor,currentMonth:monthKey(),metrics:{},myTasks:[...await wholesaleTasks(database(),actor),...await reviewTasks(database(),actor),...await afterTasks(database(),actor)],...Object.fromEntries(["inventory", "movements", "sales", "imports", "receipts", "submissions", "approvals", "batches", "skuSettings", "audit", "users", "suggestions", "monthlyStatus", "issues", "newProductProjects", "salesScopeStatus", "salesTopSkus", "purchaseOrders", "productionOrders", "shipmentBatches", "shipmentReceipts", "transportBatches", "transportReceipts", "businessPartners", "warehouses", "countRequests"].map(key=>[key,[]]))});
+    if(actor.role==="销售") return Response.json({actor,currentMonth:monthKey(),generatedAt:nowIso(),productionTracking:productionTracking(...await Promise.all([all("SELECT * FROM series_production_orders"),all("SELECT * FROM series_production_order_items"),all("SELECT * FROM series_purchase_orders"),all("SELECT entity_id,created_at,actor_name FROM audit_logs WHERE entity_type='series_production_order' AND action='生成工厂订单导出' ORDER BY created_at")]) as [AnyRow[],AnyRow[],AnyRow[],AnyRow[]]),metrics:{},myTasks:[...await wholesaleTasks(database(),actor),...await reviewTasks(database(),actor),...await afterTasks(database(),actor)],...Object.fromEntries(["inventory", "movements", "sales", "imports", "receipts", "submissions", "approvals", "batches", "skuSettings", "audit", "users", "suggestions", "monthlyStatus", "issues", "newProductProjects", "salesScopeStatus", "salesTopSkus", "purchaseOrders", "productionOrders", "shipmentBatches", "shipmentReceipts", "transportBatches", "transportReceipts", "businessPartners", "warehouses", "countRequests"].map(key=>[key,[]]))});
     const requestedImport=requestUrl.searchParams.get("salesImportId");
     if(requestedImport){
       requireBusinessPermission(actor,"sales.correct");
@@ -461,6 +462,7 @@ export async function GET(request:Request) {
     })):[];
     return Response.json(publicSystemSnapshot({
       actor, currentMonth, metrics, myTasks, generatedAt:new Date().toISOString(),
+      productionTracking:canReadDomain(actor.role,"production_tracking")?productionTracking(productionOrderRows,productionItemRows,purchaseOrderRows,await all("SELECT entity_id,created_at,actor_name FROM audit_logs WHERE entity_type='series_production_order' AND action='生成工厂订单导出' ORDER BY created_at")):[],
       adSpend:hasPermission(actor.role,"sales.ad_spend")?await all(`SELECT * FROM sales_ad_spend${scope.clause} ORDER BY business_date DESC`,scope.args):[],
       inventory:canReadDomain(actor.role,"inventory")?inventory:[],
       movements:canReadDomain(actor.role,"inventory")?movements:[],
@@ -520,6 +522,7 @@ export async function POST(request:Request) {
     if (action === "decideApproval") return await decideApproval(actor, payload);
     if (action === "withdrawPlan") return await withdrawPlan(actor, payload);
     if (action === "confirmPurchaseOrder") return await confirmPurchaseOrder(actor,payload);
+    if (action === "exportProductionOrder") return await exportProductionOrder(actor,payload);
     if (action === "acceptProductionOrder") return await acceptProductionOrder(actor,payload);
     if (action === "updateProductionProgress") return await updateProductionProgress(actor,payload);
     if (action === "completeProductionOrder") return await completeProductionOrder(actor,payload);
@@ -1016,6 +1019,21 @@ async function confirmPurchaseOrder(actor:Actor,payload:AnyRow){
   return Response.json({ok:true,status:"supplier_confirmed"});
 }
 
+async function exportProductionOrder(actor:Actor,payload:AnyRow){
+  requireBusinessPermission(actor,"production.export");
+  const productionOrderId=cleanText(payload.productionOrderId,120),db=database();
+  const order=await db.prepare("SELECT * FROM series_production_orders WHERE id=?").bind(productionOrderId).first<AnyRow>();
+  if(!order)throw new HttpError(404,"生产单不存在");
+  requireAssignedActor(actor,"工厂",order.assigned_user_id,"生产单");
+  if(order.status==="awaiting_order")throw new HttpError(409,"采购尚未确认，暂不能导出确认生产订单");
+  const items=await all("SELECT * FROM series_production_order_items WHERE production_order_id=? ORDER BY sku",[order.id]);
+  const purchase=await db.prepare("SELECT * FROM series_purchase_orders WHERE id=?").bind(order.purchase_order_id).first<AnyRow>();
+  const document=productionDocument(order,items,purchase||{}),fingerprint=await productionFingerprint(order,items,purchase||{}),receiptId=makeId("export"),timestamp=nowIso();
+  await atomicBatch(db,[guardStatement(db,actor,"导出工厂订单","EXISTS(SELECT 1 FROM series_production_orders WHERE id=? AND updated_at=? AND status=?)",[order.id,order.updated_at,order.status]),
+    db.prepare("INSERT INTO audit_logs(id,action,entity_type,entity_id,detail_json,actor_id,actor_name,created_at) VALUES(?,'生成工厂订单导出','series_production_order',?,?,?,?,?)").bind(receiptId,order.id,JSON.stringify({fingerprint,skuCount:items.length,plannedQty:document.plannedQty}),actor.id,actor.name,timestamp)]);
+  return Response.json({ok:true,document,exportReceiptId:receiptId});
+}
+
 async function acceptProductionOrder(actor:Actor,payload:AnyRow){
   requireBusinessPermission(actor,"production.accept");
   const productionOrderId=cleanText(payload.productionOrderId,120),promisedCompletionDate=cleanText(payload.promisedCompletionDate,10),evidenceRef=cleanText(payload.evidenceRef,240),note=cleanText(payload.note,500);
@@ -1023,9 +1041,15 @@ async function acceptProductionOrder(actor:Actor,payload:AnyRow){
   const db=database(),order=await db.prepare("SELECT * FROM series_production_orders WHERE id=?").bind(productionOrderId).first<AnyRow>();
   if(!order||order.status!=="awaiting_factory") throw new HttpError(409,"该生产单当前不能接单");
   requireAssignedActor(actor,"工厂",order.assigned_user_id,"生产单");
+  if(payload.orderReviewed!==true)throw new HttpError(400,"请先导出订单，并确认已核对SKU、数量和交期");
+  const receipt=await db.prepare("SELECT * FROM audit_logs WHERE id=? AND actor_id=? AND entity_id=? AND entity_type='series_production_order' AND action='生成工厂订单导出'").bind(cleanText(payload.exportReceiptId,120),actor.id,order.id).first<AnyRow>();
+  const items=await all("SELECT * FROM series_production_order_items WHERE production_order_id=? ORDER BY sku",[order.id]);
+  const purchase=await db.prepare("SELECT * FROM series_purchase_orders WHERE id=?").bind(order.purchase_order_id).first<AnyRow>();
+  if(!receipt||parseJson<AnyRow>(receipt.detail_json,{}).fingerprint!==await productionFingerprint(order,items,purchase||{}))throw new HttpError(409,"订单尚未导出或导出后已变化，请重新导出并核对");
   const timestamp=nowIso(),evidence=parseJson<AnyRow[]>(order.evidence_json,[]);
-  evidence.push({stage:"factory_accepted",reference:evidenceRef,note,promisedCompletionDate,at:timestamp,by:actor.name,role:actor.role});
-  await db.batch([
+  evidence.push({stage:"factory_accepted",reference:evidenceRef,note,promisedCompletionDate,exportReceiptId:receipt.id,at:timestamp,by:actor.name,role:actor.role});
+  await atomicBatch(db,[
+    guardStatement(db,actor,"工厂接单状态校验","EXISTS(SELECT 1 FROM series_production_orders WHERE id=? AND status='awaiting_factory' AND updated_at=?)",[order.id,order.updated_at]),
     db.prepare("UPDATE series_production_orders SET status='in_production',promised_completion_date=?,progress_pct=1,evidence_json=?,started_at=?,updated_at=? WHERE id=? AND status='awaiting_factory'").bind(promisedCompletionDate,JSON.stringify(evidence),timestamp,timestamp,productionOrderId),
     db.prepare("UPDATE series_purchase_orders SET status='in_production',updated_at=? WHERE id=?").bind(timestamp,order.purchase_order_id),
     audit(actor,"工厂确认生产接单","series_production_order",productionOrderId,{promisedCompletionDate,evidenceRef,note}),
@@ -1035,7 +1059,7 @@ async function acceptProductionOrder(actor:Actor,payload:AnyRow){
 
 async function updateProductionProgress(actor:Actor,payload:AnyRow){
   requireBusinessPermission(actor,"production.progress");
-  const productionOrderId=cleanText(payload.productionOrderId,120),progressPct=int(payload.progressPct),evidenceRef=cleanText(payload.evidenceRef,240),note=cleanText(payload.note,500);
+  const productionOrderId=cleanText(payload.productionOrderId,120),progressPct=Number(payload.progressPct),evidenceRef=cleanText(payload.evidenceRef,240),note=cleanText(payload.note,500);
   if(!Number.isInteger(progressPct)||progressPct<1||progressPct>99||!evidenceRef) throw new HttpError(400,"生产进度需为1—99%，并填写进度凭证");
   const db=database(),order=await db.prepare("SELECT * FROM series_production_orders WHERE id=?").bind(productionOrderId).first<AnyRow>();
   if(!order||order.status!=="in_production") throw new HttpError(409,"只有生产中的订单可以更新进度");
@@ -1043,7 +1067,7 @@ async function updateProductionProgress(actor:Actor,payload:AnyRow){
   if(progressPct<Number(order.progress_pct||0)) throw new HttpError(409,"生产进度不能倒退");
   const timestamp=nowIso(),evidence=parseJson<AnyRow[]>(order.evidence_json,[]);
   evidence.push({stage:"production_progress",reference:evidenceRef,note,progressPct,at:timestamp,by:actor.name,role:actor.role});
-  await db.batch([db.prepare("UPDATE series_production_orders SET progress_pct=?,evidence_json=?,updated_at=? WHERE id=? AND status='in_production' AND progress_pct<=?").bind(progressPct,JSON.stringify(evidence),timestamp,productionOrderId,progressPct),audit(actor,"更新生产进度","series_production_order",productionOrderId,{progressPct,evidenceRef,note})]);
+  await atomicBatch(db,[guardStatement(db,actor,"生产进度状态校验","EXISTS(SELECT 1 FROM series_production_orders WHERE id=? AND status='in_production' AND updated_at=? AND progress_pct=?)",[order.id,order.updated_at,order.progress_pct]),db.prepare("UPDATE series_production_orders SET progress_pct=?,evidence_json=?,updated_at=? WHERE id=? AND status='in_production' AND progress_pct<=?").bind(progressPct,JSON.stringify(evidence),timestamp,productionOrderId,progressPct),audit(actor,"更新生产进度","series_production_order",productionOrderId,{progressPct,evidenceRef,note})]);
   return Response.json({ok:true,progressPct});
 }
 
@@ -1058,7 +1082,7 @@ async function completeProductionOrder(actor:Actor,payload:AnyRow){
   if(["completed","completed_with_variance"].includes(order.status)) throw new HttpError(409,"该系列生产单已经完成，不能重复登记");
   const sourceItems=await all("SELECT * FROM series_production_order_items WHERE production_order_id=?",[productionOrderId]);
   const inputMap=new Map<string,number>();
-  for(const row of Array.isArray(payload.items)?payload.items:[]){const idValue=cleanText(row.id,120),qty=int(row.producedQty);if(idValue&&Number.isInteger(qty))inputMap.set(idValue,qty);}
+  for(const row of Array.isArray(payload.items)?payload.items:[]){const idValue=cleanText(row.id,120),qty=Number(row.producedQty);if(idValue&&Number.isInteger(qty))inputMap.set(idValue,qty);}
   if(sourceItems.some((row)=>!inputMap.has(row.id))) throw new HttpError(400,"请完整填写该系列下所有SKU的完工数量");
   let totalProduced=0;
   for(const item of sourceItems){const qty=Number(inputMap.get(item.id));if(qty<0||qty>Number(item.planned_qty)*2)throw new HttpError(400,`${item.sku}完工数量不合法`);totalProduced+=qty;}
@@ -1070,7 +1094,7 @@ async function completeProductionOrder(actor:Actor,payload:AnyRow){
     db.prepare("UPDATE series_purchase_orders SET status='awaiting_qc',updated_at=? WHERE id=?").bind(timestamp,order.purchase_order_id),
     audit(actor,"完成系列生产","series_production_order",productionOrderId,{seriesName:order.series_name,plannedQty:order.total_planned_qty,producedQty:totalProduced,status,evidenceRef}),
   );
-  await db.batch(statements);
+  await atomicBatch(db,statements);
   return Response.json({ok:true,status,totalProduced,variance:totalProduced-Number(order.total_planned_qty)});
 }
 
@@ -1080,9 +1104,12 @@ async function confirmProductionQc(actor:Actor,payload:AnyRow){
   if(!["pass","reject"].includes(decision)||!evidenceRef||note.length<3) throw new HttpError(400,"请选择质检结果，并填写质检报告编号和说明");
   const db=database(),order=await db.prepare("SELECT * FROM series_production_orders WHERE id=?").bind(productionOrderId).first<AnyRow>();
   if(!order||!["completed","completed_with_variance"].includes(order.status)) throw new HttpError(409,"只有已完工生产单可以质检");
+  if(order.qc_status==="passed")throw new HttpError(409,"该生产单已质检通过，不能重复确认或退回");
   const timestamp=nowIso(),qcStatus=decision==="pass"?"passed":"rejected";
-  await db.batch([
-    db.prepare("UPDATE series_production_orders SET qc_status=?,qc_evidence=?,qc_at=?,qc_by=?,updated_at=? WHERE id=?").bind(qcStatus,evidenceRef,timestamp,actor.id,timestamp,productionOrderId),
+  const evidence=parseJson<AnyRow[]>(order.evidence_json,[]);evidence.push({stage:decision==="pass"?"qc_passed":"qc_rejected",reference:evidenceRef,note,at:timestamp,by:actor.name,role:actor.role});
+  await atomicBatch(db,[
+    guardStatement(db,actor,"生产质检状态校验","EXISTS(SELECT 1 FROM series_production_orders WHERE id=? AND updated_at=? AND qc_status=?)",[order.id,order.updated_at,order.qc_status]),
+    db.prepare("UPDATE series_production_orders SET qc_status=?,qc_evidence=?,qc_at=?,qc_by=?,evidence_json=?,updated_at=? WHERE id=?").bind(qcStatus,evidenceRef,timestamp,actor.id,JSON.stringify(evidence),timestamp,productionOrderId),
     db.prepare("UPDATE series_purchase_orders SET status=?,updated_at=? WHERE id=?").bind(decision==="pass"?"ready_to_ship":"qc_rejected",timestamp,order.purchase_order_id),
     audit(actor,decision==="pass"?"生产质检通过":"生产质检不通过","series_production_order",productionOrderId,{evidenceRef,note}),
   ]);
