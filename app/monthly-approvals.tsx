@@ -1,6 +1,7 @@
 "use client";
 
 import {useState} from "react";
+import ReplenishmentExport from "./replenishment-export";
 import PlanInventoryCheck from "./plan-inventory-check";
 import {SupplyPicker} from "./plan-changes";
 
@@ -33,6 +34,7 @@ function PlanCard({row,data,act,busy,goInventory}:{row:Row;data:Row;act:Act;busy
   return <article className="panel monthly-approval" aria-label={`${row.month}月度计划`}>
     <header className="approval-header"><div><h3>{row.month} 月度备货计划</h3><p>送审人：{row.creator_name||"历史账号"} · {row.creator_role} <span>版本 V{row.version}</span></p></div><span className={`pill ${row.status==="approved"?"green":"red"}`}>{labels[row.status]||row.status}</span></header>
     <div className="approval-totals"><span>产品系列<strong>{format(series.length)}</strong></span><span>SKU<strong>{format(items.length)}</strong></span><span>备货总量<strong>{format(items.reduce((sum,item)=>sum+Number(item.total||0),0))} 件</strong></span></div>
+    <ReplenishmentExport snapshot={data} approvalId={row.id} showForecast={false}/>
     {row.decision_comment&&<p className="approval-comment">最近处理意见：{row.decision_comment}</p>}
     {pending&&<div className={`notice ${own&&admin?"warn":"info"}`}>{own&&admin?"这张计划由您送审，不能自行批准或驳回。请先撤回，再由供应链账号重新送审，之后您就可以审批。":own?"您是本次送审人，等待管理员审批。需要调整时可以撤回。":admin?"请核对计划明细；批准时指定供应链负责人，驳回时填写原因。":"当前等待管理员审批；供应链账号负责送审和执行，不负责审批。"}</div>}
     {["withdrawn","rejected"].includes(row.status)&&<div className="notice info">运营已提交的需求保留，可以调整后再次提交；由供应链账号核对并重新送审，再交管理员审批。</div>}

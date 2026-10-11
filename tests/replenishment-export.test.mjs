@@ -46,7 +46,7 @@ test('原生XLSX可读回，数量为数值，SKU前导零和公式样文本保�
   assert.equal(cell('建议启动生产').t,'n');assert.equal(cell('7日日均').v,2.5);assert.equal(cell('7日日均').z,'0.00;[Red]-0.00');
   assert.equal(cell('库存可售天数')?.v||'','');assert.equal(cell('预计到仓日期')?.v||'','');
   assert.ok(ws['!autofilter']);
-  assert.equal(replenishmentDownloadName('2026-10-11T01:03:44Z'),'备货明细-2026-10-11-090344.xlsx');
+  assert.equal(replenishmentDownloadName('2026-10-11T01:03:44Z'),'补货测算-2026-10-11-090344.xlsx');
 });
 
 test('导出不按图表或导入上限截断，零建议和负库存行完整保留，空表有表头与零汇总',()=>{
