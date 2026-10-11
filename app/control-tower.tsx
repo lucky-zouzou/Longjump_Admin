@@ -12,6 +12,7 @@ import MonthlyApprovals from "./monthly-approvals";
 import SalesImportHistory from "./sales-import-history";
 import {matchImportItems,groupInboundRows} from "../lib/tabular-import.mjs";
 import ForecastSettings from "./forecast-settings";
+import ReplenishmentExport from "./replenishment-export";
 import PlanChanges,{SupplyPicker,PurchaseReassign} from "./plan-changes";
 import Wholesale from "./wholesale";
 import UserManagement,{type ManagedUser} from "./user-management";
@@ -346,7 +347,7 @@ function Suggestions({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
   const m=data.metrics;
   return <>
     <PageHead title="补货与生产驾驶舱" desc="每日销量驱动，按站点＋渠道＋SKU独立判断断货、补货和生产时点">
-      <Pill tone={m.actionAlertCount?"red":"green"}>{m.actionAlertCount?`${m.actionAlertCount}项需行动`:"供应覆盖正常"}</Pill>
+      <div className="replenishment-actions"><ReplenishmentExport snapshot={data}/><Pill tone={m.actionAlertCount?"red":"green"}>{m.actionAlertCount?`${m.actionAlertCount}项需行动`:"供应覆盖正常"}</Pill></div>
     </PageHead>
     <div className="model-strip">
       <div><span>需求速度</span><strong>滚动7／21／56天加权，结合需求修正</strong></div><b>×</b><div><span>覆盖周期</span><strong>生产＋海运＋7天复盘</strong></div><b>＋</b><div><span>安全库存</span><strong>销量波动 × 服务水平</strong></div><b>－</b><div><span>供应链库存位</span><strong>库存＋海运＋生产中</strong></div>
