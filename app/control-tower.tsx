@@ -1,5 +1,6 @@
 "use client";
 import AfterSales from "./after-sales";
+import InboundReceipts from "./inbound-receipts";
 import BusinessReviews from "./business-reviews";
 import SalesAdSpend from "./sales-ad-spend";
 import SalesDashboard from "./sales-dashboard";
@@ -10,7 +11,7 @@ import TableImport from "./table-import";
 import MonthlyDemandEditor from "./monthly-demand-editor";
 import MonthlyApprovals from "./monthly-approvals";
 import SalesImportHistory from "./sales-import-history";
-import {matchImportItems,groupInboundRows} from "../lib/tabular-import.mjs";
+import {matchImportItems} from "../lib/tabular-import.mjs";
 import ForecastSettings from "./forecast-settings";
 import ProductionTracking,{ProductionOrders} from "./production-workflow";
 import ReplenishmentExport from "./replenishment-export";
@@ -679,42 +680,7 @@ function Inventory({data,act,busy,scope,clearScope}:{data:Snapshot;act:Act;busy:
 }
 
 function Receipt({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
-  const [form,setForm]=useState({receiptNo:"",sku:"",name:"",sourceBatch:"",proofRef:""});
-  const [allocations,setAllocations]=useState<AllocationDraft[]>([{site:SITES[0],channel:"TikTok",qty:""}]);
-  const totalQty=allocations.reduce((s,r)=>s+(Number(r.qty)||0),0);
-  const submit=async()=>{
-    const result=await act("receiveInbound",{...form,totalQty,allocations:allocations.map(r=>({...r,qty:Number(r.qty)}))},form.sourceBatch?"到仓已入库，下一步由各站点运营确认上架":"到仓单已按真实站点和渠道入库");
-    if(!result)return;
-    setForm({receiptNo:"",sku:"",name:"",sourceBatch:"",proofRef:""});setAllocations([{site:SITES[0],channel:"TikTok",qty:""}]);
-  };
-  return <>
-    <PageHead title="渠道级到仓入库" desc="不再按平台各半估算；到仓单号唯一，重复提交会被系统阻止"/>
-    {hasPermission(data.actor.role,"inbound.receive")&&<Panel title="批量导入到仓单" desc="可一次导入多张到仓单及其站点渠道分配">
-      <TableImport kind="inbound" busy={busy} confirmLabel="确认整批到仓入库" description="每行填写到仓单号、SKU、站点、渠道、实收数量和到仓凭证。同一单号对应一个SKU，可分配到多个渠道；不同SKU请使用不同单号。供应链必须填写历史生产批次，管理员可导入例外入库。每次最多200行。" validate={rows=>{groupInboundRows(rows);}} onApply={async(rows,meta)=>Boolean(await act("bulkImport",{kind:"inbound",rows,...meta},"到仓文件已整批导入，库存与流水已更新"))}/>
-    </Panel>}
-    {hasPermission(data.actor.role,"inbound.receive")&&<Panel title="新建到仓单" desc="每一行必须明确站点、渠道和实收数量">
-      <div className="form-grid">
-        <Field label="到仓单号"><input value={form.receiptNo} onChange={e=>setForm({...form,receiptNo:e.target.value})} placeholder="例如 WH-202609-001"/></Field>
-        <Field label="SKU"><input value={form.sku} onChange={e=>setForm({...form,sku:e.target.value})}/></Field>
-        <Field label="商品名称"><input value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/></Field>
-        <Field label="关联历史生产批次"><select value={form.sourceBatch} onChange={e=>setForm({...form,sourceBatch:e.target.value})}>{data.actor.role==="管理员"&&<option value="">管理员例外入库</option>}{data.actor.role!=="管理员"&&<option value="">必须选择批次</option>}{data.batches.filter(b=>b.stage==="awaiting_receipt").map(b=><option key={b.id} value={b.id}>{b.id} · {b.sku}</option>)}</select></Field>
-        <Field label="到仓凭证/文件编号" span={4}><input value={form.proofRef} onChange={e=>setForm({...form,proofRef:e.target.value})} placeholder="必填：海外仓入库单、签收单或共享文件编号"/></Field>
-      </div>
-      <div style={{marginTop:16}}>
-        {allocations.map((r,i)=><div className="form-grid" key={i} style={{marginBottom:9}}>
-          <Field label={i===0?"站点":""}><select value={r.site} onChange={e=>setAllocations(allocations.map((x,j)=>j===i?{...x,site:e.target.value}:x))}>{SITES.map(s=><option key={s}>{s}</option>)}</select></Field>
-          <Field label={i===0?"渠道":""}><select value={r.channel} onChange={e=>setAllocations(allocations.map((x,j)=>j===i?{...x,channel:e.target.value}:x))}>{CHANNELS.map(c=><option key={c}>{c}</option>)}</select></Field>
-          <Field label={i===0?"实收数量":""}><input type="number" min="1" value={r.qty} onChange={e=>setAllocations(allocations.map((x,j)=>j===i?{...x,qty:e.target.value}:x))}/></Field>
-          <div style={{alignSelf:"end"}}>{i===0?<button className="btn" onClick={()=>setAllocations([...allocations,{site:SITES[0],channel:"TikTok",qty:""}])}>＋ 增加分配</button>:<button className="btn danger" onClick={()=>setAllocations(allocations.filter((_,j)=>j!==i))}>移除</button>}</div>
-        </div>)}
-      </div>
-      <div className="notice info">本次实收合计：<strong>{fmt(totalQty)} 件</strong>。系统将逐行写入对应渠道库存和库存流水。</div>
-      <div className="form-actions"><button className="btn primary" disabled={busy||!form.receiptNo||!form.sku||!form.proofRef||totalQty<=0} onClick={submit}>确认到仓入库</button></div>
-    </Panel>}
-    <Panel title="最近到仓单">
-      <div className="table-wrap"><table><thead><tr><th>到仓时间</th><th>单号</th><th>SKU</th><th className="num">实收</th><th>关联批次</th><th>凭证</th><th>渠道分配</th></tr></thead><tbody>{data.receipts.length===0?<tr><td colSpan={7}><Empty>暂无到仓单</Empty></td></tr>:data.receipts.map(r=><tr key={r.id}><td>{String(r.received_at).replace("T"," ").slice(0,16)}</td><td>{r.receipt_no}</td><td>{r.sku}<br/>{r.name}</td><td className="num">{fmt(r.total_qty)}</td><td>{r.source_batch||"—"}</td><td>{r.proof_ref}</td><td>{String(r.allocations||"").split(";;").filter(Boolean).map((a:string)=>{const [s,c,q]=a.split("|");return <div key={a}>{s} · {c}：{fmt(q)}</div>})}</td></tr>)}</tbody></table></div>
-    </Panel>
-  </>;
+  return <InboundReceipts data={data} act={act} busy={busy}/>;
 }
 
 function Monthly({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {

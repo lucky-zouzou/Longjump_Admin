@@ -1,10 +1,11 @@
+import {previewInbound,submitInbound,readInboundDocuments,InboundError} from "../../../lib/inbound.mjs";
 import {productionTracking,productionDocument,productionFingerprint} from "../../../lib/production-workflow.mjs";
 import {afterTasks} from "../../../lib/after-sales.mjs";
 import {reviewTasks} from "../../../lib/business-reviews.mjs";
 import {saveSalesAdSpend} from "../../../lib/sales-ad-spend.mjs";
 import {publicSystemSnapshot} from "../../../lib/system-response.mjs";
 import {normalizeSales,SITE_CURRENCIES} from "../../../lib/sales-data.mjs";
-import {validateImportRows,groupInboundRows} from "../../../lib/tabular-import.mjs";
+import {validateImportRows} from "../../../lib/tabular-import.mjs";
 import {checkPlanInventory,confirmPlanInventory,reviewedInventoryGuards} from "../../../lib/plan-integrity.mjs";
 import {systemChecks} from "../../../lib/system-checks.mjs";
 import {saveForecastData} from "../../../lib/forecast-management.mjs";
@@ -469,6 +470,7 @@ export async function GET(request:Request) {
       sales:canReadDomain(actor.role,"sales")?sales:[],
       imports:canReadDomain(actor.role,"sales")?imports:[],
       receipts:canReadDomain(actor.role,"inventory")?receipts:[],
+      inboundDocuments:await readInboundDocuments(database(),actor),
       supplyPolicies:canReadDomain(actor.role,"planning")?policies:[],
       forecastHistory:canReadDomain(actor.role,"planning")?await all(`SELECT f.*,COALESCE((SELECT SUM(s.qty) FROM sales_records s WHERE s.sku=f.sku AND s.site=f.site AND s.channel=f.channel AND substr(s.business_date,1,7)=f.month AND s.reversed_at IS NULL),0)-COALESCE((SELECT SUM(c.return_qty) FROM sales_demand_corrections c WHERE c.sku=f.sku AND c.site=f.site AND c.channel=f.channel AND substr(c.business_date,1,7)=f.month),0) actual_sales FROM forecast_snapshots f${actor.role==="运营"?" WHERE f.site=? AND f.channel=?":""} ORDER BY month DESC`,actor.role==="运营"?[actor.site,actor.channel]:[]):[],
       planChanges: ["管理员","供应链"].includes(actor.role)?(await all("SELECT * FROM plan_changes ORDER BY created_at DESC")).map(r=>({...r,old:parseJson(r.old_json,{}),next:parseJson(r.new_json,{})})):[],
@@ -514,6 +516,7 @@ export async function POST(request:Request) {
     if (action === "decideInventoryCount") return await decideInventoryCount(actor,payload);
     if (action === "resolveInventoryHold") return await resolveInventoryHold(actor,payload);
     if (action === "receiveInbound") return await receiveInbound(actor, payload);
+    if (action === "previewInbound") return Response.json(await previewInbound(database(),actor,payload));
     if (["salesAdSpendSave","salesAdSpendDelete"].includes(action)) return Response.json(await saveSalesAdSpend(database(),actor,payload));
     if (["supplyPolicySave","demandCorrectionSave"].includes(action)) return Response.json(await saveForecastData(database(),actor,payload));
     if (PLAN_ACTIONS.has(action)) return Response.json(await managePlan(database(),actor,payload,{buildSeriesOrders}));
@@ -553,8 +556,9 @@ export async function POST(request:Request) {
 
 async function bulkImport(actor:Actor,payload:AnyRow){
   const kind=String(payload.kind||"");
-  if(!["inventory","inbound"].includes(kind))throw new HttpError(400,"不支持的批量导入类型");
-  requireBusinessPermission(actor,kind==="inbound"?"inbound.receive":actor.role==="管理员"?"inventory.adjust":"inventory.count.submit");
+  if(kind==="inbound")return Response.json(await submitInbound(database(),actor,payload));
+  if(kind!=="inventory")throw new HttpError(400,"不支持的批量导入类型");
+  requireBusinessPermission(actor,actor.role==="管理员"?"inventory.adjust":"inventory.count.submit");
   let rows:AnyRow[];
   try{const parsed=validateImportRows(kind,payload.rows);if(parsed.errors.length)throw Error(parsed.errors.map((e:{row:number;message:string})=>`第${e.row}行：${e.message}`).join("；"));rows=parsed.rows;}catch(error){throw new HttpError(400,error instanceof Error?error.message:"导入明细无效");}
   const fileName=cleanText(payload.fileName,180),fileHash=cleanText(payload.fileHash,64);
@@ -563,12 +567,11 @@ async function bulkImport(actor:Actor,payload:AnyRow){
   const digest=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(canonical));
   const key=`data_import:${kind}:${Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,"0")).join("")}`,db=database();
   if(await db.prepare("SELECT id FROM system_operations WHERE id=?").bind(key).first())throw new HttpError(409,"这份数据已经导入，系统已阻止重复写入；新盘点请填写新的调整原因");
-  let entries=rows;
-  if(kind==="inbound"){try{entries=groupInboundRows(rows);}catch(error){throw new HttpError(400,error instanceof Error?error.message:"到仓单分组无效");}}
+  const entries=rows;
   const statements:D1PreparedStatement[]=[guardStatement(db,actor,"批量文件导入","1=1",[],key,{kind,fileName,fileHash,rows:rows.length})];
   let imported=0,skipped=0;
   for(const entry of entries){
-    try{const result=await (kind==="inbound"?receiveInbound(actor,entry,statements):actor.role==="管理员"?inventoryAdjust(actor,entry,statements):submitInventoryCount(actor,entry,statements));const detail=await result.json();if(detail.skipped)skipped++;else imported++;}
+    try{const result=await (actor.role==="管理员"?inventoryAdjust(actor,entry,statements):submitInventoryCount(actor,entry,statements));const detail=await result.json();if(detail.skipped)skipped++;else imported++;}
     catch(error){if(error instanceof HttpError)throw new HttpError(error.status,`第${entry._row}行：${error.message}。整份文件未写入`);throw error;}
   }
   if(statements.length>950)throw new HttpError(400,"本次涉及的渠道分配过多，请拆分文件后重试；整份文件未写入");
@@ -764,54 +767,8 @@ async function resolveInventoryHold(actor:Actor,payload:AnyRow){
   return Response.json(await resolveInventoryHoldSources(database(),actor,{...payload,site,channel,sku}));
 }
 
-async function receiveInbound(actor:Actor, payload:AnyRow, staged?:D1PreparedStatement[]) {
-  requireBusinessPermission(actor,"inbound.receive");
-  const receiptNo = cleanText(payload.receiptNo, 80), sku = cleanSku(payload.sku), name = cleanText(payload.name,120);
-  const proofRef = cleanText(payload.proofRef, 240), sourceBatch = cleanText(payload.sourceBatch,80);
-  if (!receiptNo || !sku || !proofRef) throw new HttpError(400, "到仓单号、SKU和到仓凭证均为必填");
-  if(!sourceBatch&&actor.role!=="管理员") throw new HttpError(403,"供应链到仓必须关联系统批次；只有管理员可处理历史或线下例外入库");
-  const allocationMap = new Map<string,{site:string;channel:string;qty:number}>();
-  for (const raw of Array.isArray(payload.allocations) ? payload.allocations : []) {
-    const site = cleanText(raw.site,20), channel = cleanText(raw.channel,20), qty = Number(raw.qty);
-    validSiteChannel(site,channel);
-    if (!Number.isSafeInteger(qty) || qty <= 0) throw new HttpError(400, "渠道分配数量必须是正整数");
-    const key = `${site}|${channel}`, previous = allocationMap.get(key);
-    allocationMap.set(key, { site, channel, qty:(previous?.qty ?? 0) + qty });
-  }
-  const allocations = [...allocationMap.values()];
-  const totalQty = allocations.reduce((sum,r) => sum + r.qty,0);
-  if (!allocations.length || !allocationMatchesTotal(Number(payload.totalQty), allocations)) throw new HttpError(400, "站点＋渠道分配合计必须等于实收到仓总数");
-  const db = database();
-  if (await db.prepare("SELECT id FROM inbound_receipts WHERE receipt_no=?").bind(receiptNo).first()) throw new HttpError(409, "该到仓单号已经入库，系统已阻止重复入库");
-  const receiptId = makeId("receipt"), timestamp = nowIso();
-  const statements = [
-    db.prepare("INSERT INTO inbound_receipts (id,receipt_no,sku,name,source_batch,proof_ref,total_qty,actor_id,received_at) VALUES (?,?,?,?,?,?,?,?,?)")
-      .bind(receiptId,receiptNo,sku,name,sourceBatch,proofRef,totalQty,actor.id,timestamp),
-    db.prepare("INSERT INTO sku_settings (sku,name,product_type,unit_price,lead_time_days,safety_pct,updated_at) VALUES (?,?,'老款',0,63,.25,?) ON CONFLICT(sku) DO UPDATE SET name=CASE WHEN excluded.name<>'' THEN excluded.name ELSE sku_settings.name END,updated_at=excluded.updated_at").bind(sku,name,timestamp),
-  ];
-  allocations.forEach((a) => statements.push(
-    db.prepare("INSERT INTO inbound_allocations (receipt_id,site,channel,qty) VALUES (?,?,?,?)").bind(receiptId,a.site,a.channel,a.qty),
-    sourceBatch
-      ? db.prepare("INSERT INTO inventory_balances (site,channel,sku,name,qty,pending_shelf_qty,updated_at) VALUES (?,?,?,?,0,?,?) ON CONFLICT(site,channel,sku) DO UPDATE SET pending_shelf_qty=inventory_balances.pending_shelf_qty+excluded.pending_shelf_qty,name=CASE WHEN excluded.name<>'' THEN excluded.name ELSE inventory_balances.name END,updated_at=excluded.updated_at").bind(a.site,a.channel,sku,name,a.qty,timestamp)
-      : db.prepare("INSERT INTO inventory_balances (site,channel,sku,name,qty,updated_at) VALUES (?,?,?,?,?,?) ON CONFLICT(site,channel,sku) DO UPDATE SET qty=inventory_balances.qty+excluded.qty,name=CASE WHEN excluded.name<>'' THEN excluded.name ELSE inventory_balances.name END,updated_at=excluded.updated_at").bind(a.site,a.channel,sku,name,a.qty,timestamp),
-    db.prepare("INSERT INTO inventory_movements (id,site,channel,sku,name,movement_type,qty_delta,balance_after,reference_type,reference_id,note,actor_id,created_at) SELECT ?,site,channel,sku,name,?,?,qty,'到仓单',?,?,?,? FROM inventory_balances WHERE site=? AND channel=? AND sku=?").bind(makeId("move"),sourceBatch?"到仓待上架":"管理员例外入库",sourceBatch?0:a.qty,receiptNo,proofRef,actor.id,timestamp,a.site,a.channel,sku),
-  ));
-  if (sourceBatch) {
-    const batch = await db.prepare("SELECT id,sku,qty,stage,allocations_json,evidence_json FROM production_batches WHERE id=?").bind(sourceBatch).first<AnyRow>();
-    if (!batch) throw new HttpError(404,"关联生产批次不存在");
-    if (batch.stage!=="awaiting_receipt") throw new HttpError(409,"关联批次尚未进入等待到仓节点");
-    if (batch.sku!==sku||Number(batch.qty)!==totalQty) throw new HttpError(409,"到仓SKU或实收总数与生产批次不一致");
-    const planned=parseJson<Array<{site:string;channel:string;qty:number}>>(batch.allocations_json,[]);
-    const plannedMap=new Map(planned.map((row)=>[`${row.site}|${row.channel}`,Number(row.qty)]));
-    if(allocations.length!==plannedMap.size||allocations.some((row)=>plannedMap.get(`${row.site}|${row.channel}`)!==row.qty)) throw new HttpError(409,"到仓站点渠道分配与生产批次不一致");
-    statements.unshift(guardStatement(db,actor,"到仓批次校验","EXISTS(SELECT 1 FROM production_batches WHERE id=? AND stage='awaiting_receipt' AND sku=? AND qty=? AND allocations_json=?)",[sourceBatch,sku,totalQty,batch.allocations_json]));
-    const evidence = parseJson<AnyRow[]>(batch.evidence_json, []);
-    evidence.push({ stage:"warehouse_received", reference:receiptNo, proofRef, at:timestamp, by:actor.name, role:actor.role });
-    statements.push(db.prepare("UPDATE production_batches SET stage='shelf_pending',stage_owner='运营',evidence_json=?,updated_at=? WHERE id=?").bind(JSON.stringify(evidence),timestamp,sourceBatch));
-  }
-  statements.push(audit(actor,"渠道级到仓入库","receipt",receiptNo,{sku,totalQty,allocations,sourceBatch,proofRef}));
-  if(staged)staged.push(...statements);else await db.batch(statements);
-  return Response.json({ ok:true, receiptId, totalQty, allocations, nextStage:sourceBatch?"shelf_pending":null });
+async function receiveInbound(actor:Actor,payload:AnyRow){
+  return Response.json(await submitInbound(database(),actor,payload));
 }
 
 function normalizePlanItems(raw:unknown): PlanItem[] {
@@ -1744,6 +1701,7 @@ async function saveWarehouse(actor:Actor,payload:AnyRow){
 function errorResponse(error:unknown) {
   if(/inventory_baseline_date/.test(String(error))) return Response.json({error:"已启用2026-09-30期初库存，请选择2026-10-01或之后的销售／费用日期，历史销售不可再次扣库"},{status:409});
   if(/inventory_movements.balance_after|guard_|CHECK constraint|maintenance|closed finance/.test(String(error))) return Response.json({error:"库存或凭证已被更新，本次未覆盖；请刷新后重新核对"},{status:409});
+  if(error instanceof InboundError)return Response.json({error:error.message,errors:error.errors},{status:error.status});
   if(error instanceof HttpError || error instanceof ConflictError) return Response.json({error:error.message},{status:error.status});
   console.error(error);
   return Response.json({error:"系统暂时无法完成该操作，请稍后重试；本次未确认写入"},{status:500});

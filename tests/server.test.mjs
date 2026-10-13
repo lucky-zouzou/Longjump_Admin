@@ -99,10 +99,12 @@ test('独立服务器：公司登录、禁止伪造身份、岗位隔离、出�
  const opsCount=await request('newops','/api/system',{action:'bulkImport',kind:'inventory',rows:[{...stockRows[0],countedQty:9}],...importMeta});assert.equal(opsCount.status,200,JSON.stringify(opsCount.body));
  assert.equal((await request('newops','/api/system')).body.inventory.find(r=>r.sku==='HTTP-IMPORT').qty,12);
  assert.equal((await request('newops','/api/system',{action:'bulkImport',kind:'inventory',rows:[{...stockRows[0],site:'印尼',countedQty:2}],...importMeta})).status,403);
- const importedReceipt={receiptNo:'HTTP-RCV-1',sku:'HTTP-RCV',site:'印尼',channel:'TikTok',qty:3,proofRef:'仓库签收001'};
- assert.equal((await request('admin','/api/system',{action:'bulkImport',kind:'inbound',rows:[importedReceipt],...importMeta})).status,200);
+ const importedReceipt={receiptNo:'HTTP-RCV-1',businessDate:new Date(Date.now()+8*3600_000).toISOString().slice(0,10),note:'历史在途货物实际签收',sku:'HTTP-BAG',site:'印尼',channel:'TikTok',qty:3,proofRef:'仓库签收001'};
+ await request('admin','/api/system',{action:'saveWarehouse',code:'HTTP-ID-TK',name:'HTTP主仓',site:'印尼',channel:'TikTok',active:true,capacityQty:0});
+ const inboundPreview=await request('admin','/api/system',{action:'previewInbound',rows:[importedReceipt]});assert.equal(inboundPreview.status,200,JSON.stringify(inboundPreview.body));
+ assert.equal((await request('admin','/api/system',{action:'bulkImport',kind:'inbound',rows:inboundPreview.body.rows,previewToken:inboundPreview.body.token,confirmed:true,...importMeta})).status,200);
  const invalidBatch=await request('admin','/api/system',{action:'bulkImport',kind:'inbound',rows:[{...importedReceipt,receiptNo:'HTTP-RCV-2'},importedReceipt],...importMeta});assert.equal(invalidBatch.status,409);
- const afterImport=await request('admin','/api/system');assert.ok(!afterImport.body.receipts.some(r=>r.receipt_no==='HTTP-RCV-2'));
+ const afterImport=await request('admin','/api/system');assert.ok(!afterImport.body.inboundDocuments.some(r=>r.receipt_no==='HTTP-RCV-2'));
  const salesImport={action:'salesImport',site:'马来西亚',channel:'Shopee',businessDate:new Date(Date.now()+8*3600000).toISOString().slice(0,10),sourceBatchRef:'HTTP-SALES-001',importKey:'http-file-sales-001',rows:[{sku:'HTTP-IMPORT',qty:2}],fileName:'sales.csv'};
  assert.equal((await request('newops','/api/system',salesImport)).status,200);
  assert.equal((await request('newops','/api/system',salesImport)).status,409);

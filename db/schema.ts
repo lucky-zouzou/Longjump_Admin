@@ -183,6 +183,40 @@ export const inboundAllocations = sqliteTable("inbound_allocations", {
   qty: integer("qty").notNull(),
 }, (t) => [primaryKey({ columns: [t.receiptId, t.site, t.channel] })]);
 
+// Legacy single-SKU receipts stay immutable; new documents contain multiple SKU allocations.
+export const inboundDocuments = sqliteTable("inbound_documents", {
+  id: text("id").primaryKey(),
+  receiptNo: text("receipt_no").notNull().unique(),
+  businessDate: text("business_date").notNull(),
+  site: text("site").notNull(),
+  proofRef: text("proof_ref").notNull(),
+  note: text("note").notNull(),
+  totalQty: integer("total_qty").notNull(),
+  skuCount: integer("sku_count").notNull(),
+  actorId: text("actor_id").notNull(),
+  actorName: text("actor_name").notNull(),
+  createdAt: text("created_at").notNull(),
+});
+
+export const inboundDocumentLines = sqliteTable("inbound_document_lines", {
+  id: text("id").primaryKey(),
+  documentId: text("document_id").notNull().references(() => inboundDocuments.id),
+  sku: text("sku").notNull(),
+  name: text("name").notNull(),
+  site: text("site").notNull(),
+  channel: text("channel").notNull(),
+  warehouseId: text("warehouse_id").notNull().references(() => warehouses.id),
+  warehouseCode: text("warehouse_code").notNull(),
+  warehouseName: text("warehouse_name").notNull(),
+  sourceBatch: text("source_batch").notNull().default(""),
+  qty: integer("qty").notNull(),
+  stockState: text("stock_state").notNull(),
+  quarantineRemaining: integer("quarantine_remaining").notNull().default(0),
+  beforeJson: text("before_json").notNull(),
+  afterJson: text("after_json").notNull(),
+  createdAt: text("created_at").notNull(),
+}, (t) => [uniqueIndex("idx_inbound_document_scope").on(t.documentId,t.sku,t.site,t.channel),index("idx_inbound_hold_scope").on(t.site,t.channel,t.sku)]);
+
 export const monthlySubmissions = sqliteTable("monthly_submissions", {
   version: integer("version").notNull().default(1),
   zeroDemand: integer("zero_demand").notNull().default(0),
