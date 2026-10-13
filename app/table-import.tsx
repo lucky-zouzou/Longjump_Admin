@@ -6,9 +6,9 @@ import {IMPORT_MAX_BYTES,IMPORT_SCHEMAS,readImportSheet} from '../lib/tabular-im
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type ImportRow=Record<string,any>;
 type Meta={fileName:string;fileHash:string};
-type Props={kind:keyof typeof IMPORT_SCHEMAS;busy?:boolean;maxRows?:number;defaults?:ImportRow;contextKey?:string;templateRows?:ImportRow[];description?:string;confirmLabel?:string;validate?:(rows:ImportRow[])=>void;onApply:(rows:ImportRow[],meta:Meta)=>Promise<boolean>|boolean};
+type Props={kind:keyof typeof IMPORT_SCHEMAS;busy?:boolean;maxRows?:number;defaults?:ImportRow;contextKey?:string;templateRows?:ImportRow[];description?:string;confirmLabel?:string;successMessage?:string;validate?:(rows:ImportRow[])=>void;onApply:(rows:ImportRow[],meta:Meta)=>Promise<boolean>|boolean};
 
-export default function TableImport({kind,busy=false,maxRows,defaults={},contextKey='',templateRows=[],description,confirmLabel='确认导入到表单',validate,onApply}:Props){
+export default function TableImport({kind,busy=false,maxRows,defaults={},contextKey='',templateRows=[],description,confirmLabel='确认导入到表单',successMessage='导入完成，请核对下方数据或单据状态。',validate,onApply}:Props){
   const {t}=useWholesaleLanguage();
   const schema=IMPORT_SCHEMAS[kind],inputId=useId(),generation=useRef(0),locked=useRef(false);
   const [loading,setLoading]=useState(false),[saving,setSaving]=useState(false),[rows,setRows]=useState<ImportRow[]>([]),[errors,setErrors]=useState<Array<{row:number;message:string}>>([]),[message,setMessage]=useState(''),[meta,setMeta]=useState<Meta|null>(null),[book,setBook]=useState<import('xlsx').WorkBook|null>(null),[sheet,setSheet]=useState('');
@@ -17,7 +17,9 @@ export default function TableImport({kind,busy=false,maxRows,defaults={},context
   const parse=async(workbook:import('xlsx').WorkBook,name:string)=>{
     setRows([]);setErrors([]);setMessage('');
     const XLSX=await import('xlsx');
-    return readImportSheet(XLSX,kind,workbook,name,defaults,{maxRows});
+    const parsed=readImportSheet(XLSX,kind,workbook,name,defaults,{maxRows});
+    if(!parsed.errors.length)validate?.(parsed.rows);
+    return parsed;
   };
   const readFile=async(file:File)=>{
     reset();const current=generation.current;setLoading(true);
@@ -44,14 +46,14 @@ export default function TableImport({kind,busy=false,maxRows,defaults={},context
       const ws=XLSX.utils.aoa_to_sheet([schema.columns.map(c=>t(c.label)),...values.map(row=>schema.columns.map(c=>row[c.key]??''))]);
       ws['!cols']=schema.columns.map(()=>({wch:22}));
       XLSX.utils.book_append_sheet(workbook,ws,'导入数据');
-      XLSX.utils.book_append_sheet(workbook,XLSX.utils.aoa_to_sheet([['使用说明'],['请填写“导入数据”工作表，保留表头。只保留本次需要处理的行，删除其余明细。'],[description||'导入后预览并确认，再提交业务单据。'],['数量必须为整数；SKU及单号建议使用文本格式；不接受公式。'],['允许空白行，不会跳过错误行。'],['历史到仓单每个单号对应一个SKU，多渠道可以使用相同单号。']]),'填写说明');
+      XLSX.utils.book_append_sheet(workbook,XLSX.utils.aoa_to_sheet([['使用说明'],['请填写“导入数据”工作表，保留表头。只保留本次需要处理的行，删除其余明细。'],[description||'导入后预览并确认，再提交业务单据。'],['数量必须为整数；SKU及单号建议使用文本格式；不接受公式。'],['允许空白行，不会跳过错误行。'],['到仓单支持一单多SKU；同一单号的站点、日期、凭证和说明须一致。同SKU按渠道分配数量，合计为实际收到的数量。']]),'填写说明');
       XLSX.writeFile(workbook,`LOONG-JUMP-${kind}-import-template.xlsx`);
     }catch(error){setMessage(error instanceof Error?error.message:'模板下载失败');}
   };
   const apply=async()=>{
     if(locked.current||busy||loading||!meta||!rows.length||errors.length)return;
     locked.current=true;setSaving(true);setMessage('');
-    try{validate?.(rows);if(await onApply(rows,meta)){reset();setMessage('导入完成，请核对下方数据或单据状态。');}else setMessage('尚未确认保存，请查看页面错误提示后重试。');}
+    try{validate?.(rows);if(await onApply(rows,meta)){reset();setMessage(successMessage);}else setMessage('尚未确认保存，请查看页面错误提示后重试。');}
     catch(error){setMessage(error instanceof Error?error.message:'导入失败，请核对文件后重试');}
     finally{locked.current=false;setSaving(false);}
   };

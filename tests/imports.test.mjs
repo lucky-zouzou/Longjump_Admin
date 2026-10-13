@@ -3,12 +3,13 @@ import assert from 'node:assert/strict';
 import * as XLSX from 'xlsx';
 import {parseImportGrid,validateImportRows,matchImportItems,groupInboundRows,readImportSheet,IMPORT_SCHEMAS} from '../lib/tabular-import.mjs';
 import {translateWholesale} from '../lib/wholesale-i18n.mjs';
+import {previewInbound} from '../lib/inbound.mjs';
 import {systemFixture,svc,race} from './system-fixture.mjs';
 
 const meta={fileName:'仓库数据.xlsx',fileHash:'a'.repeat(64)};
 const stock=(sku,countedQty,extra={})=>({site:'印尼',channel:'TikTok',sku,countedQty,reason:'仓库盘点核实',...extra});
-const inbound=(receiptNo,sku,qty,extra={})=>({receiptNo,sku,name:sku,site:'印尼',channel:'TikTok',qty,sourceBatch:'',proofRef:'仓库签收凭证001',...extra});
-const call=(f,kind,rows,actor=f.users.admin)=>svc.bulkImport(actor,{kind,rows,...meta});
+const inbound=(receiptNo,sku,qty,extra={})=>({receiptNo,sku,name:sku,site:'印尼',channel:'TikTok',qty,sourceBatch:'',businessDate:'2026-10-01',note:'历史在途货物入库',proofRef:'仓库签收凭证001',...extra});
+const call=async(f,kind,rows,actor=f.users.admin)=>{if(kind!=='inbound')return svc.bulkImport(actor,{kind,rows,...meta});const p=await previewInbound(f.db,actor,{rows});return svc.bulkImport(actor,{kind,rows:p.rows,previewToken:p.token,confirmed:true,...meta});};
 
 test('导入解析：中文/平台表头、前导零SKU、千位分隔及Excel和CSV一致',()=>{
   const csv='\uFEFFSeller SKU,Product name,Units confirmed\r\n0012,旅行包,"1,200"\r\nBAG-A,背包,3';
@@ -50,11 +51,13 @@ test('盘点允许零但拒绝空值、重复目标；明细匹配禁止跨单�
   assert.equal(matchImportItems([{sku:'A',itemId:'one',qty:2,_row:2}],items)[0].itemId,'one');
   assert.equal(validateImportRows('receipt',[{sku:'A',qty:1,quarantineQty:2}]).errors.length,1);
 });
-test('到仓同单多渠道汇总；不同SKU或凭证不能共用同单号',()=>{
+test('到仓同单多SKU多渠道汇总；凭证冲突不能共用单号',()=>{
   const rows=[inbound('RCV1','A',3),inbound('RCV1','A',4,{channel:'Shopee'})];
   assert.equal(groupInboundRows(rows)[0].totalQty,7);
-  assert.throws(()=>groupInboundRows([...rows,inbound('RCV1','B',1)]),/不同SKU/);
-  assert.throws(()=>groupInboundRows([inbound('R1','A',1,{sourceBatch:'batch'}),inbound('R2','A',1,{sourceBatch:'batch'})]),/只能对应/);
+  assert.equal(groupInboundRows([...rows,inbound('RCV1','B',1)])[0].items.length,2);
+  assert.throws(()=>groupInboundRows([...rows,inbound('RCV1','B',1,{proofRef:'不同凭证'})]),/凭证/);
+  assert.equal(groupInboundRows([inbound('R1','A',1,{sourceBatch:'batch'}),inbound('R2','A',1,{sourceBatch:'batch',site:'马来西亚'})]).length,2);
+  assert.throws(()=>groupInboundRows([inbound('R1','A',1,{sourceBatch:'batch'}),inbound('R2','B',1,{sourceBatch:'batch'})]),/只能对应/);
 });
 test('管理员批量盘点写流水、零库存、新SKU及无变化行；改文件名不能重复导入',async()=>{
   const f=systemFixture();try{
@@ -96,12 +99,13 @@ test('并发重复盘点文件仅写入一次',async()=>{
 });
 test('批量到仓：多单多渠道一次入库，重复单号使整份文件回滚',async()=>{
   const f=systemFixture();try{
+    for(const ch of ['TikTok','Shopee'])f.sqlite.prepare('INSERT INTO warehouses(id,code,site,channel,name,created_at,updated_at) VALUES(?,?,?,?,?,?,?)').run(ch,ch,'印尼',ch,ch,'2026-10-01','2026-10-01');
     const rows=[inbound('RCV-A','BAG-A',3),inbound('RCV-A','BAG-A',4,{channel:'Shopee'}),inbound('RCV-B','BAG-B',5)];
     const result=await (await call(f,'inbound',rows)).json();assert.equal(result.imported,2);
-    assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM inbound_receipts').get().n,2);
+    assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM inbound_documents').get().n,2);
     assert.equal(f.sqlite.prepare("SELECT qty FROM inventory_balances WHERE site='印尼' AND channel='TikTok' AND sku='BAG-A'").get().qty,13);
     await assert.rejects(call(f,'inbound',[inbound('RCV-C','BAG-A',1),inbound('RCV-A','BAG-A',2)]),/第3行.*整份文件未写入/);
-    assert.equal(f.sqlite.prepare("SELECT COUNT(*) n FROM inbound_receipts WHERE receipt_no='RCV-C'").get().n,0);
+    assert.equal(f.sqlite.prepare("SELECT COUNT(*) n FROM inbound_documents WHERE receipt_no='RCV-C'").get().n,0);
     await assert.rejects(call(f,'inbound',[inbound('RCV-D','BAG-A',1)],f.users.supply),/必须关联/);
     await assert.rejects(call(f,'inbound',[inbound('RCV-D','BAG-A',1)],f.users.indonesia),/权限/);
   }finally{f.sqlite.close();}
