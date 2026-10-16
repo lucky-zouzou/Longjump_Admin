@@ -5,7 +5,7 @@ import {createBackup,verifyArchive} from './backup.mjs';
 
 const SITES={'越南仓库':'越南','印尼仓库':'印尼','菲律宾仓库':'菲律宾','马来仓库':'马来西亚','泰国仓库':'泰国'};
 const SALES_TABLES=['sales_demand_corrections','sales_records','sales_imports','sales_ad_spend',
- 'wholesale_return_resolutions','wholesale_returns','wholesale_finance_entries','wholesale_shipment_items','wholesale_shipments',
+ 'wholesale_consignment_sales','wholesale_return_resolutions','wholesale_returns','wholesale_finance_entries','wholesale_shipment_items','wholesale_shipments',
  'wholesale_allocations','wholesale_order_items','wholesale_files','wholesale_operations','wholesale_orders',
  'wholesale_bank_events','wholesale_bank_receipts','wholesale_finance_periods'];
 const SNAPSHOT_TABLES=[...SALES_TABLES,'inventory_balances','sku_settings','inventory_count_requests','wholesale_finance_clock'];

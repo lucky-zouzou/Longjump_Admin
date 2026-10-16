@@ -20,9 +20,11 @@ export function fixture(){
   const call=(actor,action,payload={})=>mutateWholesale(db,actor,{action,...payload,operationId:crypto.randomUUID()});
   const orderRow=id=>sqlite.prepare("SELECT * FROM wholesale_orders WHERE id=?").get(id);
   const change=(actor,id,action,payload={})=>call(actor,action,{orderId:id,version:orderRow(id).version,...payload});
-  const create=async({qty=5,terms="credit",who=users.sales,items,invoice=true,businessDate="2026-08-01"}={})=>{
+  const create=async({qty=5,terms="credit",who=users.sales,items,invoice=true,businessDate="2026-08-01",saleType}={})=>{
     const c=await call(who,"customerCreate",{name:`测试客户-${crypto.randomUUID()}`,contact:"联系人",phone:"081200000",city:"Jakarta",address:"Test warehouse 1",salesUserId:who.id});
-    return (await call(who,"orderCreate",{customerId:c.id,site:"印尼",businessDate,paymentTerms:terms,dueDate:"2027-01-01",invoiceRequired:invoice,items:items??[{sku:"BAG-A",qty,unitPrice:100000}]})).id;
+    const id=(await call(who,"orderCreate",{saleType:saleType||"cash",customerId:c.id,site:"印尼",businessDate,paymentTerms:terms,dueDate:"2027-01-01",invoiceRequired:invoice,items:items??[{sku:"BAG-A",qty,unitPrice:100000}]})).id;
+    if(!saleType)sqlite.prepare("UPDATE wholesale_orders SET sale_type='legacy',payment_terms=? WHERE id=?").run(terms,id);
+    return id;
   };
   const approve=id=>change(users.admin,id,"orderApprove",{supplyUserId:users.supply.id,stockBasisConfirmed:true,reason:"已核对客户账期和独立库存"});
   const ship=(id,qty,date=indonesiaDate(),extra={})=>change(users.supply,id,"orderShip",{items:[{itemId:sqlite.prepare("SELECT id FROM wholesale_order_items WHERE order_id=?").get(id).id,qty}],businessDate:date,carrier:"测试承运商",warehouse:"印尼仓",trackingNo:"TEST-TRACK",handoverConfirmed:true,...extra});

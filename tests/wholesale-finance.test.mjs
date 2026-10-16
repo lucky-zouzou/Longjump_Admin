@@ -41,9 +41,9 @@ test("全部订单跨月份保留所有状态，月度导出保留旧单结转�
   const a=order("1",{shipments:[ship("1","2026-08-31",2),ship("1","2026-09-01",3)],entries:[entry("receipt","2026-09-02",200000),entry("receipt","2026-09-03",300000),entry("invoice","2026-09-04",500000)]});
   const b=order("2",{business_date:"2026-09-02",status:"cancelled"}),c=order("3",{business_date:"2026-07-01",status:"rejected"});
   const sheets=wholesaleExportSheets(snapshot([a,b,c]),opts),all=sheets[0];
-  assert.equal(all.rows.length,3);assert.equal(all.rows[0][column(all,"出库销售额IDR")],500000);assert.equal(all.rows[0][column(all,"结算金额净回款IDR")],500000);assert.equal(sheets.find(s=>s.name==="收款退款明细").rows.length,2);assert.equal(sheets.find(s=>s.name==="SKU出库明细").rows.length,2);
+  assert.equal(all.rows.length,3);assert.equal(all.rows[0][column(all,"确认销售额IDR")],500000);assert.equal(all.rows[0][column(all,"结算金额净回款IDR")],500000);assert.equal(sheets.find(s=>s.name==="收款退款明细").rows.length,2);assert.equal(sheets.find(s=>s.name==="SKU出库明细").rows.length,2);
   const monthly=wholesaleExportSheets(snapshot([a,b,c]),{...opts,mode:"month"}),end=monthly.find(s=>s.name==="截至期末订单总表");
-  assert.equal(monthly[0].name,"月度对账");assert.equal(end.rows.length,2);assert.equal(end.rows[0][column(end,"出库销售额IDR")],200000);assert.equal(end.rows[0][column(end,"累计回款IDR")],0);assert.equal(end.rows[0][column(end,"已出库待收款IDR")],200000);assert.equal(monthly.find(s=>s.name==="收款退款明细").rows.length,0);
+  assert.equal(monthly[0].name,"月度对账");assert.equal(end.rows.length,2);assert.equal(end.rows[0][column(end,"确认销售额IDR")],200000);assert.equal(end.rows[0][column(end,"累计回款IDR")],0);assert.equal(end.rows[0][column(end,"已出库待收款IDR")],200000);assert.equal(monthly.find(s=>s.name==="收款退款明细").rows.length,0);
 });
 
 test("Excel八张表完整往返，金额为数值，电话和公式样文本按原文保存",()=>{
@@ -55,7 +55,7 @@ test("Excel八张表完整往返，金额为数值，电话和公式样文本按
   for(const s of sheets){const rows=XLSX.utils.sheet_to_json(book.Sheets[s.name],{header:1,defval:""});assert.equal(rows.length,s.rows.length+1);}
   const ws=book.Sheets["全部订单总表"],first=sheets[0];
   const cell=h=>ws[XLSX.utils.encode_cell({r:1,c:column(first,h)})];
-  assert.equal(cell("电话或WhatsApp").v,"08120000000");assert.equal(cell("电话或WhatsApp").t,"s");assert.equal(cell("客户名称").v,o.customer.name);assert.equal(cell("客户名称").f,undefined);assert.equal(cell("出库销售额IDR").t,"n");assert.equal(cell("出库销售额IDR").v,500000);assert.equal(cell("退货金额IDR").v,100000);assert.equal(cell("净销售额IDR").v,400000);assert.equal(cell("订单号").t,"s");
+  assert.equal(cell("电话或WhatsApp").v,"08120000000");assert.equal(cell("电话或WhatsApp").t,"s");assert.equal(cell("客户名称").v,o.customer.name);assert.equal(cell("客户名称").f,undefined);assert.equal(cell("确认销售额IDR").t,"n");assert.equal(cell("确认销售额IDR").v,500000);assert.equal(cell("退货金额IDR").v,100000);assert.equal(cell("净销售额IDR").v,400000);assert.equal(cell("订单号").t,"s");
 });
 
 test("无订单时仍可导出完整表头及零金额汇总",()=>{
@@ -70,7 +70,7 @@ test("待审批和待打包订单导出全部SKU，商品金额与申请量合�
   const sheets=wholesaleExportSheets(snapshot(orders),opts),detail=sheets.find(s=>s.name==='订单SKU明细');
   assert.equal(detail.rows.length,40);assert.equal(sheets.find(s=>s.name==='SKU出库明细').rows.length,0);
   for(const o of orders){const rows=detail.rows.filter(r=>r[0]===o.order_no);assert.equal(rows.length,20);assert.equal(rows.reduce((s,r)=>s+r[column(detail,'申请件数')],0),o.total_qty);assert.equal(rows.reduce((s,r)=>s+r[column(detail,'订单商品金额IDR')],0),o.total_amount);assert.ok(rows.every(r=>r[column(detail,'已出库件数')]===0));}
-  assert.ok(sheets[0].rows.every(r=>r[column(sheets[0],'出库销售额IDR')]===0));
+  assert.ok(sheets[0].rows.every(r=>r[column(sheets[0],'确认销售额IDR')]===0));
   const book=XLSX.read(XLSX.write(toWholesaleWorkbook(XLSX,sheets),{type:'buffer',bookType:'xlsx'}),{type:'buffer'}),ws=book.Sheets['订单SKU明细'];
   const cell=h=>ws[XLSX.utils.encode_cell({r:1,c:column(detail,h)})];
   assert.equal(cell('商品').v,'=商品测试');assert.equal(cell('商品').f,undefined);assert.equal(cell('电话或WhatsApp').v,'08120000000');assert.equal(cell('订单商品金额IDR').t,'n');
@@ -79,9 +79,9 @@ test("待审批和待打包订单导出全部SKU，商品金额与申请量合�
 test("订单SKU月度累计数量按截止日取数，部分发货和取消申请仍保留明细",()=>{
   const o=order('1',{status:'closed',shipments:[ship('1','2026-08-31',2),ship('1','2026-09-02',1)],returns:[{order_item_id:'i1',business_date:'2026-09-03',qty:1,amount:100000}]}),cancelled=order('2',{status:'cancelled'});
   const all=wholesaleExportSheets(snapshot([o,cancelled]),opts).find(s=>s.name==='订单SKU明细');
-  assert.deepEqual(all.rows[0].slice(-4),[3,2,1,'2026-09-12']);assert.deepEqual(all.rows[1].slice(-4),[0,5,0,'2026-09-12']);
+  assert.deepEqual(all.rows[0].slice(-5,-1),[3,2,1,'2026-09-12']);assert.deepEqual(all.rows[1].slice(-5,-1),[0,5,0,'2026-09-12']);
   const monthly=wholesaleExportSheets(snapshot([o]),{...opts,mode:'month'}).find(s=>s.name==='订单SKU明细');
-  assert.deepEqual(monthly.rows[0].slice(-4),[2,3,0,'2026-08-31']);
+  assert.deepEqual(monthly.rows[0].slice(-5,-1),[2,3,0,'2026-08-31']);
 });
 
 test("筛选明细导出同列表匹配，按SKU搜索保留整笔订单商品，完成页不受隐藏状态影响",()=>{

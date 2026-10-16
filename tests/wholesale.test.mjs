@@ -124,7 +124,7 @@ test("财务导出单一数据库快照包含全部订单，责任人和其他�
   await f.change(f.users.finance,a,"financeAdd",{kind:"receipt",amount:300000,reference:"EXPORTBANK2",businessDate:"2026-09-03",note:"财务核对到账二"});
   const original=f.db.batch;let batches=0;f.db.batch=async statements=>{batches++;return original(statements);};
   const all=await loadWholesaleExportSnapshot(f.db,f.users.finance);assert.equal(batches,1);assert.equal(all.orders.length,2);const o=all.orders.find(o=>o.id===a);assert.equal(o.shipments.length,2);assert.equal(o.entries.length,2);assert.equal(o.paid,500000);assert.equal(o.entries[0].actor_name,f.users.finance.name);
-  const sheets=wholesaleExportSheets(all,{mode:"all",month:"2026-08",asOfDate:"2026-09-12",exportedAt:"2026-09-12T00:00:00Z"});assert.equal(sheets[0].rows.length,2);assert.equal(sheets[0].rows[0][sheets[0].headers.indexOf("出库销售额IDR")],500000);
+  const sheets=wholesaleExportSheets(all,{mode:"all",month:"2026-08",asOfDate:"2026-09-12",exportedAt:"2026-09-12T00:00:00Z"});assert.equal(sheets[0].rows.length,2);assert.equal(sheets[0].rows[0][sheets[0].headers.indexOf("确认销售额IDR")],500000);
   assert.deepEqual((await loadWholesaleExportSnapshot(f.db,f.users.sales)).orders.map(o=>o.id),[a]);assert.deepEqual((await loadWholesaleExportSnapshot(f.db,f.users.sales2)).orders.map(o=>o.id),[b]);assert.deepEqual((await loadWholesaleExportSnapshot(f.db,f.users.supply)).orders.map(o=>o.id),[a]);assert.equal((await loadWholesaleExportSnapshot(f.db,f.users.supply2)).orders.length,0);
   const before=batches;await assert.rejects(loadWholesaleExportSnapshot(f.db,f.users.malaysia),/无权/);assert.equal(batches,before);
   const view=await readWholesale(f.db,f.users.finance,"2026-08");assert.equal(view.finance.totals.closingReceivable,200000);assert.equal(view.finance.totals.receipts,0);assert.equal(view.orders.find(o=>o.id===a).financial.salesAmount,500000);
@@ -154,7 +154,7 @@ test("订单上限跟随SKU档案，205个SKU完整创建、审批、发货且�
 test("SKU上限实时读取档案，空单、超限、重复和未建档均不创建订单",async()=>{
   const f=fixture();try{
     const c=await f.call(f.users.sales,"customerCreate",{name:"上限校验客户",contact:"测试",phone:"0800",city:"Jakarta",address:"测试地址"});
-    const create=items=>f.call(f.users.sales,"orderCreate",{customerId:c.id,businessDate:indonesiaDate(),items,maxRows:99999});
+    const create=items=>f.call(f.users.sales,"orderCreate",{saleType:"cash",customerId:c.id,businessDate:indonesiaDate(),items,maxRows:99999});
     const item=sku=>({sku,qty:1,unitPrice:1000});
     for(const [items,message] of [[[],/至少需要1/],[[item('BAG-A'),item('BAG-B'),item('UNKNOWN')],/已建档的2/],[[item('BAG-A'),item('bag-a')],/合并为一行/],[[item('UNKNOWN')],/尚未建立/]])await assert.rejects(create(items),message);
     assert.equal(f.sqlite.prepare("SELECT COUNT(*) n FROM wholesale_orders").get().n,0);
