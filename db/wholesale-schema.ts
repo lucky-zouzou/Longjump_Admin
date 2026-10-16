@@ -77,3 +77,12 @@ export const wholesaleConsignmentSales = sqliteTable("wholesale_consignment_sale
  businessDate:text("business_date").notNull(), reference:text("reference").notNull(), note:text("note").notNull(),
  actorId:text("actor_id").notNull(), actorName:text("actor_name").notNull(), createdAt:text("created_at").notNull(),
 },t=>[uniqueIndex("idx_wh_consignment_reference").on(t.reference,t.orderItemId),index("idx_wh_consignment_order").on(t.orderId,t.businessDate)]);
+
+export const wholesaleCustomerReceipts = sqliteTable("wholesale_customer_receipts", {
+ id:text("id").primaryKey(),orderId:text("order_id").notNull().references(()=>wholesaleOrders.id),shipmentId:text("shipment_id").notNull().references(()=>wholesaleShipments.id),
+ businessDate:text("business_date").notNull(),receiver:text("receiver").notNull(),proofRef:text("proof_ref").notNull(),note:text("note").notNull().default(""),
+ actorId:text("actor_id").notNull(),actorName:text("actor_name").notNull(),createdAt:text("created_at").notNull(),
+ revokedAt:text("revoked_at"),revokedBy:text("revoked_by"),revokedByName:text("revoked_by_name"),revokeReason:text("revoke_reason"),
+},t=>[uniqueIndex("idx_wh_receipt_active").on(t.shipmentId).where(sql`${t.revokedAt} IS NULL`),index("idx_wh_receipt_order").on(t.orderId,t.createdAt),
+ check("wh_receipt_evidence",sql`length(${t.receiver})>0 AND length(${t.proofRef})>=4`),
+ check("wh_receipt_revocation",sql`(${t.revokedAt} IS NULL AND ${t.revokedBy} IS NULL AND ${t.revokedByName} IS NULL AND ${t.revokeReason} IS NULL) OR (${t.revokedAt} IS NOT NULL AND ${t.revokedBy} IS NOT NULL AND ${t.revokedByName} IS NOT NULL AND ${t.revokeReason} IS NOT NULL AND length(${t.revokeReason})>=4)`)]);

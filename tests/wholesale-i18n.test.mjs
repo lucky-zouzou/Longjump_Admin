@@ -10,7 +10,7 @@ import { translateWholesale,wholesaleMoney,wholesalePreferenceKey,wholesaleLangu
 import { WHOLESALE_ID } from "../lib/wholesale-id.mjs";
 import { wholesaleExportSheets,toWholesaleWorkbook,orderFinancials,monthlyReconciliation } from "../lib/wholesale-finance.mjs";
 
-const order=()=>({id:"o1",order_no:"ID-WH-0001",business_date:"2026-08-01",customer_id:"c1",customer:{code:"001",name:"Toko Jakarta",contact:"Sari",phone:"081200000",city:"Jakarta",address:"Jl. Mawar 1"},sales_user_id:"sales1",creator_id:"sales1",sales_name:"Tommy",supply_user_id:"supply1",supply_name:"Budi",status:"partial",total_qty:5,total_amount:500000,payment_terms:"credit",invoice_required:1,invoiceStatus:"待开票",paymentStatus:"部分回款",outstanding:400000,paid:100000,invoiced:0,refundDue:0,files:[],items:[{id:"i1",sku:"BAG-01",name:"Tote",qty:5,unit_price:100000,shipped_qty:2,returned_qty:0,allocations:[{id:"a1",channel:"TikTok",qty:3,shipped_qty:2,released_qty:0,returned_qty:0}]}],shipments:[{id:"s1",shipment_no:"S001",business_date:"2026-08-31",warehouse:"Jakarta",carrier:"Courier",tracking_no:"0001",proofs:[],items:[{order_item_id:"i1",qty:2,amount:200000,allocations_json:"[]"}]}],entries:[{id:"e1",kind:"receipt",business_date:"2026-09-02",amount:100000,reference:"000bank",actor_id:"f1",actor_name:"Sari",note:"Payment confirmed"}],returns:[]});
+const order=()=>({customerReceipts:[],customerReceipt:{status:"待客户收货",pending:1,confirmed:0,total:1},id:"o1",order_no:"ID-WH-0001",business_date:"2026-08-01",customer_id:"c1",customer:{code:"001",name:"Toko Jakarta",contact:"Sari",phone:"081200000",city:"Jakarta",address:"Jl. Mawar 1"},sales_user_id:"sales1",creator_id:"sales1",sales_name:"Tommy",supply_user_id:"supply1",supply_name:"Budi",status:"partial",total_qty:5,total_amount:500000,payment_terms:"credit",invoice_required:1,invoiceStatus:"待开票",paymentStatus:"部分回款",outstanding:400000,paid:100000,invoiced:0,refundDue:0,files:[],items:[{id:"i1",sku:"BAG-01",name:"Tote",qty:5,unit_price:100000,shipped_qty:2,returned_qty:0,allocations:[{id:"a1",channel:"TikTok",qty:3,shipped_qty:2,released_qty:0,returned_qty:0}]}],shipments:[{id:"s1",shipment_no:"S001",business_date:"2026-08-31",warehouse:"Jakarta",carrier:"Courier",tracking_no:"0001",proofs:[],items:[{order_item_id:"i1",qty:2,amount:200000,allocations_json:"[]"}]}],entries:[{id:"e1",kind:"receipt",business_date:"2026-09-02",amount:100000,reference:"000bank",actor_id:"f1",actor_name:"Sari",note:"Payment confirmed"}],returns:[]});
 
 test("语言切换只改变显示格式，保留IDR值及动态SKU；偏好按账号隔离",()=>{
   assert.equal(wholesaleMoney("zh",1250000),"IDR 1,250,000");assert.equal(wholesaleMoney("id",1250000),"IDR 1.250.000");
@@ -36,7 +36,7 @@ function compileComponent(file,extra="",overrides={}){
   const url=new URL(file,import.meta.url),require=createRequire(url),module={exports:{}};
   const source=readFileSync(url,"utf8")+extra;
   const compiled=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX,esModuleInterop:true}}).outputText;
-  new Function("require","module","exports",compiled)(name=>overrides[name]??(name==="./field-sales"?compileComponent("../app/field-sales.tsx","",overrides):name==="./wholesale-management-ui"?compileComponent("../app/wholesale-management-ui.tsx","",overrides):name==="./table-import"?compileComponent("../app/table-import.tsx","",overrides):require(name)),module,module.exports);
+  new Function("require","module","exports",compiled)(name=>overrides[name]??(name==="./wholesale-receipts"?compileComponent("../app/wholesale-receipts.tsx","",overrides):name==="./field-sales"?compileComponent("../app/field-sales.tsx","",overrides):name==="./wholesale-management-ui"?compileComponent("../app/wholesale-management-ui.tsx","",overrides):name==="./table-import"?compileComponent("../app/table-import.tsx","",overrides):require(name)),module,module.exports);
   return module.exports;
 }
 test("所有线下表单和对账组件使用印尼语渲染，选项值保持业务编码",()=>{
@@ -53,7 +53,7 @@ test("所有线下表单和对账组件使用印尼语渲染，选项值保持�
 });
 
 test("所有显式界面翻译键都有印尼语文案",()=>{
-  for(const file of ["../app/wholesale.tsx","../app/control-tower.tsx","../app/wholesale-management-ui.tsx"]){const source=ts.createSourceFile(file,readFileSync(new URL(file,import.meta.url),"utf8"),ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
+  for(const file of ["../app/wholesale-receipts.tsx","../app/wholesale.tsx","../app/control-tower.tsx","../app/wholesale-management-ui.tsx"]){const source=ts.createSourceFile(file,readFileSync(new URL(file,import.meta.url),"utf8"),ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
     const walk=node=>{if(ts.isCallExpression(node)&&["t","shellT"].includes(node.expression.getText(source))&&node.arguments[0]&&ts.isStringLiteral(node.arguments[0]))assert.ok(Object.hasOwn(WHOLESALE_ID,node.arguments[0].text),node.arguments[0].text);ts.forEachChild(node,walk);};walk(source);
   }
 });
