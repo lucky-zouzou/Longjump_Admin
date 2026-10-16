@@ -18,3 +18,18 @@ test('售后证据与台账随备份恢复，新表受维护锁保护',async()=>
   const object=await fileBucket(join(target,'files')).get(file.object_key);assert.deepEqual(new Uint8Array(await new Response(object.body).arrayBuffer()),bytes);
  }finally{rmSync(root,{recursive:true,force:true})}
 });
+
+
+test('财务凭证原文件、上传人及回款关联随备份恢复',async()=>{
+ const {uploadWholesaleFile}=await import('../lib/wholesale-files.mjs');
+ const {indonesiaDate}=await import('../lib/wholesale.mjs');
+ const root=mkdtempSync(join(tmpdir(),'lj-finance-proof-backup-'));try{
+  const f=fixture(),id=await f.create(),bucket=fileBucket(join(root,'files'));await f.approve(id);
+  const file=await uploadWholesaleFile(f.db,bucket,f.users.finance,{orderId:id,purpose:'finance',file:new File(['%PDF-1.7\nBank receipt'],'payment.pdf',{type:'application/pdf'})});
+  await f.change(f.users.finance,id,'financeAdd',{kind:'receipt',amount:100000,reference:'BACKUP-PAY',businessDate:indonesiaDate(),note:'核实公司账户到账',proofIds:[file.id]});
+  const path=join(root,'backup.tar');await createBackup({DB:f.db,WHOLESALE_FILES:bucket},path);assert.equal((await verifyArchive(path)).files.length,1);
+  const target=join(root,'restore');await restoreBackup(path,target);const db=openDatabase(join(target,'business.sqlite'));
+  const restored=db.sqlite.prepare('SELECT f.*,e.reference FROM wholesale_files f JOIN wholesale_finance_entries e ON e.id=f.finance_entry_id WHERE f.id=?').get(file.id);assert.equal(restored.reference,'BACKUP-PAY');assert.equal(restored.actor_name,'财务');assert.equal(restored.purpose,'finance');db.sqlite.close();
+  const object=await fileBucket(join(target,'files')).get(restored.object_key);assert.equal(await new Response(object.body).text(),'%PDF-1.7\nBank receipt');
+ }finally{rmSync(root,{recursive:true,force:true})}
+});

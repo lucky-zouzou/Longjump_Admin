@@ -666,3 +666,10 @@ tr:hover td { background:#fbfcff; }
   .inbound-preview-table td:nth-child(n+3) { display:flex; flex-wrap:wrap; align-items:baseline; gap:5px; }
   .inbound-preview-table td:nth-child(n+3)::before { margin:0 auto 0 0; }
 }
+
+.wh-finance-proofs { min-width:0; max-width:100%; }
+.wh-finance-proofs .wh-history a, .wh-finance-proofs .wh-file-name { overflow-wrap:anywhere; }
+.wh-finance-proofs .wh-history small { display:block; margin-top:6px; color:#667792; }
+.wh-finance-proofs .wh-upload .wh-field { min-width:0; flex:1 1 220px; }
+
+.wh-finance-proof-panel { scroll-margin-top:90px; }
