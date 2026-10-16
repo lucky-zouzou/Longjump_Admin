@@ -33,3 +33,17 @@ test('财务凭证原文件、上传人及回款关联随备份恢复',async()=>
   const object=await fileBucket(join(target,'files')).get(restored.object_key);assert.equal(await new Response(object.body).text(),'%PDF-1.7\nBank receipt');
  }finally{rmSync(root,{recursive:true,force:true})}
 });
+
+test('客户收货确认及撤销记录随备份恢复，原批次关联和历史依据保留',async()=>{
+ const root=mkdtempSync(join(tmpdir(),'lj-customer-receipt-'));try{
+  const f=fixture(),id=await f.create();await f.approve(id);await f.ship(id,5);
+  const shipment=f.sqlite.prepare('SELECT * FROM wholesale_shipments WHERE order_id=?').get(id);
+  const payload={shipmentId:shipment.id,businessDate:shipment.business_date,receiver:'客户签收人',proofRef:'已核对物流签收记录',receivedConfirmed:true};
+  await f.change(f.users.sales,id,'customerReceiptConfirm',payload);const receipt=f.sqlite.prepare('SELECT * FROM wholesale_customer_receipts').get();
+  await f.change(f.users.sales,id,'customerReceiptRevoke',{receiptId:receipt.id,reason:'选错签收日期需更正'});
+  await f.change(f.users.finance,id,'customerReceiptConfirm',payload);
+  const expected=f.sqlite.prepare('SELECT * FROM wholesale_customer_receipts ORDER BY id').all();
+  const path=join(root,'backup.tar');await createBackup({DB:f.db,WHOLESALE_FILES:fileBucket(join(root,'files'))},path);const out=join(root,'restore');await restoreBackup(path,out);
+  const db=openDatabase(join(out,'business.sqlite'));assert.deepEqual(db.sqlite.prepare('SELECT * FROM wholesale_customer_receipts ORDER BY id').all(),expected);db.sqlite.close();
+ }finally{rmSync(root,{recursive:true,force:true})}
+});

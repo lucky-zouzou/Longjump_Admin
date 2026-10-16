@@ -673,3 +673,5 @@ tr:hover td { background:#fbfcff; }
 .wh-finance-proofs .wh-upload .wh-field { min-width:0; flex:1 1 220px; }
 
 .wh-finance-proof-panel { scroll-margin-top:90px; }
+
+.wh-customer-receipts{scroll-margin-top:90px;margin-block:16px;min-width:0}.wh-customer-receipts .wh-history{overflow-wrap:anywhere}.wh-receipt-cell{display:grid;gap:6px;margin-top:10px;min-width:140px}.wh-receipt-cell .btn{white-space:normal}
