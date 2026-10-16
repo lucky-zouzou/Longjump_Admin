@@ -67,8 +67,9 @@ export const wholesaleOperations = sqliteTable("wholesale_operations", {
 },t=>[check("wh_operation_atomic_guard",sql`${t.guard}=1`)]);
 
 export const wholesaleFiles = sqliteTable("wholesale_files", {
+  purpose:text("purpose").notNull().default("shipment"), financeEntryId:text("finance_entry_id").references(()=>wholesaleFinanceEntries.id), actorName:text("actor_name").notNull().default(""),
   id:text("id").primaryKey(), orderId:text("order_id").notNull().references(()=>wholesaleOrders.id), objectKey:text("object_key").notNull(), name:text("name").notNull(), contentType:text("content_type").notNull(), size:integer("size").notNull(), actorId:text("actor_id").notNull(), createdAt:text("created_at").notNull(),
-},t=>[index("idx_wh_files_order").on(t.orderId)]);
+},t=>[index("idx_wh_files_order").on(t.orderId),index("idx_wh_files_finance_entry").on(t.financeEntryId)]);
 
 export const wholesaleConsignmentSales = sqliteTable("wholesale_consignment_sales", {
  id:text("id").primaryKey(), orderId:text("order_id").notNull().references(()=>wholesaleOrders.id),
