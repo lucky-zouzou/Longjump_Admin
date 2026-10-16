@@ -18,6 +18,7 @@ export const wholesaleOrders = sqliteTable("wholesale_orders", {
   totalQty:integer("total_qty").notNull(), totalAmount:integer("total_amount").notNull(),
   cancelledAmount:integer("cancelled_amount").notNull().default(0),
   invoiceRequired:integer("invoice_required").notNull().default(0), paymentTerms:text("payment_terms").notNull().default("prepaid"),
+  saleType:text("sale_type").notNull().default("legacy"), businessCode:text("business_code").notNull().default(""),
   dueDate:text("due_date"), allocationPolicy:text("allocation_policy").notNull().default("average_v1"),
   note:text("note").notNull().default(""), decisionNote:text("decision_note").notNull().default(""),
   createdAt:text("created_at").notNull(), updatedAt:text("updated_at").notNull(), approvedAt:text("approved_at"), completedAt:text("completed_at"),
@@ -26,6 +27,7 @@ export const wholesaleOrders = sqliteTable("wholesale_orders", {
 export const wholesaleOrderItems = sqliteTable("wholesale_order_items", {
   id:text("id").primaryKey(), orderId:text("order_id").notNull().references(()=>wholesaleOrders.id),
   sku:text("sku").notNull(), name:text("name").notNull(), qty:integer("qty").notNull(),
+  productColor:text("product_color").notNull().default(""), productSize:text("product_size").notNull().default(""),
   unitPrice:integer("unit_price").notNull(), amount:integer("amount").notNull(), shippedQty:integer("shipped_qty").notNull().default(0), returnedQty:integer("returned_qty").notNull().default(0),
 },t=>[uniqueIndex("idx_wh_item_sku").on(t.orderId,t.sku),check("wh_item_qty",sql`${t.qty}>0 AND ${t.shippedQty}>=0 AND ${t.shippedQty}<=${t.qty} AND ${t.returnedQty}>=0 AND ${t.returnedQty}<=${t.shippedQty}`)]);
 
@@ -55,6 +57,7 @@ export const wholesaleFinanceEntries = sqliteTable("wholesale_finance_entries", 
 
 export const wholesaleReturns = sqliteTable("wholesale_returns", {
   id:text("id").primaryKey(), orderId:text("order_id").notNull().references(()=>wholesaleOrders.id), orderItemId:text("order_item_id").notNull().references(()=>wholesaleOrderItems.id),
+  consignmentSoldQty:integer("consignment_sold_qty").notNull().default(0),
   qty:integer("qty").notNull(), amount:integer("amount").notNull(), resellable:integer("resellable").notNull().default(0), allocationsJson:text("allocations_json").notNull(), businessDate:text("business_date").notNull(),
   proofRef:text("proof_ref").notNull(), reason:text("reason").notNull(), actorId:text("actor_id").notNull(), createdAt:text("created_at").notNull(),
 },t=>[index("idx_wh_return_month").on(t.businessDate,t.orderId)]);
@@ -66,3 +69,10 @@ export const wholesaleOperations = sqliteTable("wholesale_operations", {
 export const wholesaleFiles = sqliteTable("wholesale_files", {
   id:text("id").primaryKey(), orderId:text("order_id").notNull().references(()=>wholesaleOrders.id), objectKey:text("object_key").notNull(), name:text("name").notNull(), contentType:text("content_type").notNull(), size:integer("size").notNull(), actorId:text("actor_id").notNull(), createdAt:text("created_at").notNull(),
 },t=>[index("idx_wh_files_order").on(t.orderId)]);
+
+export const wholesaleConsignmentSales = sqliteTable("wholesale_consignment_sales", {
+ id:text("id").primaryKey(), orderId:text("order_id").notNull().references(()=>wholesaleOrders.id),
+ orderItemId:text("order_item_id").notNull().references(()=>wholesaleOrderItems.id), qty:integer("qty").notNull(), amount:integer("amount").notNull(),
+ businessDate:text("business_date").notNull(), reference:text("reference").notNull(), note:text("note").notNull(),
+ actorId:text("actor_id").notNull(), actorName:text("actor_name").notNull(), createdAt:text("created_at").notNull(),
+},t=>[uniqueIndex("idx_wh_consignment_reference").on(t.reference,t.orderItemId),index("idx_wh_consignment_order").on(t.orderId,t.businessDate)]);

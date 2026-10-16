@@ -40,13 +40,16 @@ function compileComponent(file,extra="",overrides={}){
   return module.exports;
 }
 test("所有线下表单和对账组件使用印尼语渲染，选项值保持业务编码",()=>{
-  const locale=compileComponent("../app/wholesale-language.tsx"),ui=compileComponent("../app/wholesale.tsx","\nexport {CustomerForm,CreateOrder,OrderDetail,ShipmentForm,FinanceForm,ReturnForm,FinanceReconciliation,Dashboard};",{"./wholesale-language":locale});
+  const locale=compileComponent("../app/wholesale-language.tsx"),ui=compileComponent("../app/wholesale.tsx","\nexport {CustomerForm,CreateOrder,OrderDetail,ShipmentForm,FinanceForm,ReturnForm,FinanceReconciliation,Dashboard,ConsignmentPanel};",{"./wholesale-language":locale});
   const o=order();o.financial=orderFinancials(o);const data={actor:{id:"admin1",role:"管理员"},customers:[{...o.customer,id:"c1",sales_user_id:"sales1"}],users:[{id:"supply1",role:"供应链",name:"Budi"}],skus:[{sku:"BAG-01",name:"Tote"}],stock:[]};
   const common={data,order:o,busy:false,mutate:async()=>true,done:()=>{},close:()=>{},newCustomer:()=>{},refresh:async()=>{},notice:()=>{}},report=monthlyReconciliation([o],"2026-08","2026-09-12");
   const render=(Component,props,language="id")=>renderToStaticMarkup(React.createElement(locale.WholesaleLanguageContext.Provider,{value:{language,setLanguage:()=>{}}},React.createElement(Component,props)));
   for(const name of ["CustomerForm","CreateOrder","OrderDetail","ShipmentForm","FinanceForm","ReturnForm"]){const html=render(ui[name],common);assert.ok(!/[\u3400-\u9fff]/.test(html),`${name} still contains Chinese UI text`);}
   assert.ok(!/[\u3400-\u9fff]/.test(render(ui.FinanceReconciliation,{report,exporting:false,download:()=>{}})));
-  const form=render(ui.CreateOrder,common);assert.ok(form.includes('value="prepaid"'));assert.ok(form.includes('value="credit"'));assert.ok(form.includes('value="false"'));assert.ok(form.includes("Bayar sebelum pengiriman"));assert.ok(render(ui.CreateOrder,common,"zh").includes("先款后货"));
+  const consignmentOrder={...o,sale_type:"consignment",consignmentSales:[]};
+  for(const name of ["ConsignmentPanel","ReturnForm"]){const html=render(ui[name],{...common,order:consignmentOrder,editable:true});assert.ok(!/[\u3400-\u9fff]/.test(html),name+" contains Chinese");}
+  const financeDetail=render(ui.OrderDetail,{...common,order:{...o,status:"pending",sale_type:"cash"},data:{...data,actor:{id:"finance1",role:"财务"}}});assert.ok(financeDetail.includes("Persetujuan keuangan"));assert.ok(financeDetail.includes("Setujui"));
+  const form=render(ui.CreateOrder,common);assert.ok(form.includes('value="cash"'));assert.ok(form.includes('value="consignment"'));assert.ok(form.includes('value="false"'));assert.ok(form.includes("Bayar sebelum pengiriman"));assert.ok(render(ui.CreateOrder,common,"zh").includes("先款后货"));
 });
 
 test("所有显式界面翻译键都有印尼语文案",()=>{

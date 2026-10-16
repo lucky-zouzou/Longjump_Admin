@@ -127,6 +127,13 @@
       "when": 1791900481975,
       "tag": "0017_inbound_documents",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1792108800000,
+      "tag": "0018_wholesale_finance_approval",
+      "breakpoints": true
     }
   ]
 }
