@@ -1,5 +1,6 @@
 "use client";
 
+import {useDirtyGuard} from "./workspace-hooks";
 import {useState} from "react";
 import ReplenishmentExport from "./replenishment-export";
 import PlanInventoryCheck from "./plan-inventory-check";
@@ -15,6 +16,7 @@ function PlanCard({row,data,act,busy,goInventory}:{row:Row;data:Row;act:Act;busy
   const [inventoryCheck,setInventoryCheck]=useState<Row|null>(null);
   const [mode,setMode]=useState(""),[comment,setComment]=useState(""),[error,setError]=useState("");
   const [supplyUserId,setSupplyUserId]=useState(data.users.some((u:Row)=>u.id===row.creator_id&&u.role==="供应链"&&u.active)?row.creator_id:"");
+  useDirtyGuard(Boolean(mode));
   const own=row.creator_id===data.actor.id,admin=data.actor.role==="管理员",supply=data.actor.role==="供应链";
   const pending=row.status==="pending",canWithdraw=pending&&own&&(admin||supply),canDecide=pending&&admin&&!own;
   const canResubmit=supply&&["withdrawn","rejected"].includes(row.status);
@@ -31,7 +33,7 @@ function PlanCard({row,data,act,busy,goInventory}:{row:Row;data:Row;act:Act;busy
         :await act("decideApproval",{approvalId:row.id,version:row.version,decision:mode,comment,supplyUserId,inventoryAcknowledged:inventoryCheck?.ack===true,inventorySnapshot:inventoryCheck?.snapshot},mode==="approve"?"计划已批准，采购单与生产单已生成":"计划已驳回，等待供应链调整后重新送审",setError);
     if(result)setMode("");
   };
-  return <article className="panel monthly-approval" aria-label={`${row.month}月度计划`}>
+  return <article className="panel monthly-approval" data-entity-id={row.id} tabIndex={-1} aria-label={`${row.month}月度计划`}>
     <header className="approval-header"><div><h3>{row.month} 月度备货计划</h3><p>送审人：{row.creator_name||"历史账号"} · {row.creator_role} <span>版本 V{row.version}</span></p></div><span className={`pill ${row.status==="approved"?"green":"red"}`}>{labels[row.status]||row.status}</span></header>
     <div className="approval-totals"><span>产品系列<strong>{format(series.length)}</strong></span><span>SKU<strong>{format(items.length)}</strong></span><span>备货总量<strong>{format(items.reduce((sum,item)=>sum+Number(item.total||0),0))} 件</strong></span></div>
     <ReplenishmentExport snapshot={data} approvalId={row.id} showForecast={false}/>

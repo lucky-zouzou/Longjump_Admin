@@ -44,7 +44,7 @@ export default function InventoryCountReview({rows,busy,act}:Props){
       {visible.length===0?<tr><td colSpan={8}><div className="empty">{showHistory?"暂无盘点差异单":"暂无待复核盘点差异"}</div></td></tr>:visible.map(row=>{
         const delta=Number(row.counted_qty)-Number(row.system_qty),known=row.current_qty!==undefined;
         const stale=known&&Number(row.current_qty)!==Number(row.system_qty),active=editing?.id===row.id;
-        return <Fragment key={row.id}><tr>
+        return <Fragment key={row.id}><tr data-entity-id={row.id} tabIndex={-1}>
           <td><strong>{row.sku}</strong><div className="cell-note">{row.site} · {row.channel}</div></td>
           <td>{row.creator_name||row.creator_id}<div className="cell-note">{date(row.created_at)}（北京时间）</div></td>
           <td className="num">{fmt(Number(row.system_qty))}</td><td className="num">{fmt(Number(row.counted_qty))}</td>
