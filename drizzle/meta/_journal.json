@@ -148,6 +148,13 @@
       "when": 1792202400000,
       "tag": "0020_wholesale_customer_receipts",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1792288800000,
+      "tag": "0021_factory_documents",
+      "breakpoints": true
     }
   ]
 }

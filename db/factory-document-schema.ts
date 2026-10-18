@@ -1,0 +1,10 @@
+import {integer,text,sqliteTable,uniqueIndex,index} from 'drizzle-orm/sqlite-core';
+export const purchasePlanDrafts=sqliteTable('purchase_plan_drafts',{
+ month:text('month').primaryKey(),sourceKey:text('source_key').notNull(),documentsJson:text('documents_json').notNull(),version:integer('version').notNull().default(1),actorId:text('actor_id').notNull(),updatedAt:text('updated_at').notNull(),
+});
+export const factoryDispatchNotices=sqliteTable('factory_dispatch_notices',{
+ id:text('id').primaryKey(),noticeNo:text('notice_no').notNull().unique(),productionOrderId:text('production_order_id').notNull(),purchaseOrderId:text('purchase_order_id').notNull(),factoryUserId:text('factory_user_id').notNull(),supplyUserId:text('supply_user_id').notNull(),site:text('site').notNull(),channel:text('channel').notNull(),warehouseId:text('warehouse_id').notNull(),warehouseName:text('warehouse_name').notNull(),shippingDate:text('shipping_date').notNull(),receiver:text('receiver').notNull(),receiverPhone:text('receiver_phone').notNull(),receiverAddress:text('receiver_address').notNull(),instructions:text('instructions').notNull().default(''),itemsJson:text('items_json').notNull(),status:text('status').notNull().default('issued'),packingJson:text('packing_json').notNull().default('{}'),packingNo:text('packing_no'),transportBatchId:text('transport_batch_id'),version:integer('version').notNull().default(1),createdBy:text('created_by').notNull(),createdAt:text('created_at').notNull(),updatedAt:text('updated_at').notNull(),
+},t=>[index('idx_dispatch_production').on(t.productionOrderId,t.status),uniqueIndex('idx_factory_packing_no').on(t.packingNo)]);
+export const factoryDocumentFiles=sqliteTable('factory_document_files',{
+ id:text('id').primaryKey(),noticeId:text('notice_id').notNull().references(()=>factoryDispatchNotices.id),objectKey:text('object_key').notNull().unique(),name:text('name').notNull(),contentType:text('content_type').notNull(),size:integer('size').notNull(),actorId:text('actor_id').notNull(),actorName:text('actor_name').notNull(),createdAt:text('created_at').notNull(),
+});
