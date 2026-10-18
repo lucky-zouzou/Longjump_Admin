@@ -1,4 +1,5 @@
 "use client";
+import {purchaseWorkbook,writeFactoryWorkbook} from '../lib/factory-document-export.mjs';
 import {useDirtyGuard} from './workspace-hooks';
 import {useState} from 'react';
 import {hasPermission} from '../lib/permissions.mjs';
@@ -8,7 +9,7 @@ type Act=(action:string,payload:Row,success:string,onError?:(message:string)=>vo
 const fmt=(n:unknown)=>Number(n||0).toLocaleString('zh-CN');
 const time=(v:string)=>v?new Date(v).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false}):'—';
 const today=()=>new Date(Date.now()+8*3600000).toISOString().slice(0,10);
-const eventLabels:Record<string,string>={factory_accepted:'确认接单并开始生产',production_progress:'更新生产进度',production_completed:'生产完成，转待质检',qc_passed:'质检通过',qc_rejected:'质检不通过'};
+const eventLabels:Record<string,string>={factory_accepted:'确认接单并开始生产',production_progress:'更新生产进度',production_completed:'生产完成，转待质检',qc_passed:'质检通过',qc_rejected:'质检不通过',dispatch_issued:'供应链下发发货通知',packing_submitted:'工厂发货并提交装箱清单',packing_confirmed:'装箱清单复核通过',packing_returned:'装箱清单退回补正',dispatch_cancelled:'取消发货通知',transport_linked:'装箱清单转海运批次'};
 function Flow({stage}:{stage:string}){
   const current=stage==='awaiting_order'?0:stage==='awaiting_factory'?1:stage==='in_production'||stage==='pending'?2:stage==='ready_to_ship'?5:4;
   return <ol className="production-flow" aria-label="工厂生产流程">{['收到订单','导出确认','生产中','生产完成','待质检','可发货'].map((label,i)=><li key={label} className={i<current?'done':i===current?'current':''}><span>{i<current?'✓':i+1}</span>{label}</li>)}</ol>;
@@ -37,7 +38,7 @@ function ProductionOrder({order,actor,act,busy}:{order:Row;actor:Row;act:Act;bus
     try{
       const XLSX=await import('xlsx');
       const result=await act('exportProductionOrder',{productionOrderId:order.id},'工厂订单导出已生成',setError);if(!result)return;
-      const bytes=XLSX.write(productionWorkbook(XLSX,result.document),{type:'array',bookType:'xlsx',compression:true});
+      const bytes=result.purchaseDocument?writeFactoryWorkbook(XLSX,purchaseWorkbook(XLSX,result.purchaseDocument)):XLSX.write(productionWorkbook(XLSX,result.document),{type:'array',bookType:'xlsx',compression:true});
       const url=URL.createObjectURL(new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'})),link=document.createElement('a');
       link.href=url;link.download=`工厂生产订单-${order.month}-${String(order.series_name).replace(/[\\/:*?"<>|]/g,'_')}-${order.id}.xlsx`;document.body.appendChild(link);
       try{link.click();}finally{link.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);}
@@ -55,7 +56,7 @@ function ProductionOrder({order,actor,act,busy}:{order:Row;actor:Row;act:Act;bus
   const events=(order.evidence||[]).filter((e:Row)=>eventLabels[e.stage]).map((e:Row)=>({...e,label:eventLabels[e.stage]}));
   return <article className="production-card" data-entity-id={order.id} tabIndex={-1}><header><div><h4>{order.series_name}</h4><p>{order.factory_name||'待分配工厂'} · {order.month} · {order.items.length} 个 SKU</p><small className="production-id">{order.id}</small></div><span className={`production-badge ${['awaiting_qc','qc_rejected','awaiting_factory'].includes(stage)?'attention':''}`}>{productionStageLabel(order)}</span></header>
     <Flow stage={stage}/><div className="production-stats"><span>计划数量<strong>{fmt(order.visiblePlannedQty)}</strong></span><span>实际完工<strong>{fmt(order.visibleProducedQty)}</strong></span><span>生产进度<strong>{fmt(order.progress_pct)}%</strong></span><span>承诺完工日<strong>{order.promised_completion_date||'待确认'}</strong></span></div>
-    <p className="production-next">{stage==='awaiting_factory'?'下一步：工厂导出订单，核对SKU和数量后确认接单。':['in_production','pending'].includes(stage)?'下一步：工厂更新进度；完成后逐项登记实际完工数量。':stage==='awaiting_qc'?'下一步：供应链核对质检报告并确认结果。':stage==='qc_rejected'?'下一步：工厂按质检意见整改，供应链复检后重新确认。':stage==='ready_to_ship'?'下一步：供应链前往“海运批次”，按剩余可发数量安排发运。':'下一步：供应链先确认采购订单。'}</p>
+    <p className="production-next">{stage==='awaiting_factory'?'下一步：工厂导出订单，核对SKU和数量后确认接单。':['in_production','pending'].includes(stage)?'下一步：工厂更新进度；完成后逐项登记实际完工数量。':stage==='awaiting_qc'?'下一步：供应链核对质检报告并确认结果。':stage==='qc_rejected'?'下一步：工厂按质检意见整改，供应链复检后重新确认。':stage==='ready_to_ship'?'下一步：供应链在本页下发发货通知；工厂发货后提交装箱清单。复核后再转海运。':'下一步：供应链先确认采购订单。'}</p>
     {done&&Number(order.visiblePlannedQty)!==Number(order.visibleProducedQty)&&<p className="notice warn">完工差异：计划 {fmt(order.visiblePlannedQty)} 件，实际 {fmt(order.visibleProducedQty)} 件，相差 {fmt(Math.abs(Number(order.visibleProducedQty)-Number(order.visiblePlannedQty)))} 件，请结合生产说明核对。</p>}
     <details className="production-detail"><summary>SKU明细与操作记录</summary><div className="table-wrap"><table><thead><tr><th>SKU / 商品</th><th className="num">计划</th><th className="num">实际完工</th><th className="num">累计发货</th><th className="num">剩余可发</th></tr></thead><tbody>{order.items.map((i:Row)=><tr key={i.id}><td><strong>{i.sku}</strong><small>{i.name}</small></td><td className="num">{fmt(i.visiblePlanned)}</td><td className="num">{fmt(i.visibleProduced)}</td><td className="num">{fmt(i.shippedQty)}</td><td className="num">{fmt(i.remainingToShip)}</td></tr>)}</tbody></table></div>{events.length?<Timeline events={events}/>:<p>暂无工厂操作记录</p>}</details>
     <div className="production-actions">{can('production.export')&&order.status!=='awaiting_order'&&<button className="btn" disabled={pending} onClick={download}>{downloading?'正在生成…':'导出工厂订单 Excel'}</button>}{order.status==='awaiting_factory'&&can('production.accept')&&<button className="btn primary" disabled={pending||!receipt} onClick={()=>begin('accept')}>确认接单并开始生产</button>}{order.status==='in_production'&&can('production.progress')&&<button className="btn" disabled={pending} onClick={()=>begin('progress')}>更新生产进度</button>}{['in_production','pending'].includes(order.status)&&can('production.complete')&&<button className="btn primary" disabled={pending} onClick={()=>begin('complete')}>登记生产完成</button>}{done&&order.qc_status!=='passed'&&can('production.qc')&&<><button className="btn primary" disabled={pending} onClick={()=>begin('pass')}>质检通过</button><button className="btn danger" disabled={pending} onClick={()=>begin('reject')}>质检不通过</button></>}</div>

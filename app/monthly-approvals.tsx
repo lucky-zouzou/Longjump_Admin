@@ -5,6 +5,7 @@ import {useState} from "react";
 import ReplenishmentExport from "./replenishment-export";
 import PlanInventoryCheck from "./plan-inventory-check";
 import {SupplyPicker} from "./plan-changes";
+import {PurchaseDocumentView,PurchasePreparation} from './factory-documents';
 
 type Row = Record<string,any>;
 type Act = (action:string,payload:Row,success:string,onError?:(message:string)=>void)=>Promise<Row|null>;
@@ -37,6 +38,7 @@ function PlanCard({row,data,act,busy,goInventory}:{row:Row;data:Row;act:Act;busy
     <header className="approval-header"><div><h3>{row.month} 月度备货计划</h3><p>送审人：{row.creator_name||"历史账号"} · {row.creator_role} <span>版本 V{row.version}</span></p></div><span className={`pill ${row.status==="approved"?"green":"red"}`}>{labels[row.status]||row.status}</span></header>
     <div className="approval-totals"><span>产品系列<strong>{format(series.length)}</strong></span><span>SKU<strong>{format(items.length)}</strong></span><span>备货总量<strong>{format(items.reduce((sum,item)=>sum+Number(item.total||0),0))} 件</strong></span></div>
     <ReplenishmentExport snapshot={data} approvalId={row.id} showForecast={false}/>
+    {row.payload?.purchaseDocuments?.length>0&&<section><h4>{row.status==='approved'?'已批准采购模板单':'待核对采购模板单'}</h4><p>请核对采购价、交期、工厂及条款；批准后将按本版本下发工厂。</p>{row.payload.purchaseDocuments.map((d:Row)=><PurchaseDocumentView key={d.key} document={{...d,approvalId:row.id,...(row.status==='approved'?{approvedBy:[...(row.history||[])].reverse().find((h:Row)=>h.action.startsWith('批准'))?.actorName||'管理员',approvedAt:row.updated_at}:{})}}/>)}</section>}
     {row.decision_comment&&<p className="approval-comment">最近处理意见：{row.decision_comment}</p>}
     {pending&&<div className={`notice ${own&&admin?"warn":"info"}`}>{own&&admin?"这张计划由您送审，不能自行批准或驳回。请先撤回，再由供应链账号重新送审，之后您就可以审批。":own?"您是本次送审人，等待管理员审批。需要调整时可以撤回。":admin?"请核对计划明细；批准时指定供应链负责人，驳回时填写原因。":"当前等待管理员审批；供应链账号负责送审和执行，不负责审批。"}</div>}
     {["withdrawn","rejected"].includes(row.status)&&<div className="notice info">运营已提交的需求保留，可以调整后再次提交；由供应链账号核对并重新送审，再交管理员审批。</div>}
@@ -44,7 +46,7 @@ function PlanCard({row,data,act,busy,goInventory}:{row:Row;data:Row;act:Act;busy
     <details className="approval-detail"><summary>查看本版计划明细（{items.length} 个 SKU）</summary><div className="table-wrap"><table><thead><tr><th>SKU / 商品</th><th>站点 / 渠道分配</th><th className="num">总数量</th></tr></thead><tbody>{items.length?items.map((item:Row)=><tr key={item.sku}><td><strong>{item.sku}</strong><div className="cell-note">{item.name}</div></td><td>{(item.allocations||[]).map((a:Row)=><div key={`${a.site}-${a.channel}`}>{a.site} · {a.channel}：{format(a.qty)} 件</div>)}</td><td className="num">{format(item.total)}</td></tr>):<tr><td colSpan={3}>本月已确认无备货需求</td></tr>}</tbody></table></div></details>
     {!mode&&<div className="approval-actions">
       {canWithdraw&&<button className="btn danger" disabled={busy} onClick={()=>open("withdraw")}>撤回本人计划</button>}
-      {canResubmit&&<button className="btn primary" disabled={busy} onClick={()=>open("resubmit")}>核对并重新送审</button>}
+      {canResubmit&&<PurchasePreparation month={row.month} planVersion={row.version} act={act} busy={busy}/>}
       {canDecide&&<><button className="btn primary" disabled={busy} onClick={()=>open("approve")}>批准计划</button><button className="btn danger" disabled={busy} onClick={()=>open("reject")}>驳回计划</button></>}
     </div>}
     {mode&&<form className="approval-editor" onSubmit={submit}>

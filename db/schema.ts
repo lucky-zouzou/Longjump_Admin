@@ -284,6 +284,8 @@ export const seriesPurchaseOrders = sqliteTable("series_purchase_orders", {
   approvalId: text("approval_id").notNull(),
   creatorId: text("creator_id").notNull(),
   assignedSupplyUserId: text("assigned_supply_user_id").references(() => users.id),
+  documentJson: text("document_json").notNull().default("{}"),
+  workflowVersion: integer("workflow_version").notNull().default(0),
   orderRef: text("order_ref").notNull().default(""),
   supplierConfirmedAt: text("supplier_confirmed_at"),
   expectedCompletionDate: text("expected_completion_date"),
@@ -621,3 +623,5 @@ export * from "./field-sales-schema";
 export * from "./review-schema";
 
 export * from "./after-sales-schema";
+
+export * from "./factory-document-schema";

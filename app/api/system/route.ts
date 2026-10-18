@@ -1,4 +1,6 @@
 import {workspaceTasks} from "../../../lib/workspace-tasks.mjs";
+import {purchaseDocumentsForSubmission,FactoryDocumentError,keyOf} from "../../../lib/purchase-documents.mjs";
+import {packingTransportContext} from "../../../lib/factory-documents.mjs";
 import {moduleSnapshot,MODULE_FIELDS,mobileModules} from "../../../lib/workspace-model.mjs";
 import {readHistory,historyCsv,HistoryError} from "../../../lib/history-query.mjs";
 import {previewInbound,submitInbound,readInboundDocuments,InboundError} from "../../../lib/inbound.mjs";
@@ -261,7 +263,7 @@ export async function GET(request:Request) {
     const productionOrders:AnyRow[]=productionOrderRows.map((order):AnyRow=>{
       const items=productionItemsByOrder.get(order.id)??[];
       const producedVariance=Number(order.total_produced_qty||0)!==Number(order.total_planned_qty||0);
-      return {...order,items,visiblePlannedQty:items.reduce((sum,row)=>sum+Number(row.visiblePlanned||0),0),visibleProducedQty:items.reduce((sum,row)=>sum+Number(row.visibleProduced||0),0),remainingToShip:items.reduce((sum,row)=>sum+Number(row.remainingToShip||0),0),producedVariance,evidence:parseJson(order.evidence_json,[])};
+      return {...order,workflowVersion:purchaseOrderRows.find(p=>p.id===order.purchase_order_id)?.workflow_version||0,items,visiblePlannedQty:items.reduce((sum,row)=>sum+Number(row.visiblePlanned||0),0),visibleProducedQty:items.reduce((sum,row)=>sum+Number(row.visibleProduced||0),0),remainingToShip:items.reduce((sum,row)=>sum+Number(row.remainingToShip||0),0),producedVariance,evidence:parseJson(order.evidence_json,[])};
     }).filter((order)=>actor.role!=="运营"||order.items.length>0)
       .filter((order)=>actor.role!=="工厂"||order.assigned_user_id===actor.id)
       .sort((a,b)=>Number(b.producedVariance)-Number(a.producedVariance)||Date.parse(b.updated_at)-Date.parse(a.updated_at));
@@ -866,14 +868,15 @@ async function submitPlan(actor:Actor,payload:AnyRow) {
   const existing=await db.prepare("SELECT * FROM approval_requests WHERE type='monthly_plan' AND month=?").bind(month).first<AnyRow>();
   if(existing && !["rejected","withdrawn"].includes(existing.status)) throw new HttpError(409,"该月计划已经提交审批");
   if(existing && Number(payload.version)!==Number(existing.version)) throw new HttpError(409,"计划版本已变化，请刷新后重新送审");
+  const procurement=await purchaseDocumentsForSubmission(db,actor,month,seriesOrders);
   const approvalId=existing?.id??makeId("approval");
   const sql=existing
     ? "UPDATE approval_requests SET version=version+1,status='pending',stage='admin_review',creator_id=?,creator_role=?,payload_json=?,decision_comment='',approved_by=NULL,updated_at=? WHERE id=?"
     : "INSERT INTO approval_requests (id,type,month,status,stage,creator_id,creator_role,payload_json,decision_comment,approved_by,created_at,updated_at) VALUES (?,'monthly_plan',?,'pending','admin_review',?,?,?,'',NULL,?,?)";
   const statement=existing
-    ? db.prepare(sql).bind(actor.id,actor.role,JSON.stringify({items,seriesOrders}),timestamp,approvalId)
-    : db.prepare(sql).bind(approvalId,month,actor.id,actor.role,JSON.stringify({items,seriesOrders}),timestamp,timestamp);
-  await atomicBatch(db,[...submissions.map(row=>guardStatement(db,actor,"submitPlan","EXISTS (SELECT 1 FROM monthly_submissions WHERE id=? AND version=?)",[row.id,row.version])),guardStatement(db,actor,"submitPlan",existing?"EXISTS (SELECT 1 FROM approval_requests WHERE id=? AND version=? AND status IN ('rejected','withdrawn'))":"NOT EXISTS (SELECT 1 FROM approval_requests WHERE type='monthly_plan' AND month=?)",existing?[existing.id,existing.version]:[month]),statement,audit(actor,existing?"重新提交月度计划审批":"按系列提交月度计划审批","approval",approvalId,{month,fromStatus:existing?.status??null,fromVersion:existing?.version??null,status:"pending",version:Number(existing?.version||0)+1,creatorId:actor.id,creatorRole:actor.role,seriesCount:seriesOrders.length,skuCount:items.length,totalQty:items.reduce((s,r)=>s+r.total,0),plan:{items,seriesOrders}})]);
+    ? db.prepare(sql).bind(actor.id,actor.role,JSON.stringify({items,seriesOrders,purchaseDocuments:procurement.documents}),timestamp,approvalId)
+    : db.prepare(sql).bind(approvalId,month,actor.id,actor.role,JSON.stringify({items,seriesOrders,purchaseDocuments:procurement.documents}),timestamp,timestamp);
+  await atomicBatch(db,[...procurement.guards,...submissions.map(row=>guardStatement(db,actor,"submitPlan","EXISTS (SELECT 1 FROM monthly_submissions WHERE id=? AND version=?)",[row.id,row.version])),guardStatement(db,actor,"submitPlan",existing?"EXISTS (SELECT 1 FROM approval_requests WHERE id=? AND version=? AND status IN ('rejected','withdrawn'))":"NOT EXISTS (SELECT 1 FROM approval_requests WHERE type='monthly_plan' AND month=?)",existing?[existing.id,existing.version]:[month]),statement,audit(actor,existing?"重新提交月度计划审批":"按系列提交月度计划审批","approval",approvalId,{month,fromStatus:existing?.status??null,fromVersion:existing?.version??null,status:"pending",version:Number(existing?.version||0)+1,creatorId:actor.id,creatorRole:actor.role,seriesCount:seriesOrders.length,skuCount:items.length,totalQty:items.reduce((s,r)=>s+r.total,0),plan:{items,seriesOrders,purchaseDocuments:procurement.documents}})]);
   return Response.json({ok:true,approvalId,version:Number(existing?.version||0)+1,seriesCount:seriesOrders.length,skuCount:items.length});
 }
 
@@ -937,11 +940,14 @@ async function decideApproval(actor:Actor,payload:AnyRow) {
       if(!items.length) throw new HttpError(409,`${series.seriesName}没有有效SKU明细`);
       for(const item of items) if(!allocationMatchesTotal(item.total,item.allocations as Array<{qty:number}>)) throw new HttpError(409,`${item.sku}分配合计异常，审批已阻止`);
       const supplier=await db.prepare("SELECT * FROM business_partners WHERE type='supplier' AND name=? AND active=1").bind(series.supplierName).first<AnyRow>();
-      const factory=await db.prepare("SELECT * FROM business_partners WHERE type='factory' AND name=? AND active=1").bind(series.factoryName).first<AnyRow>();
+      const factory=await db.prepare("SELECT b.* FROM business_partners b JOIN users u ON u.id=b.assigned_user_id WHERE b.type='factory' AND b.name=? AND b.active=1 AND u.role='工厂' AND u.active=1").bind(series.factoryName).first<AnyRow>();
       if(!supplier) throw new HttpError(409,`${series.supplierName}尚未建立启用中的供应商主数据`);
       if(!factory?.assigned_user_id) throw new HttpError(409,`${series.factoryName}尚未建立工厂主数据或未绑定工厂账号`);
+      statements.push(guardStatement(db,actor,"approveFactoryMapping","EXISTS(SELECT 1 FROM business_partners b JOIN users u ON u.id=b.assigned_user_id WHERE b.id=? AND b.active=1 AND b.assigned_user_id=? AND u.role='工厂' AND u.active=1)",[factory.id,factory.assigned_user_id]));
       const purchaseOrderId=makeId("series_po"),productionOrderId=makeId("series_mo");
       const totalQty=items.reduce((sum,item)=>sum+Number(item.total||0),0);
+      const purchaseDocument=plan.purchaseDocuments?.find((d:AnyRow)=>d.key===keyOf(series));
+      if(Array.isArray(plan.purchaseDocuments)&&!purchaseDocument)throw new HttpError(409,"采购模板明细缺失，请撤回后由供应链重新核对送审");
       statements.push(
         db.prepare("INSERT INTO series_purchase_orders (id,month,series_name,supplier_name,factory_name,status,total_qty,sku_count,approval_id,creator_id,assigned_supply_user_id,created_at,updated_at) VALUES (?,?,?,?,?,'draft',?,?,?,?,?,?,?)")
           .bind(purchaseOrderId,approval.month,series.seriesName,series.supplierName,series.factoryName,totalQty,items.length,approval.id,approval.creator_id,supplyId,timestamp,timestamp),
@@ -956,6 +962,11 @@ async function decideApproval(actor:Actor,payload:AnyRow) {
           db.prepare("INSERT INTO series_production_order_items (id,production_order_id,purchase_order_item_id,sku,name,planned_qty,produced_qty,created_at,updated_at) VALUES (?,?,?,?,?,?,0,?,?)")
             .bind(productionItemId,productionOrderId,purchaseItemId,item.sku,item.name,item.total,timestamp,timestamp),
         );
+      }
+      if(purchaseDocument){
+        const frozen={...purchaseDocument,approvalId:approval.id,approvedBy:actor.name,approvedAt:timestamp};
+        const completionDate=purchaseDocument.items.map((i:AnyRow)=>i.dueDate).sort().at(-1);
+        statements.push(db.prepare("UPDATE series_purchase_orders SET document_json=?,workflow_version=1,status='supplier_confirmed',order_ref=?,supplier_confirmed_at=?,expected_completion_date=? WHERE id=?").bind(JSON.stringify(frozen),purchaseDocument.number,timestamp,completionDate,purchaseOrderId),db.prepare("UPDATE series_production_orders SET status='awaiting_factory',promised_completion_date=? WHERE id=?").bind(completionDate,productionOrderId));
       }
     }
   }
@@ -996,7 +1007,7 @@ async function exportProductionOrder(actor:Actor,payload:AnyRow){
   const document=productionDocument(order,items,purchase||{}),fingerprint=await productionFingerprint(order,items,purchase||{}),receiptId=makeId("export"),timestamp=nowIso();
   await atomicBatch(db,[guardStatement(db,actor,"导出工厂订单","EXISTS(SELECT 1 FROM series_production_orders WHERE id=? AND updated_at=? AND status=?)",[order.id,order.updated_at,order.status]),
     db.prepare("INSERT INTO audit_logs(id,action,entity_type,entity_id,detail_json,actor_id,actor_name,created_at) VALUES(?,'生成工厂订单导出','series_production_order',?,?,?,?,?)").bind(receiptId,order.id,JSON.stringify({fingerprint,skuCount:items.length,plannedQty:document.plannedQty}),actor.id,actor.name,timestamp)]);
-  return Response.json({ok:true,document,exportReceiptId:receiptId});
+  return Response.json({ok:true,document,purchaseDocument:purchase?.workflow_version===1?parseJson(purchase.document_json,{}):null,exportReceiptId:receiptId});
 }
 
 async function acceptProductionOrder(actor:Actor,payload:AnyRow){
@@ -1083,6 +1094,8 @@ async function confirmProductionQc(actor:Actor,payload:AnyRow){
 
 async function createTransportBatch(actor:Actor,payload:AnyRow){
   requireBusinessPermission(actor,"transport.create");
+  const packing=await packingTransportContext(database(),actor,payload);
+  if(packing)payload={...payload,items:packing.items};
   const batchNo=cleanText(payload.batchNo,100).toUpperCase(),containerNo=cleanText(payload.containerNo,100).toUpperCase(),billNo=cleanText(payload.billNo,100).toUpperCase(),carrierName=cleanText(payload.carrierName,120),note=cleanText(payload.note,500);
   if(batchNo.length<3||!carrierName) throw new HttpError(400,"请填写运输主批次号和承运商");
   const db=database();
@@ -1141,6 +1154,7 @@ async function createTransportBatch(actor:Actor,payload:AnyRow){
   const batchId=makeId("transport"),timestamp=nowIso(),statements:ReturnType<ReturnType<typeof database>["prepare"]>[]=[];
   const totalQty=sourceItems.reduce((sum,row)=>sum+Number(itemInputs.get(row.id)!.shippedQty),0),seriesCount=new Set(sourceItems.map((row)=>row.series_name)).size;
   statements.push(db.prepare("INSERT INTO transport_batches (id,batch_no,container_no,bill_no,carrier_name,status,total_shipped_qty,sku_count,series_count,creator_id,created_at,updated_at) VALUES (?,?,?,?,?,'booking',?,?,?,?,?,?)").bind(batchId,batchNo,containerNo,billNo,carrierName,totalQty,sourceItems.length,seriesCount,actor.id,timestamp,timestamp));
+  if(packing)statements.push(...packing.statements(batchId,timestamp));
   const legGroups=new Map<string,{site:string;channel:string;warehouse:AnyRow;items:Array<{batchItemId:string;sku:string;qty:number}>}>();
   for(const source of sourceItems){
     const input=itemInputs.get(source.id)!,batchItemId=makeId("transport_item");
@@ -1158,7 +1172,7 @@ async function createTransportBatch(actor:Actor,payload:AnyRow){
     for(const item of group.items) statements.push(db.prepare("INSERT INTO transport_leg_items (id,leg_id,batch_item_id,sku,qty,received_qty,pending_shelf_qty,sellable_qty,quarantine_qty,created_at,updated_at) VALUES (?,?,?,?,?,0,0,0,0,?,?)").bind(makeId("leg_item"),legId,item.batchItemId,item.sku,item.qty,timestamp,timestamp));
   }
   statements.push(audit(actor,"创建跨系列运输主批次","transport_batch",batchId,{batchNo,containerNo,billNo,carrierName,totalQty,skuCount:sourceItems.length,seriesCount,destinationLegs:legGroups.size,note}));
-  await db.batch(statements);
+  await atomicBatch(db,statements);
   return Response.json({ok:true,batchId,batchNo,totalQty,skuCount:sourceItems.length,seriesCount,legCount:legGroups.size});
 }
 
@@ -1259,6 +1273,7 @@ async function createShipmentBatch(actor:Actor,payload:AnyRow){
   const db=database(),order=await db.prepare("SELECT * FROM series_production_orders WHERE id=?").bind(productionOrderId).first<AnyRow>();
   if(!order||!["completed","completed_with_variance"].includes(order.status)) throw new HttpError(409,"只有已经登记完工的系列生产单才能创建海运批次");
   if(order.qc_status!=="passed") throw new HttpError(409,"生产单尚未质检通过，不能创建海运批次");
+  if((await db.prepare("SELECT workflow_version FROM series_purchase_orders WHERE id=?").bind(order.purchase_order_id).first<AnyRow>())?.workflow_version===1)throw new HttpError(409,"新版采购单需先下发发货通知并复核工厂装箱清单，再创建海运批次");
   if(await db.prepare("SELECT id FROM shipment_batches WHERE batch_no=?").bind(batchNo).first()) throw new HttpError(409,"该海运批次号已经存在");
   const sourceItems=await all("SELECT m.*,p.allocations_json FROM series_production_order_items m JOIN series_purchase_order_items p ON p.id=m.purchase_order_item_id WHERE m.production_order_id=?",[productionOrderId]);
   const legacyShippedRows=await all("SELECT production_order_item_id,SUM(shipped_qty) shipped_qty FROM shipment_batch_items WHERE production_order_item_id IN (SELECT id FROM series_production_order_items WHERE production_order_id=?) GROUP BY production_order_item_id",[productionOrderId]);
@@ -1707,6 +1722,7 @@ async function saveWarehouse(actor:Actor,payload:AnyRow){
 }
 
 function errorResponse(error:unknown) {
+  if(error instanceof FactoryDocumentError)return Response.json({error:error.message},{status:error.status});
   if(/inventory_baseline_date/.test(String(error))) return Response.json({error:"已启用2026-09-30期初库存，请选择2026-10-01或之后的销售／费用日期，历史销售不可再次扣库"},{status:409});
   if(/inventory_movements.balance_after|guard_|CHECK constraint|maintenance|closed finance/.test(String(error))) return Response.json({error:"库存或凭证已被更新，本次未覆盖；请刷新后重新核对"},{status:409});
   if(error instanceof HistoryError||error instanceof SkuCatalogError)return Response.json({error:error.message},{status:error.status});

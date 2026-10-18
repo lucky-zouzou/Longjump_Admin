@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {svc,systemFixture,seedMonthly,race} from './system-fixture.mjs';
+import {preparePurchase} from './factory-document-fixture.mjs';
 import {REQUIRED_MONTHLY_SCOPES} from '../lib/rules.mjs';
 
 const month='2026-09';
@@ -25,6 +26,7 @@ test('旧管理员计划撤回 → 运营调整 → 供应链重送 → 管理�
   assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM series_purchase_orders').get().n,0);
   assert.ok((await snapshot(f.users.supply)).myTasks.some(t=>t.title==='重新送审月度计划'));
   await svc.monthlySubmit(f.users.indonesia,{month,site:'印尼',channel:'TikTok',items:[{sku:'BAG-A',qty:15,reason:'核对后增加五件需求'}]});
+  await preparePurchase(f,month);
   await svc.submitPlan(f.users.supply,{month,version:2});
   assert.equal(row(f).creator_id,f.users.supply.id);assert.equal(row(f).version,3);assert.equal(total(f),15);
   await assert.rejects(decide(f,'approve',1),/版本已变化/);
@@ -35,7 +37,7 @@ test('旧管理员计划撤回 → 运营调整 → 供应链重送 → 管理�
   const po=f.sqlite.prepare('SELECT * FROM series_purchase_orders').get();
   assert.equal(po.total_qty,15);assert.equal(po.assigned_supply_user_id,f.users.supply.id);
   assert.equal(f.sqlite.prepare('SELECT total_planned_qty FROM series_production_orders').get().total_planned_qty,15);
-  await svc.confirmPurchaseOrder(f.users.supply,{purchaseOrderId:po.id,orderRef:'RESUBMIT-PO',expectedCompletionDate:'2027-01-01'});
+  assert.equal(po.workflow_version,1); // Approval now issues the locked PO directly to the factory.
   assert.equal(f.sqlite.prepare('SELECT status FROM series_production_orders').get().status,'awaiting_factory');
   const history=logs(f);assert.deepEqual(history.map(r=>r.detail.status),['withdrawn','pending','approved']);
   assert.deepEqual(history.map(r=>r.detail.totalQty),[10,15,15]);assert.deepEqual(history.map(r=>r.actor_id),[f.users.admin.id,f.users.supply.id,f.users.admin.id]);
@@ -71,6 +73,7 @@ test('送审仅供应链允许；撤回后必须携带版本，仍检查十个�
 test('管理员驳回后供应链可以重新送审，批准不再依赖旧审批意见',async()=>{
   const f=systemFixture();await submissions(f);seedMonthly(f);
   await decide(f,'reject');assert.equal(row(f).status,'rejected');
+  await preparePurchase(f,month);
   await svc.submitPlan(f.users.supply2,{month,version:2});assert.equal(row(f).creator_id,f.users.supply2.id);assert.equal(row(f).decision_comment,'');
   await decide(f,'approve',3);assert.deepEqual(logs(f).map(r=>r.detail.status),['rejected','pending','approved']);
   assert.equal(f.sqlite.prepare('SELECT assigned_supply_user_id FROM series_purchase_orders').get().assigned_supply_user_id,f.users.supply2.id);
@@ -89,6 +92,7 @@ for(const decision of ['approve','reject'])for(const winner of ['withdraw','deci
 test('重复撤回与并发重送不会新增多条审批或重复留痕',async()=>{
   const f=systemFixture();await submissions(f);seedMonthly(f);
   const withdrawals=await race(f,()=>withdraw(f),()=>withdraw(f));assert.equal(withdrawals.filter(r=>r.ok).length,1);
+  await preparePurchase(f,month);
   const resends=await race(f,()=>svc.submitPlan(f.users.supply,{month,version:2}),()=>svc.submitPlan(f.users.supply2,{month,version:2}));assert.equal(resends.filter(r=>r.ok).length,1);
   assert.equal(row(f).creator_id,f.users.supply2.id);assert.equal(row(f).version,3);assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM approval_requests').get().n,1);
   assert.equal(logs(f).length,2);
@@ -96,13 +100,16 @@ test('重复撤回与并发重送不会新增多条审批或重复留痕',async(
 
 test('重新送审和运营更新并发时阻止过期需求被锁定',async()=>{
   const f=systemFixture();await submissions(f);seedMonthly(f);await withdraw(f);
+  await preparePurchase(f,month);
   const result=await race(f,()=>svc.submitPlan(f.users.supply,{month,version:2}),()=>svc.monthlySubmit(f.users.indonesia,{month,site:'印尼',channel:'TikTok',items:[{sku:'BAG-A',qty:20,reason:'修改最新备货数量'}]}));
   assert.equal(result[0].ok,false);assert.equal(result[1].ok,true);assert.equal(row(f).status,'withdrawn');
+  await preparePurchase(f,month);
   await svc.submitPlan(f.users.supply,{month,version:2});assert.equal(total(f),20);
 });
 
 test('真实 API 动作接通撤回，越权请求不写入；首次送审记录完整快照',async()=>{
   const f=systemFixture();await submissions(f);seedMonthly(f);f.sqlite.prepare('DELETE FROM approval_requests').run();
+  await preparePurchase(f,month);
   const plan=await(await svc.submitPlan(f.users.supply,{month})).json();assert.equal(plan.version,1);assert.equal(logs(f)[0].detail.plan.items[0].total,10);
   const request=()=>new Request('http://localhost/api/system',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action:'withdrawPlan',approvalId:plan.approvalId,version:1,reason:'核对后重新送审'})});
   svc.setActor(f.users.admin);assert.equal((await svc.POST(request())).status,403);
