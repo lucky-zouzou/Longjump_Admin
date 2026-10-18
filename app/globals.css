@@ -675,3 +675,16 @@ tr:hover td { background:#fbfcff; }
 .wh-finance-proof-panel { scroll-margin-top:90px; }
 
 .wh-customer-receipts{scroll-margin-top:90px;margin-block:16px;min-width:0}.wh-customer-receipts .wh-history{overflow-wrap:anywhere}.wh-receipt-cell{display:grid;gap:6px;margin-top:10px;min-width:140px}.wh-receipt-cell .btn{white-space:normal}
+
+/* SKU onboarding stays beside the current receipt; it never resets its rows. */
+.sku-catalog-toolbar,.sku-create-heading{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.sku-catalog-toolbar{margin-bottom:18px}.sku-catalog-toolbar p,.sku-create p,.inbound-missing p{color:var(--muted);font-size:13px;line-height:1.7;margin:6px 0 12px}
+.sku-create-anchor,.sku-create{scroll-margin-top:100px}.sku-create{margin:16px 0;padding:20px;border:1px solid #b8ccf4;border-radius:12px;background:#f7faff;min-width:0}
+.sku-create h4,.inbound-missing h4{margin:0;font-size:16px}.sku-create fieldset{border:0;padding:0;margin:0;min-width:0}
+.sku-create-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:14px 0}
+.sku-create-grid label{display:flex;flex-direction:column;align-items:stretch;gap:8px;min-width:0;font-size:13px;font-weight:600}
+.sku-create-grid input,.sku-create-grid select{box-sizing:border-box;width:100%;min-width:0;min-height:44px;padding:10px 12px;font:inherit;border:1px solid #d4ddec;border-radius:8px;background:#fff;color:var(--ink)}
+.sku-create-grid input:focus,.sku-create-grid select:focus{outline:2px solid #7299f3;outline-offset:1px}
+.inbound-missing{padding:16px;margin:16px 0;border:1px solid #efcf91;border-radius:12px;background:#fffcf5}
+.inbound-missing ul{list-style:none;padding:0;margin:0}.inbound-missing li{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 0;border-top:1px solid #eadfca}.inbound-missing li>div{min-width:0;overflow-wrap:anywhere}.inbound-missing li span{display:block;color:var(--muted);font-size:12px;margin-top:6px}.inbound-missing .btn{flex-shrink:0}
+@media(max-width:600px){.sku-create{padding:14px}.sku-create-grid{grid-template-columns:1fr}.sku-create .form-actions .btn{flex:1;min-height:44px}.sku-catalog-toolbar>.btn{width:100%}.inbound-workspace .panel-head{flex-wrap:wrap;gap:12px}}

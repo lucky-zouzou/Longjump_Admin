@@ -15,6 +15,7 @@ import MonthlyApprovals from "./monthly-approvals";
 import SalesImportHistory from "./sales-import-history";
 import {matchImportItems} from "../lib/tabular-import.mjs";
 import ForecastSettings from "./forecast-settings";
+import SkuCreate from "./sku-create";
 import ProductionTracking,{ProductionOrders} from "./production-workflow";
 import ReplenishmentExport from "./replenishment-export";
 import TransportLegCard,{TransportCreated} from "./transport-workflow";
@@ -349,15 +350,16 @@ function Suggestions({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
   const actor=data.actor;
   const [selectedKey,setSelectedKey]=useState(data.suggestions[0]?supplyKey(data.suggestions[0]):"");
   const [setting,setSetting]=useState({sku:"",name:"",productSeries:"",supplierName:"",factoryName:"",productType:"老款",unitPrice:"0",productionLeadDays:"21",seaLeadDays:"35",reviewCycleDays:"7",serviceLevel:"0.95",minOrderQty:"1",orderMultiple:"1",cartonQty:"1",unitVolumeCbm:"0"});
+  const [creatingSku,setCreatingSku]=useState(false),[createdSkus,setCreatedSkus]=useState<Row[]>([]),[skuNotice,setSkuNotice]=useState('');
+  const skuCatalog=[...data.skuSettings,...createdSkus.filter(s=>!data.skuSettings.some(r=>r.sku===s.sku))];
   const selected=data.suggestions.find(row=>supplyKey(row)===selectedKey)||data.suggestions[0];
   const effectiveSelectedKey=selected?supplyKey(selected):"";
   const [trend,setTrend]=useState<Row|null>(null),[trendError,setTrendError]=useState("");
   useEffect(()=>{if(!effectiveSelectedKey)return;const abort=new AbortController();setTrend(null);setTrendError("");fetch(`/api/system?forecastTrend=${encodeURIComponent(effectiveSelectedKey)}`,{cache:"no-store",signal:abort.signal}).then(parseResponse).then(v=>setTrend({...v,key:effectiveSelectedKey})).catch(e=>{if(e.name!=="AbortError")setTrendError(e.message)});return()=>abort.abort();},[effectiveSelectedKey,data.generatedAt]);
-  const chooseSetting=(sku:string)=>{
-    const row=data.skuSettings.find(item=>item.sku===sku);
-    if(!row)return;
+  const loadSetting=(row:Row)=>{
     setSetting({sku:row.sku,name:row.name||"",productSeries:row.product_series==="待归类"?"":row.product_series||"",supplierName:row.supplier_name||"",factoryName:row.factory_name||"",productType:row.product_type||"老款",unitPrice:String(row.unit_price??0),productionLeadDays:String(row.production_lead_days??21),seaLeadDays:String(row.sea_lead_days??35),reviewCycleDays:String(row.review_cycle_days??7),serviceLevel:String(row.service_level??.95),minOrderQty:String(row.min_order_qty??1),orderMultiple:String(row.order_multiple??1),cartonQty:String(row.carton_qty??1),unitVolumeCbm:String(row.unit_volume_cbm??0)});
   };
+  const chooseSetting=(sku:string)=>{const row=skuCatalog.find(item=>item.sku===sku);if(row)loadSetting(row);};
   const m=data.metrics;
   return <>
     <PageHead title="补货与生产驾驶舱" desc="每日销量驱动，按站点＋渠道＋SKU独立判断断货、补货和生产时点">
@@ -387,10 +389,13 @@ function Suggestions({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
       <tbody>{data.suggestions.length===0?<tr><td colSpan={10}><Empty>请先录入库存和销售数据，系统将自动形成动态建议</Empty></td></tr>:data.suggestions.map((r)=><tr key={supplyKey(r)}><td><Pill tone={ALERT_TONE[r.alertLevel]||"blue"}>{r.alertLabel}</Pill><div className="cell-note">{r.alertReason}</div></td><td>{r.site}<br/><span className="cell-note">{r.channel}</span></td><td><strong>{r.sku}</strong><br/><span className="cell-note">{r.name||"—"}</span></td><td className="num">{Number(r.avg7).toFixed(1)}</td><td className="num" style={{color:r.trendRate>=.2?"var(--blue)":r.trendRate<0?"var(--green)":undefined}}>{r.previous7>0?`${r.trendRate>=0?"+":""}${pct(r.trendRate)}`:"—"}</td><td className="num" style={{color:r.qty<0?"var(--red)":undefined}}>{fmt(r.qty)}<div className="cell-note">{days(r.stockCoverDays)}</div></td><td className="num">{fmt(r.seaInTransit)}<div className="cell-note">{r.nextSeaEta||"未填写ETA"}</div></td><td className="num">{fmt(r.productionInProgress)}</td><td className="num">{fmt(r.suggestedReplenishment)}</td><td className="num"><strong>{fmt(r.suggestedProduction)}</strong><div className="cell-note">目标 {fmt(r.targetQty)}</div></td></tr>)}</tbody></table></div>
     </Panel>
     {hasPermission(actor.role,"sku.manage")&&<Panel collapsible title="SKU系列与供应参数" desc="产品系列是供应链合并下单、工厂合并生产的必要依据">
+      <div className="sku-catalog-toolbar"><div><strong>商品建档与供应资料</strong><p>首次入系统先新增 SKU，已有商品选择后维护参数。</p></div><button type="button" className="btn primary" disabled={busy||creatingSku} onClick={()=>{setCreatingSku(true);setSkuNotice('');}}>＋ 新增 SKU</button></div>
+      {creatingSku&&<SkuCreate catalog={skuCatalog} act={act} busy={busy} source="settings" onCancel={()=>setCreatingSku(false)} onCreated={row=>{setCreatedSkus(list=>[...list.filter(s=>s.sku!==row.sku),row]);loadSetting(row);setCreatingSku(false);setSkuNotice(`${row.sku} 已建档并选中，请在下方完善供应商、工厂及供应参数。`);}}/>}
+      {skuNotice&&<p className="notice info" role="status">{skuNotice}</p>}
       {data.skuSettings.some(row=>!row.product_series||row.product_series==="待归类")&&<div className="notice warn">还有 <strong>{data.skuSettings.filter(row=>!row.product_series||row.product_series==="待归类").length}</strong> 个SKU未归入产品系列。涉及这些SKU的月度计划会暂停进入审批。</div>}
       <div className="form-grid">
-        <Field label="选择已有SKU"><select value={data.skuSettings.some(row=>row.sku===setting.sku)?setting.sku:""} onChange={event=>chooseSetting(event.target.value)}><option value="">选择后自动带出参数</option>{data.skuSettings.map(row=><option key={row.sku} value={row.sku}>{row.sku} · {row.product_series||"待归类"}</option>)}</select></Field>
-        <Field label="SKU"><input value={setting.sku} onChange={e=>setSetting({...setting,sku:e.target.value})}/></Field>
+        <Field label="选择已有SKU"><select value={skuCatalog.some(row=>row.sku===setting.sku)?setting.sku:""} onChange={event=>chooseSetting(event.target.value)}><option value="">选择后自动带出参数</option>{skuCatalog.map(row=><option key={row.sku} value={row.sku}>{row.sku} · {row.product_series||"待归类"}</option>)}</select></Field>
+        <Field label="SKU（已建档编码）"><input value={setting.sku} readOnly placeholder="先选择已有 SKU 或点击新增 SKU"/></Field>
         <Field label="商品名称"><input value={setting.name} onChange={e=>setSetting({...setting,name:e.target.value})}/></Field>
         <Field label="产品系列（必填）"><input value={setting.productSeries} onChange={e=>setSetting({...setting,productSeries:e.target.value})} placeholder="例如：城市通勤包系列"/></Field>
         <Field label="供应商（主数据）"><select value={setting.supplierName} onChange={e=>setSetting({...setting,supplierName:e.target.value})}><option value="">请选择</option>{data.businessPartners.filter(row=>row.type==="supplier"&&Number(row.active)).map(row=><option key={row.id}>{row.name}</option>)}</select></Field>
