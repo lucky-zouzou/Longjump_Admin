@@ -2,6 +2,7 @@ import {workspaceTasks} from "../../../lib/workspace-tasks.mjs";
 import {moduleSnapshot,MODULE_FIELDS,mobileModules} from "../../../lib/workspace-model.mjs";
 import {readHistory,historyCsv,HistoryError} from "../../../lib/history-query.mjs";
 import {previewInbound,submitInbound,readInboundDocuments,InboundError} from "../../../lib/inbound.mjs";
+import {createCatalogSku,SkuCatalogError} from "../../../lib/sku-catalog.mjs";
 import {productionTracking,productionDocument,productionFingerprint} from "../../../lib/production-workflow.mjs";
 import {saveSalesAdSpend} from "../../../lib/sales-ad-spend.mjs";
 import {publicSystemSnapshot} from "../../../lib/system-response.mjs";
@@ -553,6 +554,7 @@ export async function POST(request:Request) {
     if (action === "submitNewProductStage") return await submitNewProductStage(actor, payload);
     if (action === "decideNewProduct") return await decideNewProduct(actor, payload);
     if (action === "assignUser") return await assignUser(actor, payload);
+    if (action === "createSku") return Response.json(await createCatalogSku(database(),actor,payload));
     if (action === "saveSkuSetting") return await saveSkuSetting(actor, payload);
     if (action === "saveBusinessPartner") return await saveBusinessPartner(actor,payload);
     if (action === "saveWarehouse") return await saveWarehouse(actor,payload);
@@ -1707,7 +1709,7 @@ async function saveWarehouse(actor:Actor,payload:AnyRow){
 function errorResponse(error:unknown) {
   if(/inventory_baseline_date/.test(String(error))) return Response.json({error:"已启用2026-09-30期初库存，请选择2026-10-01或之后的销售／费用日期，历史销售不可再次扣库"},{status:409});
   if(/inventory_movements.balance_after|guard_|CHECK constraint|maintenance|closed finance/.test(String(error))) return Response.json({error:"库存或凭证已被更新，本次未覆盖；请刷新后重新核对"},{status:409});
-  if(error instanceof HistoryError)return Response.json({error:error.message},{status:error.status});
+  if(error instanceof HistoryError||error instanceof SkuCatalogError)return Response.json({error:error.message},{status:error.status});
   if(error instanceof InboundError)return Response.json({error:error.message,errors:error.errors},{status:error.status});
   if(error instanceof HttpError || error instanceof ConflictError) return Response.json({error:error.message},{status:error.status});
   console.error(error);
