@@ -1,9 +1,11 @@
 "use client";
-import AfterSales from "./after-sales";
-import InboundReceipts from "./inbound-receipts";
-import BusinessReviews from "./business-reviews";
+import HistoryBrowser from "./history-browser";
+import {WorkspaceGuard,useWorkspaceRoute,useVisibleRefresh} from "./workspace-hooks";
+import {NAV_GROUPS,mobileModules} from "../lib/workspace-model.mjs";
+const InboundReceipts=lazy(()=>import("./inbound-receipts"));
+const BusinessReviews=lazy(()=>import("./business-reviews"));
 import SalesAdSpend from "./sales-ad-spend";
-import SalesDashboard from "./sales-dashboard";
+const SalesDashboard=lazy(()=>import("./sales-dashboard"));
 import InventoryCountReview,{type CountRequest} from "./inventory-count-review";
 import {SITE_CURRENCIES,SALES_CURRENCIES} from "../lib/sales-data.mjs";
 
@@ -17,13 +19,14 @@ import ProductionTracking,{ProductionOrders} from "./production-workflow";
 import ReplenishmentExport from "./replenishment-export";
 import TransportLegCard,{TransportCreated} from "./transport-workflow";
 import PlanChanges,{SupplyPicker,PurchaseReassign} from "./plan-changes";
-import Wholesale from "./wholesale";
+const Wholesale=lazy(()=>import("./wholesale"));
 import UserManagement,{type ManagedUser} from "./user-management";
 import { WholesaleLanguageContext,useWholesalePreference } from "./wholesale-language";
 import { translateWholesale } from "../lib/wholesale-i18n.mjs";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy,Suspense,useCallback, useEffect, useRef, useState } from "react";
 import { dataDomainsForRole, DATA_DOMAIN_LABELS, hasPermission, navigationForRole, PERMISSION_LABELS, permissionsForRole, ROLE_PERMISSIONS } from "../lib/permissions.mjs";
 
+const AfterSales=lazy(()=>import("./after-sales"));
 const SITES = ["马来西亚", "印尼", "泰国", "越南", "菲律宾"];
 const CHANNELS = ["TikTok", "Shopee", "线下分销"];
 const REQUIRED_CHANNELS = ["TikTok", "Shopee"];
@@ -49,7 +52,7 @@ type Identity = { userId:string; displayName:string; email:string; fullName:stri
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Row = Record<string,any>;
 type Snapshot = {
-  productionTracking:Row[]; generatedAt:string; actor:Row; currentMonth:string; metrics:Row; inventory:Row[]; movements:Row[]; sales:Row[]; imports:Row[];
+  module?:string; productionTracking:Row[]; generatedAt:string; actor:Row; currentMonth:string; metrics:Row; inventory:Row[]; movements:Row[]; sales:Row[]; imports:Row[];
   supplyPolicies:Row[]; forecastHistory:Row[]; planChanges:Row[]; receipts:Row[]; submissions:Row[]; approvals:Row[]; batches:Row[]; skuSettings:Row[]; audit:Row[];
   users:ManagedUser[]; suggestions:Row[]; monthlyStatus:Row[]; issues:Row[]; newProductProjects:Row[];
   salesScopeStatus:Row[]; salesTopSkus:Row[]; purchaseOrders:Row[]; productionOrders:Row[];
@@ -83,10 +86,15 @@ async function parseResponse(response:Response) {
   return result;
 }
 
-export default function ControlTower({ identity }: { identity:Identity }) {
+export default function ControlTower({identity}:{identity:Identity}) {return <WorkspaceGuard><ControlTowerWorkspace identity={identity}/></WorkspaceGuard>;}
+function ControlTowerWorkspace({ identity }: { identity:Identity }) {
   const wholesaleLocale=useWholesalePreference(identity.userId);
   const [inventoryScope,setInventoryScope]=useState<Row|null>(null);
-  const [selectedTab,setTab] = useState("overview");
+  const {route,navigate}=useWorkspaceRoute();
+  const selectedTab=route.page;
+  const [more,setMore]=useState(false);
+  const setTab=(page:string,task:Row={})=>{if(navigate({page,entity:task.entity||"",view:task.view||"",month:task.month||"",search:"",status:"all"}))setMore(false);};
+  const requestGeneration=useRef(0);
   const [data,setData] = useState<Snapshot|null>(null);
   const [loading,setLoading] = useState(true);
   const [busy,setBusy] = useState(false);
@@ -96,23 +104,21 @@ export default function ControlTower({ identity }: { identity:Identity }) {
   const [welcomeLeaving,setWelcomeLeaving] = useState(false);
 
   const refresh = useCallback(async () => {
-    try{const response = await fetch("/api/system", { cache:"no-store",signal:AbortSignal.timeout(20000) });
-    const result = await parseResponse(response);
-    setData(result);setConnectionError("");setLastSync(new Date().toLocaleTimeString("zh-CN"));
-    }catch(error){setConnectionError(error instanceof Error?error.message:"更新失败");throw error;}
-  },[]);
-
-  useEffect(() => {
-    let active=true;
-    fetch("/api/system",{cache:"no-store"})
-      .then(parseResponse)
-      .then(result=>{if(active){setData(result);setLastSync(new Date().toLocaleTimeString("zh-CN"));setConnectionError("");}})
-      .catch(error=>{if(active)setToast(error.message);})
-      .finally(()=>{if(active)setLoading(false);});
-    return ()=>{active=false;};
-  },[]);
-
-  useEffect(()=>{const timer=window.setInterval(()=>{if(document.visibilityState==="visible")void refresh().catch(()=>{});},30000);return ()=>window.clearInterval(timer);},[refresh]);
+    const generation=++requestGeneration.current;
+    try{const result=await parseResponse(await fetch(`/api/system?module=${encodeURIComponent(selectedTab)}`,{cache:"no-store",signal:AbortSignal.timeout(20000)}));
+      if(generation!==requestGeneration.current)return;
+      setData(result);setConnectionError("");setLastSync(new Date().toLocaleTimeString("zh-CN"));
+      if(selectedTab==="home")navigate({page:result.module},true);
+    }catch(error){if(generation===requestGeneration.current)setConnectionError(error instanceof Error?error.message:"更新失败");throw error;}
+    finally{if(generation===requestGeneration.current)setLoading(false);}
+  },[selectedTab,navigate]);
+  useEffect(()=>{void refresh().catch(()=>{});return()=>{requestGeneration.current++;};},[refresh]);
+  useVisibleRefresh(refresh,30000,!busy,true);
+  useEffect(()=>{
+    if(!route.entity||data?.module!==route.page||route.page==="wholesale")return;
+    const timer=setTimeout(()=>{const el=document.querySelector<HTMLElement>(`[data-entity-id="${CSS.escape(route.entity)}"]`);if(el){let node:HTMLElement|null=el;while(node){if(node instanceof HTMLDetailsElement)node.open=true;node=node.parentElement;}el.scrollIntoView({block:"center",behavior:"smooth"});el.focus({preventScroll:true});}},150);
+    return()=>clearTimeout(timer);
+  },[route.entity,route.page,data?.module]);
 
   const act = useCallback(async (action:string,payload:Row,success:string,onError?:(message:string)=>void) => {
     setBusy(true);
@@ -167,7 +173,7 @@ export default function ControlTower({ identity }: { identity:Identity }) {
   };
 
   if (showWelcome) return <BrandWelcome leaving={welcomeLeaving} ready={!loading && Boolean(data)} onEnter={enterSystem}/>;
-  if (loading) return <div className="empty" style={{paddingTop:160}}>正在连接供应链数据库…</div>;
+  if (loading&&!data) return <div className="empty" style={{paddingTop:160}}>正在连接供应链数据库…</div>;
   if (!data) return <div className="empty" style={{paddingTop:160}}>系统暂时无法读取数据，请刷新页面重试。</div>;
   const actor=data.actor;
   const roleNav=navigationForRole(actor.role).filter(key=>key!=="wholesale"||actor.role!=="运营"||actor.site==="印尼");
@@ -181,9 +187,9 @@ export default function ControlTower({ identity }: { identity:Identity }) {
     <aside className="sidebar">
       <div className="brand"><img className="brand-logo" src="/loong-jump-logo-white.png" alt="LOONG JUMP"/><p>{shellT("品牌出海供应链控制塔")}</p></div>
       <nav className="nav" aria-label={shellT("系统导航")}>
-        {visibleNav.map(([key,label,icon]) => <button key={key} className={classNames("nav-button",tab===key&&"active")} onClick={()=>setTab(key)}>
+        {NAV_GROUPS.filter(group=>visibleNav.some(([key])=>group.keys.includes(key))).map(group=><div className="nav-group" key={group.label}><small>{shellT(group.label)}</small>{visibleNav.filter(([key])=>group.keys.includes(key)).map(([key,label,icon]) => <button key={key} className={classNames("nav-button",tab===key&&"active")} onClick={()=>setTab(key)}>
           <span className="nav-icon">{icon}</span><span>{shellT(key==="sales"?(actor.role==="运营"?"每日销售导入":"销售看板"):label)}</span>{taskBadge(key)}
-        </button>)}
+        </button>)}</div>)}
       </nav>
       <div className="account">
         <strong>{actor.name} · {shellT(actor.role)}</strong>
@@ -197,14 +203,14 @@ export default function ControlTower({ identity }: { identity:Identity }) {
         <div><h2>{shellT("全链路可视化协同")}</h2><p>{shellT("SKU需求 → 系列采购 → 系列生产 → 海运批次 → 到仓上架")}</p></div>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
           {hasPermission(actor.role,"backup.export")&&<button className="btn" onClick={exportBackup}>{shellT("导出备份")}</button>}
-          <span className={`status-pill ${connectionError?"connection-failed":""}`} role="status">{connectionError?"更新失败 · 数据可能已过时":`已同步 ${lastSync||"—"}`}</span>{connectionError&&<button className="btn danger" onClick={()=>void refresh().catch(()=>{})}>重新连接</button>}
+          <span className={`status-pill ${connectionError?"connection-failed":""}`} role="status">{connectionError?shellT("更新失败 · 数据可能已过时"):`${shellT(["wholesale","reviews","after-sales"].includes(selectedTab)?"导航已更新":"工作区已更新")} ${lastSync||"—"}`}</span>{connectionError&&<button className="btn danger" onClick={()=>void refresh().catch(()=>{})}>{shellT("重新连接")}</button>}
         </div>
       </header>
-      <div className="content">
+      <div className="content"><Suspense fallback={<div className="panel" role="status">正在打开工作区…</div>}>{data.module&&data.module!==tab?<div className="panel" role="status">正在读取当前工作区…{connectionError&&<p>{connectionError}</p>}</div>:<>
         {actor.role==="运营" && (!actor.site || !actor.channel) && <div className="notice warn">当前账号尚未绑定站点和渠道，请联系管理员在“用户管理”中完成分配后再录入业务数据。</div>}
-        {tab==="wholesale" && <WholesaleLanguageContext.Provider value={wholesaleLocale}><Wholesale onChanged={refresh}/></WholesaleLanguageContext.Provider>}
-        {tab==="reviews" && <BusinessReviews/>}
-        {tab==="after-sales" && <AfterSales/>}
+        {tab==="wholesale" && <WholesaleLanguageContext.Provider value={wholesaleLocale}><Wholesale onChanged={refresh} route={route} navigate={navigate}/></WholesaleLanguageContext.Provider>}
+        {tab==="reviews" && <BusinessReviews initialView={route.view} initialDate={route.entity}/>}
+        {tab==="after-sales" && <AfterSales initialMonth={route.month}/>}
         {tab==="overview" && <Overview data={data} go={setTab}/>}
         {tab==="suggestions" && <Suggestions data={data} act={act} busy={busy}/>}
         {tab==="new-products" && <NewProducts data={data} act={act} busy={busy}/>}
@@ -220,10 +226,12 @@ export default function ControlTower({ identity }: { identity:Identity }) {
         {tab==="audit" && <Audit data={data}/>}
         {tab==="users" && <UserManagement users={data.users} actorId={actor.id} act={act} busy={busy} onCreated={refresh}/>}
         {tab==="permissions" && <PermissionTest data={data}/>}
-      </div>
+      </>}</Suspense></div>
     </main>
-    <nav className="mobile-nav" aria-label={shellT("移动端导航")}>
-      {visibleNav.map(([key,label,icon]) => <button key={key} className={classNames("nav-button",tab===key&&"active")} onClick={()=>setTab(key)}><span>{icon}</span><span>{shellT(key==="sales"?(actor.role==="运营"?"销售导入":"销售看板"):label)}</span>{taskBadge(key)}</button>)}
+    {more&&<div className="mobile-more" role="dialog" aria-label="更多工作区"><div className="panel-head"><h3>{shellT("全部工作区")}</h3><button className="btn" onClick={()=>setMore(false)}>关闭</button></div>{NAV_GROUPS.filter(group=>visibleNav.some(([key])=>group.keys.includes(key))).map(group=><section key={group.label}><h4>{shellT(group.label)}</h4><div>{visibleNav.filter(([key])=>group.keys.includes(key)).map(([key,label,icon])=><button key={key} className={classNames("nav-button",tab===key&&"active")} onClick={()=>setTab(key)}>{icon} {shellT(label)}{taskBadge(key)}</button>)}</div></section>)}</div>}
+    <nav className="mobile-nav workspace-mobile-nav" aria-label={shellT("移动端导航")}>
+      {mobileModules(actor.role).map((key:string)=>{const [,label,icon]=navItems.find(row=>row[0]===key)!;return <button key={key} className={classNames("nav-button",tab===key&&"active")} onClick={()=>setTab(key)}><span>{icon}</span><span>{shellT(key==="sales"?(actor.role==="运营"?"销售导入":"销售看板"):label)}</span>{taskBadge(key)}</button>})}
+      {visibleNav.length>mobileModules(actor.role).length&&<button className={classNames("nav-button",more&&"active")} aria-expanded={more} onClick={()=>setMore(!more)}><span>•••</span><span>{shellT("更多")}</span></button>}
     </nav>
     {toast && <div className="toast">{shellT(toast)}</div>}
   </div>;
@@ -257,34 +265,34 @@ function Panel({title,desc,children,action,collapsible=false}:{title:string;desc
 function Pill({children,tone="blue"}:{children:React.ReactNode;tone?:string}) { return <span className={`pill ${tone}`}>{children}</span>; }
 function Empty({children}:{children:React.ReactNode}) { return <div className="empty">{children}</div>; }
 
-function Overview({data,go}:{data:Snapshot;go:(tab:string)=>void}) {
+function Overview({data,go}:{data:Snapshot;go:(tab:string,task?:Row)=>void}) {
   const [showAllTasks,setShowAllTasks]=useState(false);
   const m=data.metrics;
   const completeness=m.monthlyRequired ? m.monthlySubmitted/m.monthlyRequired : 0;
   return <>
     <PageHead title="经营协同总览" desc={`${data.currentMonth} · 销量、库存、海运与生产一屏联动`}>
-      <Pill tone={m.actionAlertCount?"red":"green"}>{m.actionAlertCount ? `${m.actionAlertCount}项需行动` : "供应覆盖正常"}</Pill>
+      <Pill tone={m.actionAlertCount?"red":"green"}>{m.actionAlertCount ? `${m.actionAlertCount}项供应风险` : "供应覆盖正常"}</Pill>
     </PageHead>
     <div className="metrics">
       <div className="metric"><div className="label">当前可售库存</div><div className="value">{fmt(m.inventoryQty)}</div><div className="foot">待上架 {fmt(m.pendingShelfQty)} · 隔离 {fmt(m.quarantineQty)}</div></div>
-      <div className="metric"><div className="label">近7天销量</div><div className="value">{fmt(m.sales7Qty)}</div><div className="foot">仅用已导入日期计算，缺失日不当作零</div></div>
+      <div className="metric"><div className="label">近7天销量</div><div className="value">{fmt(m.sales7Qty)}</div><div className="foot">{m.salesWindowFrom} — {m.salesWindowTo}<br/>滚动7个自然日，缺报不视为零销量</div></div>
       <div className="metric"><div className="label">海运在途</div><div className="value">{fmt(m.seaTransitQty)}</div><div className="foot">只统计已进入海运的数量</div></div>
       <div className="metric"><div className="label">建议启动生产</div><div className="value" style={{color:m.suggestedProductionQty?"var(--amber)":"var(--ink)"}}>{fmt(m.suggestedProductionQty)}</div><div className="foot">已扣库存、海运在途和生产中</div></div>
     </div>
-    {data.myTasks.length>0&&<Panel title={`我的待办 · ${data.myTasks.length} 项`} desc="红色事项需要处理；完成相应业务后自动移出待办" action={data.myTasks.length>8&&<button className="btn danger" onClick={()=>setShowAllTasks(!showAllTasks)}>{showAllTasks?"收起待办":`展开全部 ${data.myTasks.length} 项`}</button>}><div className="task-grid">{(showAllTasks?data.myTasks:data.myTasks.slice(0,8)).map((task,index)=><button className={`task-card ${task.level}`} key={`${task.title}-${index}`} onClick={()=>go(task.tab)}><strong>{task.title}</strong><span>{task.detail}</span><i>{task.level==="red"?"优先处理":"待处理"} →</i></button>)}</div></Panel>}
+    {data.myTasks.length>0&&<Panel title={`我的待办 · ${data.myTasks.length} 项`} desc="红色事项需要处理；完成相应业务后自动移出待办" action={data.myTasks.length>8&&<button className="btn danger" onClick={()=>setShowAllTasks(!showAllTasks)}>{showAllTasks?"收起待办":`展开全部 ${data.myTasks.length} 项`}</button>}><div className="task-grid">{(showAllTasks?data.myTasks:data.myTasks.slice(0,8)).map((task,index)=><button className={`task-card ${task.level}`} key={`${task.title}-${index}`} onClick={()=>go(task.tab,task)}><strong>{task.title}</strong><span>{task.detail}</span><i>{task.level==="red"?"优先处理":"待处理"} →</i></button>)}</div></Panel>}
     <div className="grid-2">
-      <Panel title="本月提交完整度" desc="五个站点 × TikTok/Shopee，全部提交后才能进入审批" action={<button className="btn" onClick={()=>go("monthly")}>查看明细</button>}>
+      <Panel title="本月提交完整度" desc="五个站点 × TikTok/Shopee，全部提交后才能进入审批" action={navigationForRole(data.actor.role).includes("monthly")?<button className="btn" onClick={()=>go("monthly")}>查看明细</button>:undefined}>
         <div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:8}}><span>{m.monthlySubmitted}/{m.monthlyRequired} 已提交</span><strong>{pct(completeness)}</strong></div>
         <div className="bar"><i style={{width:`${Math.min(100,completeness*100)}%`}}/></div>
         <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:8,marginTop:14}}>
           {data.monthlyStatus.map((r)=><div key={`${r.site}-${r.channel}`} style={{fontSize:9,color:r.submitted?"var(--green)":"var(--muted)"}}>{r.submitted?"●":"○"} {r.site}<br/>{r.channel}</div>)}
         </div>
       </Panel>
-      <Panel title="动态预警" desc="断货、数据缺口和在途缺ETA优先处理" action={<button className="btn" onClick={()=>go("suggestions")}>打开驾驶舱</button>}>
+      <Panel title="动态预警" desc="断货、数据缺口和在途缺ETA优先处理" action={navigationForRole(data.actor.role).includes("suggestions")?<button className="btn" onClick={()=>go("suggestions")}>打开驾驶舱</button>:undefined}>
         {data.issues.length===0?<Empty>暂无高优先级供应风险</Empty>:data.issues.slice(0,6).map((issue,i)=><div key={i} className={`notice ${issue.level==="critical"?"error":"warn"}`} style={{marginBottom:7}}><strong>{issue.type}</strong><br/>{issue.detail}</div>)}
       </Panel>
     </div>
-    <Panel title="全链路实时状态" desc={`当前 ${fmt(m.activeBatchCount)} 个在途批次，${fmt(m.stalledBatchCount)} 个节点停滞，${fmt(m.pendingShelfCount)} 个待上架`} action={<button className="btn" onClick={()=>go("batches")}>查看全部批次</button>}>
+    <Panel title="全链路实时状态" desc={`当前 ${fmt(m.activeBatchCount)} 个在途批次，${fmt(m.stalledBatchCount)} 个节点停滞，${fmt(m.pendingShelfCount)} 个待上架`} action={navigationForRole(data.actor.role).includes("batches")?<button className="btn" onClick={()=>go("batches")}>查看全部批次</button>:undefined}>
       <div className="workflow chain-overview">
         {[["supply_confirm","备货确认"],["factory_production","工厂生产"],["booking","订舱"],["sea_freight","海运"],["port_arrived","到港"],["customs_clearance","清关"],["last_mile_delivery","派送"],["awaiting_receipt","待到仓"],["shelf_pending","待上架"],["on_shelf","已上架"]].map(([key,label])=><div className="workflow-step" key={key}><strong>{fmt(m.batchStageCounts?.[key])}</strong><span>{label}</span></div>)}
       </div>
@@ -343,6 +351,8 @@ function Suggestions({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
   const [setting,setSetting]=useState({sku:"",name:"",productSeries:"",supplierName:"",factoryName:"",productType:"老款",unitPrice:"0",productionLeadDays:"21",seaLeadDays:"35",reviewCycleDays:"7",serviceLevel:"0.95",minOrderQty:"1",orderMultiple:"1",cartonQty:"1",unitVolumeCbm:"0"});
   const selected=data.suggestions.find(row=>supplyKey(row)===selectedKey)||data.suggestions[0];
   const effectiveSelectedKey=selected?supplyKey(selected):"";
+  const [trend,setTrend]=useState<Row|null>(null),[trendError,setTrendError]=useState("");
+  useEffect(()=>{if(!effectiveSelectedKey)return;const abort=new AbortController();setTrend(null);setTrendError("");fetch(`/api/system?forecastTrend=${encodeURIComponent(effectiveSelectedKey)}`,{cache:"no-store",signal:abort.signal}).then(parseResponse).then(v=>setTrend({...v,key:effectiveSelectedKey})).catch(e=>{if(e.name!=="AbortError")setTrendError(e.message)});return()=>abort.abort();},[effectiveSelectedKey,data.generatedAt]);
   const chooseSetting=(sku:string)=>{
     const row=data.skuSettings.find(item=>item.sku===sku);
     if(!row)return;
@@ -351,7 +361,7 @@ function Suggestions({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
   const m=data.metrics;
   return <>
     <PageHead title="补货与生产驾驶舱" desc="每日销量驱动，按站点＋渠道＋SKU独立判断断货、补货和生产时点">
-      <div className="replenishment-actions"><ReplenishmentExport snapshot={data}/><Pill tone={m.actionAlertCount?"red":"green"}>{m.actionAlertCount?`${m.actionAlertCount}项需行动`:"供应覆盖正常"}</Pill></div>
+      <div className="replenishment-actions"><ReplenishmentExport snapshot={data}/><Pill tone={m.actionAlertCount?"red":"green"}>{m.actionAlertCount?`${m.actionAlertCount}项供应风险`:"供应覆盖正常"}</Pill></div>
     </PageHead>
     <div className="model-strip">
       <div><span>需求速度</span><strong>滚动7／21／56天加权，结合需求修正</strong></div><b>×</b><div><span>覆盖周期</span><strong>生产＋海运＋7天复盘</strong></div><b>＋</b><div><span>安全库存</span><strong>销量波动 × 服务水平</strong></div><b>－</b><div><span>供应链库存位</span><strong>库存＋海运＋生产中</strong></div>
@@ -370,7 +380,7 @@ function Suggestions({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
       <SupplyCoverage rows={data.suggestions}/>
     </Panel>
     <Panel title="56天销量趋势" desc={selected?`${selected.site} · ${selected.channel} · ${selected.sku}｜数据可信度：${selected.confidence}（已导入${selected.dataDays}天）`:"先录入销售数据"} action={data.suggestions.length?<select className="compact-select" aria-label="选择趋势SKU" value={effectiveSelectedKey} onChange={event=>setSelectedKey(event.target.value)}>{data.suggestions.map(row=><option key={supplyKey(row)} value={supplyKey(row)}>{row.site} · {row.channel} · {row.sku}</option>)}</select>:undefined}>
-      {selected?<SalesTrendChart row={selected}/>:<Empty>请先录入库存和每日销售数据</Empty>}
+      {trendError?<p role="alert">{trendError}</p>:selected?trend?.key===effectiveSelectedKey?<SalesTrendChart row={{...selected,...trend}}/>:<p role="status">正在读取所选SKU趋势…</p>:<Empty>请先录入库存和每日销售数据</Empty>}
     </Panel>
     <Panel title="动态建议清单" desc="海运补货量解决运输周期缺口；启动生产量覆盖生产＋海运全周期">
       <div className="table-wrap"><table className="supply-table"><thead><tr><th>状态</th><th>站点/渠道</th><th>SKU</th><th className="num">7日日均</th><th className="num">趋势</th><th className="num">库存/可售天数</th><th className="num">海运/ETA</th><th className="num">生产中</th><th className="num">建议海运补货</th><th className="num">建议启动生产</th></tr></thead>
@@ -546,7 +556,7 @@ function NewProducts({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
           </>:<Empty>等待财务提交成本与毛利测算</Empty>}
         </Panel>
         <Panel title="继续或止损" desc="毛利低于本项目目标时，只能重新定价或放弃">
-          {record("finance")?<div className="stage-summary"><strong>测算结果</strong><p>毛利率 {pct(record("finance").data.grossMarginRate)}｜目标 {pct(record("finance").data.targetGrossMarginRate)}｜盈亏平衡 {record("finance").data.breakEvenQty===null?"不可达":`${fmt(record("finance").data.breakEvenQty)}件`}</p><span>{record("finance").actor_name} · {readableDate(record("finance").submitted_at)}</span></div>:<Empty>尚未提交测算</Empty>}
+          {record("finance")?.data.submitted?<p>财务测算已提交</p>:record("finance")?<div className="stage-summary"><strong>测算结果</strong><p>毛利率 {pct(record("finance").data.grossMarginRate)}｜目标 {pct(record("finance").data.targetGrossMarginRate)}｜盈亏平衡 {record("finance").data.breakEvenQty===null?"不可达":`${fmt(record("finance").data.breakEvenQty)}件`}</p><span>{record("finance").actor_name} · {readableDate(record("finance").submitted_at)}</span></div>:<Empty>尚未提交测算</Empty>}
           {actor.role==="管理员"&&<div className="form-actions"><button className="btn danger" disabled={busy} onClick={()=>decide("abandon")}>放弃</button><button className="btn" disabled={busy||!record("finance")} onClick={()=>decide("reprice")}>重新定价</button><button className="btn primary" disabled={busy||!record("finance")} onClick={()=>decide("continue")}>进入打板</button></div>}
         </Panel>
       </div>}
@@ -635,6 +645,7 @@ function SalesImport({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
     </Panel>
     </>}
     <SalesAdSpend data={data} act={act} busy={busy}/>
+    <details className="panel"><summary>查询历史销售明细</summary><HistoryBrowser kind="sales" actor={actor} refreshToken={data.generatedAt}/></details>
     <SalesImportHistory data={data} act={act} busy={busy}/>
     {canImport&&<Panel collapsible title="销售经营看板" desc="展开查看趋势、SKU排名和投产比；日常导入优先展示"><SalesDashboard actor={actor} refreshToken={data}/></Panel>}
 
@@ -673,9 +684,7 @@ function Inventory({data,act,busy,scope,clearScope}:{data:Snapshot;act:Act;busy:
       <div className="form-actions"><button className="btn primary" disabled={busy||!adjust.sku||adjust.reason.length<4} onClick={submitCount}>{actor.role==="管理员"?"确认修正":"提交复核"}</button></div>
     </Panel>}
     {hasPermission(actor.role,"inventory.count.approve")&&<InventoryCountReview rows={data.countRequests} busy={busy} act={act}/>}
-    <Panel title="最近库存流水" desc="每一笔库存变化均可追溯到业务凭证">
-      <div className="table-wrap"><table><thead><tr><th>时间</th><th>类型</th><th>站点/渠道</th><th>SKU</th><th className="num">变动</th><th className="num">变动后</th><th>凭证</th><th>说明</th></tr></thead><tbody>{data.movements.length===0?<tr><td colSpan={8}><Empty>暂无库存流水</Empty></td></tr>:data.movements.map(r=><tr key={r.id}><td>{String(r.created_at).replace("T"," ").slice(0,16)}</td><td><Pill tone={MOVEMENT_TONE[r.movement_type]||"blue"}>{r.movement_type}</Pill></td><td>{r.site} · {r.channel}</td><td>{r.sku}</td><td className="num" style={{color:r.qty_delta<0?"var(--red)":"var(--green)"}}>{r.qty_delta>0?"+":""}{fmt(r.qty_delta)}</td><td className="num">{fmt(r.balance_after)}</td><td>{r.reference_type}<br/><span style={{color:"var(--muted)"}}>{r.reference_id}</span></td><td>{r.note}</td></tr>)}</tbody></table></div>
-    </Panel>
+    <HistoryBrowser kind="movements" actor={actor} refreshToken={data.generatedAt}/>
   </>;
 }
 
@@ -728,7 +737,7 @@ function Fulfillment({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}){
     </div>
     {data.actor.role==="工厂"&&<ProductionOrders data={data} act={act} busy={busy}/>}
     <Panel title="系列采购单" desc="默认只展示系列汇总；SKU明细在生产单中追溯">
-      <div className="table-wrap"><table><thead><tr><th>月份</th><th>系列</th><th>供应商</th><th className="num">SKU数</th><th className="num">下单数量</th><th>订单/交期</th><th>状态</th><th></th></tr></thead><tbody>{data.purchaseOrders.length===0?<tr><td colSpan={8}><Empty>管理员批准月度计划后自动生成系列采购单</Empty></td></tr>:data.purchaseOrders.map(order=><tr key={order.id}><td>{order.month}</td><td><strong>{order.series_name}</strong><div className="cell-note">{order.id}</div></td><td>{order.supplier_name}</td><td className="num">{fmt(order.visibleSkuCount)}</td><td className="num">{fmt(order.visibleQty)}</td><td>{order.order_ref||"—"}<div className="cell-note">{order.expected_completion_date||"待确认"}</div></td><td><Pill tone={order.status==="draft"?"red":order.status==="qc_rejected"?"red":"green"}>{statusLabel[order.status]||order.status}</Pill></td><td>{["draft","ordered"].includes(order.status)&&hasPermission(data.actor.role,"purchase.confirm")&&<button className="btn primary" disabled={busy} onClick={()=>confirmPurchase(order)}>确认接单</button>}<PurchaseReassign data={data} order={order} act={act} busy={busy}/></td></tr>)}</tbody></table></div>
+      <div className="table-wrap"><table><thead><tr><th>月份</th><th>系列</th><th>供应商</th><th className="num">SKU数</th><th className="num">下单数量</th><th>订单/交期</th><th>状态</th><th></th></tr></thead><tbody>{data.purchaseOrders.length===0?<tr><td colSpan={8}><Empty>管理员批准月度计划后自动生成系列采购单</Empty></td></tr>:data.purchaseOrders.map(order=><tr key={order.id} data-entity-id={order.id} tabIndex={-1}><td>{order.month}</td><td><strong>{order.series_name}</strong><div className="cell-note">{order.id}</div></td><td>{order.supplier_name}</td><td className="num">{fmt(order.visibleSkuCount)}</td><td className="num">{fmt(order.visibleQty)}</td><td>{order.order_ref||"—"}<div className="cell-note">{order.expected_completion_date||"待确认"}</div></td><td><Pill tone={order.status==="draft"?"red":order.status==="qc_rejected"?"red":"green"}>{statusLabel[order.status]||order.status}</Pill></td><td>{["draft","ordered"].includes(order.status)&&hasPermission(data.actor.role,"purchase.confirm")&&<button className="btn primary" disabled={busy} onClick={()=>confirmPurchase(order)}>确认接单</button>}<PurchaseReassign data={data} order={order} act={act} busy={busy}/></td></tr>)}</tbody></table></div>
     </Panel>
     {data.actor.role!=="工厂"&&<ProductionOrders data={data} act={act} busy={busy}/>}
   </>;
@@ -826,14 +835,7 @@ function Batches({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
   </>;
 }
 
-function Audit({data}:{data:Snapshot}) {
-  return <>
-    <PageHead title="审计日志" desc="关键写入由服务端记录账号、时间、对象和变更内容"/>
-    <Panel title="最近操作">
-      <div className="table-wrap"><table><thead><tr><th>时间</th><th>操作</th><th>对象</th><th>操作人</th><th>内容</th></tr></thead><tbody>{data.audit.length===0?<tr><td colSpan={5}><Empty>暂无审计记录</Empty></td></tr>:data.audit.map(r=><tr key={r.id}><td>{String(r.created_at).replace("T"," ").slice(0,19)}</td><td><strong>{r.action}</strong></td><td>{r.entity_type}<br/>{r.entity_id}</td><td>{r.actor_name}</td><td style={{maxWidth:420,wordBreak:"break-word"}}>{Object.entries(r.detail||{}).map(([k,v])=><div key={k}><span style={{color:"var(--muted)"}}>{k}：</span>{typeof v==="object"?JSON.stringify(v):String(v)}</div>)}</td></tr>)}</tbody></table></div>
-    </Panel>
-  </>;
-}
+function Audit({data}:{data:Snapshot}) {return <><PageHead title="审计日志" desc="按账号、时间和对象追溯关键操作"/><HistoryBrowser kind="audit" actor={data.actor} refreshToken={data.generatedAt}/></>;}
 
 function MasterData({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}){
   const [partner,setPartner]=useState({type:"supplier",code:"",name:"",contact:"",defaultLeadDays:"21",assignedUserId:"",active:true});

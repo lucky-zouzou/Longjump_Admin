@@ -1,4 +1,5 @@
 "use client";
+import {useDirtyGuard} from './workspace-hooks';
 import {useEffect,useRef,useState} from 'react';
 import {transportSteps,transportGuidance} from '../lib/transport-workflow.mjs';
 type Row=Record<string,any>;
@@ -15,6 +16,7 @@ export function TransportCreated({batchNo}:{batchNo:string}){
 export default function TransportLegCard({leg,actor,users,act,busy,onReceive,receipt}:{leg:Row;actor:Row;users:Row[];act:Act;busy:boolean;onReceive:()=>void;receipt?:React.ReactNode}){
   const guide=transportGuidance(leg,actor,users);
   const [mode,setMode]=useState(''),[error,setError]=useState(''),[feedback,setFeedback]=useState('');
+  useDirtyGuard(Boolean(mode));
   const [form,setForm]=useState({reference:'',note:'',etd:'',eta:'',ata:'',portName:'',version:0,stage:'',itemId:'',qty:''});
   const editor=useRef<HTMLFormElement>(null);
   useEffect(()=>{if(mode)editor.current?.scrollIntoView({block:'center',behavior:'smooth'});},[mode]);
@@ -29,7 +31,7 @@ export default function TransportLegCard({leg,actor,users,act,busy,onReceive,rec
     if(await act(action,payload,success,setError)){setMode('');setFeedback(success);}
   };
   const pendingItems=(leg.items||[]).filter((item:Row)=>Number(item.pending_shelf_qty)>0);
-  return <section className="transport-guide" aria-label={`目的地 ${leg.leg_no}`}>
+  return <section className="transport-guide" data-entity-id={leg.id} tabIndex={-1} aria-label={`目的地 ${leg.leg_no}`}>
     <header><div><h4>{leg.leg_no}</h4><p>{leg.site} · {leg.channel} · {leg.warehouse_name}</p></div><span className={`pill ${leg.stage==='on_shelf'?'green':'blue'}`}>{transportSteps[guide.index]?.[1]||leg.stage}</span></header>
     <ol className="transport-flow" aria-label="目的地运输流程">{transportSteps.map(([key,label],i)=><li key={key} className={i<guide.index?'done':i===guide.index?'current':''} aria-current={i===guide.index?'step':undefined}><i>{i<guide.index?'✓':i+1}</i><span>{label}</span></li>)}</ol>
     <div className="transport-facts"><span>当前处理人<strong>{guide.owner}</strong></span><span>开船 / 预计到仓<strong>{leg.etd||'未登记'} / {leg.eta||'未登记'}</strong></span><span>已到仓 / 发运<strong>{fmt(leg.receivedQty)} / {fmt(leg.total_qty)} 件</strong></span><span>待上架 / 隔离<strong>{fmt(leg.pendingShelfQty)} / {fmt(leg.quarantineQty)} 件</strong></span></div>

@@ -30,19 +30,26 @@ export default function SalesDashboard({actor,refreshToken}:{actor:Row;refreshTo
   const exportReport=async()=>{if(!report)return;setExporting(true);try{const XLSX=await import('xlsx'),book=XLSX.utils.book_new();
     const add=(name:string,rows:Row[])=>XLSX.utils.book_append_sheet(book,XLSX.utils.json_to_sheet(rows),name);
     const financialRows=(rows:Row[])=>rows.map(r=>({日期:r.date||'',站点:r.site||'',渠道:r.channel||'',SKU:r.sku||'',币种:r.currency,销量:r.qty,已填报销售额:r.revenue,已填报投放成本:r.adCost,缺销售额记录:r.revenueMissing,缺成本记录:r.costMissing,ROAS:r.roas,状态:status(r)}));
+    if(actor.role==='工厂'){
+      add('统计范围',[{开始日期:report.filters.from,结束日期:report.filters.to,站点:report.filters.site||'全部可见站点',渠道:report.filters.channel||'全部可见渠道',销售件数:report.totalQty}]);
+      add('SKU销量',report.skuRanking.map((r:Row)=>({排名:r.rank,SKU:r.sku,商品:r.name,销量:r.qty,站点数:r.siteCount})));
+      add('站点渠道',report.scopes.map((r:Row)=>({站点:r.site,渠道:r.channel,销量:r.qty})));
+      add('每日销量',report.daily.map((r:Row)=>({日期:r.date,销量:r.qty,日报已齐:r.salesComplete?'是':'待补齐'})));
+    }else{
     add('统计口径',[{起始日期:report.filters.from,截止日期:report.filters.to,站点:report.filters.site||'全部可见站点',渠道:report.filters.channel||'全部可见渠道',总销量:report.totalQty,说明:'ROAS=销售额÷广告成本；不同币种不相加，金额为已填报部分；缺金额或成本不排名；旧估算价格不计销售额；不代表利润率。渠道日总费用优先于同日SKU成本，不重复相加；SKU排名只用可归属的实际成本。'}]);
     add('全站SKU销量',report.skuRanking.map((r:Row)=>({排名:r.rank,SKU:r.sku,商品:r.name,销售总数量:r.qty,站点数:r.siteCount,销量占比:r.share})));
     add('币种汇总',financialRows(report.currencies));add('SKU投产比',financialRows(report.roiRanking));add('站点渠道',financialRows(report.scopes));add('每日明细',financialRows(report.daily));
+    }
     XLSX.writeFile(book,`销售看板_${report.filters.from}_${report.filters.to}.xlsx`);
   }catch(e){setError(e instanceof Error?e.message:'导出失败，请重试');}finally{setExporting(false);}};
   const moneyColumns:Column[]=[{label:'销量',numeric:true,render:r=>number(r.qty)},{label:'销售额',numeric:true,render:r=><>{money(r.revenue)}{r.revenueMissing>0&&<small className="report-missing">部分未填报</small>}</>},{label:'投放成本',numeric:true,render:r=><>{money(r.adCost)}{r.costMissing>0&&<small className="report-missing">部分未填报</small>}</>},{label:'投产比 ROAS',numeric:true,render:r=>ratio(r)}];
   return <section className="sales-dashboard" aria-label="销售经营看板">
-    <Panel title="销售经营看板" desc="销量跨站点汇总；金额按币种分别统计。ROAS是销售额÷广告投放成本，不代表利润率。">
+    <Panel title="销售经营看板" desc={actor.role==='工厂'?'按站点与渠道查看销量、趋势和SKU排名':'销量跨站点汇总；金额按币种分别统计。ROAS是销售额÷广告投放成本，不代表利润率。'}>
       <div className="report-filters"><label>开始日期<input type="date" value={filters.from} max={filters.to} onChange={e=>setFilters({...filters,from:e.target.value})}/></label><label>结束日期<input type="date" value={filters.to} min={filters.from} max={today()} onChange={e=>setFilters({...filters,to:e.target.value})}/></label><label>站点<select disabled={actor.role==='运营'} value={filters.site} onChange={e=>setFilters({...filters,site:e.target.value})}><option value="">全部可见站点</option>{Object.keys(SITE_CURRENCIES).map(s=><option key={s}>{s}</option>)}</select></label><label>渠道<select disabled={actor.role==='运营'} value={filters.channel} onChange={e=>setFilters({...filters,channel:e.target.value})}><option value="">全部渠道</option>{['TikTok','Shopee','线下分销'].map(s=><option key={s}>{s}</option>)}</select></label></div>
       <div className="report-actions">{[{label:'近7天',from:ago(6)},{label:'近30天',from:ago(29)},{label:'本月',from:`${today().slice(0,7)}-01`}].map(r=><button className="btn" key={r.label} onClick={()=>setFilters({...filters,from:r.from,to:today()})}>{r.label}</button>)}<button className="btn" disabled={loading} onClick={()=>setRetry(retry+1)}>刷新</button><button className="btn" disabled={!report||exporting} onClick={exportReport}>{exporting?'正在导出…':'导出完整看板'}</button></div>
     </Panel>
     {loading&&<p className="notice info" role="status">{report?"正在更新，当前展示上次成功汇总的数据…":"正在汇总销售数据…"}</p>}{error&&<p className="notice warn" role="alert">{error}</p>}
-    {report&&<>
+    {report&&(actor.role==='工厂'?<FactorySalesReport report={report}/>:<>
       <p className="notice info">广告费用口径：同日、同站点、同渠道、同币种优先使用渠道总费用，不与 SKU 成本重复相加。SKU 成本未知不参与 SKU 投产比排名。</p>
       <div className="report-currencies" aria-label="金额统计币种"><strong>金额币种</strong>{report.currencies.map((r:Row)=><button key={r.currency} className={`btn ${selected===r.currency?'primary':''}`} aria-pressed={selected===r.currency} onClick={()=>setCurrency(r.currency)}>{r.currency==='UNKNOWN'?'历史未标币种':r.currency}</button>)}{!report.currencies.length&&<span>暂无销售数据</span>}<span>切换币种只影响金额、投产比和金额明细；销量榜保持所选站点总计。</span></div>
       {report.currencies.some((r:Row)=>r.currency==="UNKNOWN")&&<p className="notice info">包含未标币种的历史记录：这些记录仅计入销量，不混入当前币种的销售额或投产比。可切换“历史未标币种”查看。</p>}
@@ -78,6 +85,14 @@ export default function SalesDashboard({actor,refreshToken}:{actor:Row;refreshTo
       <details className="panel chart-details"><summary>每日销售明细 · {selected}</summary><ReportTable rows={daily} columns={[{label:`日期 · ${selected}`,render:r=>r.date},...moneyColumns]}/></details>
       <Panel title={`站点 / 渠道表现 · ${selected}`} desc="同币种比较，销售额完整的渠道进入图形；全部数据可展开核对。"><RankingBars rows={scopes.filter((r:Row)=>!r.revenueMissing).map((r:Row)=>({...r,label:`${r.site} · ${r.channel}`})).sort((a:Row,b:Row)=>(b.revenue||0)-(a.revenue||0))} labelKey="label" valueKey="revenue" unit={selected} color="mixed"/><details className="chart-details"><summary>查看渠道金额与费用明细</summary><ReportTable rows={scopes} columns={[{label:'站点 / 渠道',render:r=>`${r.site} · ${r.channel}`},...moneyColumns]}/></details></Panel>
       <p className="report-timestamp">最近成功汇总：{new Date(report.generatedAt).toLocaleString('zh-CN')} · 销量为净件数，ROAS不代表利润</p>
-    </>}
+    </>)}
   </section>;
 }
+
+function FactorySalesReport({report}:{report:Row}){return <>
+  <div className="report-metrics"><Card label="销售总数量" value={`${number(report.totalQty)} 件`} note="当前日期和站点范围"/><Card label="产生销量的SKU" value={number(report.skuCount)} note="同一SKU合并去重"/></div>
+  <div className="sales-visual-grid"><Panel title="销量趋势" desc={`${report.filters.from} — ${report.filters.to}；缺报日期不视为零销量`}><SalesTrend rows={report.daily} from={report.filters.from} to={report.filters.to} mode="qty" currency=""/></Panel><Panel title="站点与渠道销量" desc="按销售件数比较"><RankingBars rows={report.scopes.map((r:Row)=>({...r,label:`${r.site} · ${r.channel}`}))} labelKey="label" valueKey="qty" color="mixed"/></Panel></div>
+  <Panel title="SKU销量排名" desc="按所选范围的销售件数排序"><RankingBars rows={report.skuRanking} valueKey="qty"/><ReportTable rows={report.skuRanking} columns={[{label:'排名',render:r=>r.rank},{label:'SKU',render:r=>r.sku},{label:'商品',render:r=>r.name},{label:'销售数量',numeric:true,render:r=>number(r.qty)}]}/></Panel>
+  <details className="panel"><summary>每日销量明细</summary><ReportTable rows={report.daily} columns={[{label:'日期',render:r=>r.date},{label:'销量',numeric:true,render:r=>number(r.qty)},{label:'日报完整度',render:r=>r.salesComplete?'已齐':'待补齐'}]}/></details>
+  <p className="report-timestamp">最近成功读取：{new Date(report.generatedAt).toLocaleString('zh-CN')}</p>
+</>;}

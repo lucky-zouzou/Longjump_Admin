@@ -1,4 +1,5 @@
 "use client";
+import {useDirtyGuard} from "./workspace-hooks";
 import {useEffect,useState} from 'react';
 import {addDays,reviewToday,reviewMetrics,derivedReviewMetrics,ratio} from '../lib/business-review-model.mjs';
 import './business-reviews.css';
@@ -8,11 +9,12 @@ const percent=(v:any)=>v==null?'—':`${(v*100).toFixed(1)}%`;
 const statusLabel:Row={missing:'未建立',draft:'草稿',submitted:'待复核',returned:'待修订',reviewed:'已复核',open:'待执行',done:'待验收',closed:'已完成',cancelled:'已取消'};
 async function request(url:string,p?:Row){const res=await fetch(url,p?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)}:{cache:'no-store'});const value=await res.json();if(!res.ok)throw Error(value.error||'操作失败');return value;}
 function download(name:string,rows:any[][]){const escape=(v:any)=>`"${String(v??'').replace(/^[=+@-]/,"'$&").replaceAll('"','""')}"`;const url=URL.createObjectURL(new Blob(['\ufeff'+rows.map(r=>r.map(escape).join(',')).join('\r\n')],{type:'text/csv;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
-export default function BusinessReviews(){
+export default function BusinessReviews({initialView="",initialDate=""}:{initialView?:string;initialDate?:string}){
  const [unsaved,setUnsaved]=useState(false);
+ useDirtyGuard(unsaved);
  const leave=()=>!unsaved||window.confirm('有未保存的报告内容，确认放弃并切换？');
  useEffect(()=>{const warn=(e:BeforeUnloadEvent)=>{if(unsaved){e.preventDefault();e.returnValue='';}};window.addEventListener('beforeunload',warn);return()=>window.removeEventListener('beforeunload',warn)},[unsaved]);
- const [kind,setKind]=useState('weekly'),[date,setDate]=useState(reviewToday()),[data,setData]=useState<Row|null>(null),[selected,setSelected]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(false),[view,setView]=useState('reports');
+ const [kind,setKind]=useState(initialView==='monthly'?'monthly':'weekly'),[date,setDate]=useState(/^\d{4}-\d{2}-\d{2}$/.test(initialDate)?initialDate:reviewToday()),[data,setData]=useState<Row|null>(null),[selected,setSelected]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(false),[view,setView]=useState(initialView==='actions'?'actions':'reports');
  async function load(){const value=await request(`/api/business-reviews?kind=${kind}&date=${date}`);setData(value);return value;}
  useEffect(()=>{let active=true;setData(null);setSelected('');setError('');request(`/api/business-reviews?kind=${kind}&date=${date}`).then(v=>{if(active)setData(v)}).catch(e=>{if(active)setError(e.message)});return()=>{active=false}},[kind,date]);
  const act=async(p:Row)=>{setBusy(true);setError('');try{const value=await request('/api/business-reviews',p);await load();if(value.id)setSelected(value.id);return true;}catch(e){setError(e instanceof Error?e.message:'操作失败');return false;}finally{setBusy(false)}};

@@ -1,4 +1,6 @@
 "use client";
+import HistoryBrowser from "./history-browser";
+import {useDirtyGuard} from "./workspace-hooks";
 import {useState,useRef,useEffect} from 'react';
 import {hasPermission} from '../lib/permissions.mjs';
 import {SALES_CURRENCIES,SITE_CURRENCIES,normalizeSales} from '../lib/sales-data.mjs';
@@ -6,14 +8,16 @@ import TableImport from './table-import';
 type R=Record<string,any>;
 export default function SalesImportHistory({data,act,busy}:{data:R;act:any;busy:boolean}){
  const [selected,setSelected]=useState<R|null>(null),[mode,setMode]=useState(''),[rows,setRows]=useState<R[]>([]),[date,setDate]=useState(''),[ref,setRef]=useState(''),[reason,setReason]=useState(''),[error,setError]=useState(''),[loading,setLoading]=useState(false),[page,setPage]=useState(0);
+ useDirtyGuard(Boolean(selected));
  const editor=useRef<HTMLDivElement>(null);
  useEffect(()=>{if(selected)editor.current?.scrollIntoView({behavior:'smooth',block:'center'});},[selected,mode]);
  const canEdit=hasPermission(data.actor.role,'sales.correct'),canDelete=hasPermission(data.actor.role,'sales.reverse');
  const open=async(row:R,next:string)=>{setSelected(row);setMode(next);setError('');setReason('');setDate(row.business_date);setRef(row.source_batch_ref);setRows([]);setPage(0);if(next==='delete')return;setLoading(true);try{const response=await fetch(`/api/system?salesImportId=${encodeURIComponent(row.id)}`),body=await response.json();if(!response.ok)throw Error(body.error||'读取失败');if(body.source.reversed_at)throw Error('该批次已被修改或删除，请刷新');setRows(body.rows.map((r:R)=>({sku:r.sku,name:r.name,qty:r.qty,amount:r.reported_amount??'',adCost:r.ad_cost??'',currency:r.currency||''})));}catch(e){setError(e instanceof Error?e.message:'读取失败');}finally{setLoading(false);}};
  const save=async()=>{setError('');const result=await act(mode==='edit'?'correctSalesImport':'reverseSalesImport',{importId:selected?.id,businessDate:date,sourceBatchRef:ref,rows,reason},mode==='edit'?'销售批次已修订，库存已同步校正，请重新核对日报':'批次已删除并冲销，原记录和库存流水保留',setError);if(result){setSelected(null);setMode('');}};
  const update=(i:number,key:string,value:string)=>setRows(rows.map((r,j)=>i===j?{...r,[key]:value}:r));
- return <section className="panel sales-maintenance"><div className="panel-head"><div><h4>最近导入批次</h4><p>修改后原批次冲销并生成修订批次；删除恢复对应库存，历史可追溯。销量变更后须重新确认日报完整。</p></div></div>
- <div className="table-wrap import-history-table"><table><thead><tr><th>销售日期</th><th>站点 / 渠道</th><th>来源 / 文件</th><th>SKU / 件数</th><th>状态</th><th>操作</th></tr></thead><tbody>{data.imports.map((r:R)=><tr key={r.id}><td>{r.business_date}</td><td>{r.site} · {r.channel}</td><td>{r.source_batch_ref}<small>{r.file_name}</small></td><td>{r.row_count} / {Number(r.total_qty).toLocaleString()}</td><td><span className={`pill ${r.reversed_at?'red':'green'}`}>{r.reversed_at?'已冲销':'有效'}</span>{r.reversed_at&&<small>{r.reversal_reason}</small>}</td><td>{!r.reversed_at&&<div className="maintenance-actions">{canEdit&&!String(r.import_key).startsWith('coverage|')&&<button className="btn" disabled={busy||loading} onClick={()=>open(r,'edit')}>修改</button>}{canDelete&&<button className="btn danger" disabled={busy||loading} onClick={()=>open(r,'delete')}>删除</button>}</div>}</td></tr>)}{!data.imports.length&&<tr><td colSpan={6}>暂无导入记录</td></tr>}</tbody></table></div>
+ return <section className="panel sales-maintenance"><div className="panel-head"><div><h4>销售导入管理</h4><p>修改后原批次冲销并生成修订批次；删除恢复对应库存，历史可追溯。销量变更后须重新确认日报完整。</p></div></div>
+ <HistoryBrowser kind="imports" actor={data.actor} refreshToken={data.generatedAt} actions={r=><>{!r.reversed_at&&<div className="maintenance-actions">{canEdit&&!String(r.import_key).startsWith('coverage|')&&<button className="btn" disabled={busy||loading} onClick={()=>open(r,'edit')}>修改</button>}{canDelete&&<button className="btn danger" disabled={busy||loading} onClick={()=>open(r,'delete')}>删除</button>}</div>}</>}/>
+
  {selected&&<div ref={editor} className="maintenance-editor" role="region" aria-label="批次维护"><h3>{mode==='edit'?'修改销售批次':'删除销售批次'} · {selected.business_date}</h3><p>{selected.site} · {selected.channel} · {selected.source_batch_ref}</p>
  {mode==='delete'?<div className="notice warn">将冲销此批次 {selected.total_qty} 件销售，恢复相应库存。原始记录、金额和操作原因保留，批次不再计入有效销售。</div>:<>
  <div className="form-grid"><label className="field">销售日期<input type="date" value={date} onChange={e=>setDate(e.target.value)}/></label><label className="field">平台报表编号<input value={ref} onChange={e=>setRef(e.target.value)}/></label></div>

@@ -1,7 +1,8 @@
+import {workspaceTasks} from "../../../lib/workspace-tasks.mjs";
+import {moduleSnapshot,MODULE_FIELDS,mobileModules} from "../../../lib/workspace-model.mjs";
+import {readHistory,historyCsv,HistoryError} from "../../../lib/history-query.mjs";
 import {previewInbound,submitInbound,readInboundDocuments,InboundError} from "../../../lib/inbound.mjs";
 import {productionTracking,productionDocument,productionFingerprint} from "../../../lib/production-workflow.mjs";
-import {afterTasks} from "../../../lib/after-sales.mjs";
-import {reviewTasks} from "../../../lib/business-reviews.mjs";
 import {saveSalesAdSpend} from "../../../lib/sales-ad-spend.mjs";
 import {publicSystemSnapshot} from "../../../lib/system-response.mjs";
 import {normalizeSales,SITE_CURRENCIES} from "../../../lib/sales-data.mjs";
@@ -14,10 +15,10 @@ import { PLAN_ACTIONS, managePlan } from "../../../lib/plan-changes.mjs";
 import { resolveInventoryHoldSources, transportCompletionStatements } from "../../../lib/inventory-holds.mjs";
 import { guardStatement, atomicBatch, assertWritable, ConflictError } from "../../../lib/atomic.mjs";
 import { countStatements, reversalStatements } from "../../../lib/inventory-guard.mjs";
-import { wholesaleTasks, wholesaleSalesSummary } from "../../../lib/wholesale.mjs";
+import { wholesaleSalesSummary } from "../../../lib/wholesale.mjs";
 import { database, ensureSchema, makeId, nowIso } from "../../../lib/database";
 import { HttpError, requireActor, requireScope, ROLES, type Actor, type Role } from "../../../lib/auth";
-import { canReadDomain, hasPermission } from "../../../lib/permissions.mjs";
+import { canReadDomain, hasPermission, navigationForRole } from "../../../lib/permissions.mjs";
 import { allocationMatchesTotal, calculateSupplyPlan, canAdvanceBatch, financeGatePasses, missingMonthlyScopes, newProductScopeGate, prorateAllocations, REQUIRED_MONTHLY_SCOPES, roundSupplyQuantity, sampleGateReady, shelfScopesComplete } from "../../../lib/rules.mjs";
 
 const SITES = ["马来西亚", "印尼", "泰国", "越南", "菲律宾"];
@@ -121,7 +122,28 @@ export async function GET(request:Request) {
       requireBusinessPermission(actor,"backup.export");
       return Response.redirect(new URL("/api/backup",request.url),307);
     }
-    if(actor.role==="销售") return Response.json({actor,currentMonth:monthKey(),generatedAt:nowIso(),productionTracking:productionTracking(...await Promise.all([all("SELECT * FROM series_production_orders"),all("SELECT * FROM series_production_order_items"),all("SELECT * FROM series_purchase_orders"),all("SELECT entity_id,created_at,actor_name FROM audit_logs WHERE entity_type='series_production_order' AND action='生成工厂订单导出' ORDER BY created_at")]) as [AnyRow[],AnyRow[],AnyRow[],AnyRow[]]),metrics:{},myTasks:[...await wholesaleTasks(database(),actor),...await reviewTasks(database(),actor),...await afterTasks(database(),actor)],...Object.fromEntries(["inventory", "movements", "sales", "imports", "receipts", "submissions", "approvals", "batches", "skuSettings", "audit", "users", "suggestions", "monthlyStatus", "issues", "newProductProjects", "salesScopeStatus", "salesTopSkus", "purchaseOrders", "productionOrders", "shipmentBatches", "shipmentReceipts", "transportBatches", "transportReceipts", "businessPartners", "warehouses", "countRequests"].map(key=>[key,[]]))});
+    if(requestUrl.searchParams.has("history")){
+      const result=await readHistory(database(),actor,Object.fromEntries(requestUrl.searchParams));
+      return requestUrl.searchParams.get("export")==="1"?new Response(historyCsv(result),{headers:{"content-type":"text/csv; charset=utf-8","content-disposition":`attachment; filename="${result.kind}-history.csv"`,"cache-control":"no-store"}}):Response.json(result);
+    }
+    const requestedModule=requestUrl.searchParams.get("module")||"";
+    const module=requestedModule==="home"?(mobileModules(actor.role)[0]||"overview"):requestedModule;
+    if(module&&!navigationForRole(actor.role).includes(module))throw new HttpError(403,"当前账号无权打开此工作区");
+    const forecastTrend=requestUrl.searchParams.get("forecastTrend");
+    if(forecastTrend){
+      if(!navigationForRole(actor.role).includes("suggestions"))throw new HttpError(403,"无权查看补货趋势");
+      const forecast=await loadForecast(database(),actor),row=forecast.suggestions.find(r=>`${r.site}|${r.channel}|${r.sku}`===forecastTrend);
+      if(!row)throw new HttpError(404,"当前权限内未找到该SKU趋势");
+      return Response.json({dailySeries:row.dailySeries,generatedAt:nowIso()});
+    }
+    // Independent workspaces fetch their own ledgers; avoid constructing the global forecast.
+    if(["wholesale","reviews","after-sales","audit","users","permissions","production-tracking"].includes(module)){
+      const empty=Object.fromEntries([...new Set(Object.values(MODULE_FIELDS).flat())].filter(key=>!["currentMonth","metrics"].includes(key)).map(key=>[key,[]]));
+      const users=["users","permissions"].includes(module)?await all("SELECT id,email,name,role,site,channel,responsibility_unit,active,created_at,updated_at FROM users ORDER BY created_at"):[];
+      const tracking=module==="production-tracking"?productionTracking(...await Promise.all([all("SELECT * FROM series_production_orders"),all("SELECT * FROM series_production_order_items"),all("SELECT * FROM series_purchase_orders"),all("SELECT entity_id,created_at,actor_name FROM audit_logs WHERE entity_type='series_production_order' AND action='生成工厂订单导出' ORDER BY created_at")]) as [AnyRow[],AnyRow[],AnyRow[],AnyRow[]]):[];
+      return Response.json(publicSystemSnapshot({...empty,module,actor,currentMonth:monthKey(),generatedAt:nowIso(),metrics:{},users,productionTracking:tracking,myTasks:await workspaceTasks(database(),actor)},actor.role));
+    }
+    if(actor.role==="销售") return Response.json({actor,currentMonth:monthKey(),generatedAt:nowIso(),productionTracking:productionTracking(...await Promise.all([all("SELECT * FROM series_production_orders"),all("SELECT * FROM series_production_order_items"),all("SELECT * FROM series_purchase_orders"),all("SELECT entity_id,created_at,actor_name FROM audit_logs WHERE entity_type='series_production_order' AND action='生成工厂订单导出' ORDER BY created_at")]) as [AnyRow[],AnyRow[],AnyRow[],AnyRow[]]),metrics:{},myTasks:await workspaceTasks(database(),actor),...Object.fromEntries(["inventory", "movements", "sales", "imports", "receipts", "submissions", "approvals", "batches", "skuSettings", "audit", "users", "suggestions", "monthlyStatus", "issues", "newProductProjects", "salesScopeStatus", "salesTopSkus", "purchaseOrders", "productionOrders", "shipmentBatches", "shipmentReceipts", "transportBatches", "transportReceipts", "businessPartners", "warehouses", "countRequests"].map(key=>[key,[]]))});
     const requestedImport=requestUrl.searchParams.get("salesImportId");
     if(requestedImport){
       requireBusinessPermission(actor,"sales.correct");
@@ -134,9 +156,9 @@ export async function GET(request:Request) {
     const today=chinaDate(),expectedDate=chinaDate(-1),cutoff7=chinaDate(-6);
     const results: AnyRow[][] = await Promise.all([
       all(`SELECT * FROM inventory_balances${scope.clause} ORDER BY site,channel,sku`, scope.args),
-      all(`SELECT * FROM inventory_movements${scope.clause} ORDER BY created_at DESC LIMIT 500`, scope.args),
-      all(`SELECT * FROM sales_records${scope.clause}${scope.clause?" AND":" WHERE"} reversed_at IS NULL ORDER BY business_date DESC,created_at DESC LIMIT 1000`, scope.args),
-      all(`SELECT * FROM sales_imports${scope.clause} ORDER BY created_at DESC LIMIT 100`, scope.args),
+      module?Promise.resolve([]):all(`SELECT * FROM inventory_movements${scope.clause} ORDER BY created_at DESC LIMIT 500`, scope.args),
+      module?Promise.resolve([]):all(`SELECT * FROM sales_records${scope.clause}${scope.clause?" AND":" WHERE"} reversed_at IS NULL ORDER BY business_date DESC,created_at DESC LIMIT 1000`, scope.args),
+      module?Promise.resolve([]):all(`SELECT * FROM sales_imports${scope.clause} ORDER BY created_at DESC LIMIT 100`, scope.args),
       all("SELECT site,channel,MAX(CASE WHEN report_kind IN ('complete','zero') THEN business_date END) last_sale_date,MAX(business_date) last_import_date,MAX(CASE WHEN business_date=? AND report_kind IN ('complete','zero') THEN 1 ELSE 0 END) expected_complete,MAX(CASE WHEN business_date=? AND total_qty>0 THEN 1 ELSE 0 END) expected_imported,SUM(CASE WHEN business_date=? THEN total_qty ELSE 0 END) sales_expected,SUM(CASE WHEN business_date=? THEN total_qty ELSE 0 END) sales_today,SUM(CASE WHEN business_date>=? THEN total_qty ELSE 0 END) sales_7_qty,COUNT(DISTINCT CASE WHEN business_date>=? AND report_kind IN ('complete','zero') THEN business_date END) import_days_7 FROM sales_imports WHERE reversed_at IS NULL GROUP BY site,channel",[expectedDate,expectedDate,expectedDate,today,cutoff7,cutoff7]),
       all(`SELECT site,channel,sku,SUM(qty) qty FROM sales_records WHERE reversed_at IS NULL AND business_date>=?${actor.role==="运营"?" AND site=? AND channel=?":""} GROUP BY site,channel,sku ORDER BY qty DESC LIMIT 100`,actor.role==="运营"?[cutoff7,actor.site,actor.channel]:[cutoff7]),
       actor.role === "运营"
@@ -149,7 +171,7 @@ export async function GET(request:Request) {
       all("SELECT * FROM new_product_projects WHERE status NOT IN ('completed','abandoned') OR id IN (SELECT id FROM new_product_projects ORDER BY updated_at DESC LIMIT 200) ORDER BY updated_at DESC"),
       all("SELECT * FROM new_product_stage_records ORDER BY submitted_at DESC"),
       all("SELECT * FROM sku_settings ORDER BY sku"),
-      actor.role === "管理员" ? all("SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT 500") : all("SELECT * FROM audit_logs WHERE actor_id=? ORDER BY created_at DESC LIMIT 200", [actor.id]),
+      module?Promise.resolve([]):actor.role === "管理员" ? all("SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT 500") : all("SELECT * FROM audit_logs WHERE actor_id=? ORDER BY created_at DESC LIMIT 200", [actor.id]),
       all("SELECT * FROM series_purchase_orders ORDER BY updated_at DESC"),
       all("SELECT * FROM series_purchase_order_items ORDER BY updated_at DESC"),
       all("SELECT * FROM series_production_orders ORDER BY updated_at DESC"),
@@ -352,7 +374,7 @@ export async function GET(request:Request) {
       } as AnyRow;
     });
 
-    const {suggestions,salesDaily,policies}=await loadForecast(database(),actor);
+    const {suggestions,salesDaily,policies}=!module||["overview","suggestions","monthly"].includes(module)?await loadForecast(database(),actor):{suggestions:[] as AnyRow[],salesDaily:[] as AnyRow[],policies:[] as AnyRow[]};
 
     const currentMonth = monthKey();
     const submittedSet = new Set(submissionScopeRows.filter((r) => r.month === currentMonth).map((r) => `${r.site}|${r.channel}`));
@@ -390,6 +412,7 @@ export async function GET(request:Request) {
       negativeSkuCount:negativeInventory.length,
       salesToday:salesScopeStatus.reduce((sum,r) => sum + Number(r.salesToday), 0)+offlineSales.todayQty,
       sales7Qty:salesDaily.filter(r=>r.business_date>=cutoff7&&r.business_date<=today).reduce((sum,r)=>sum+Number(r.qty),0)+offlineSales.periodQty,
+      salesWindowFrom:cutoff7,salesWindowTo:today,
       offlineSales7Qty:offlineSales.periodQty,
       seaTransitQty:suggestions.reduce((sum,row)=>sum+Number(row.seaInTransit),0),
       productionInProgressQty:suggestions.reduce((sum,row)=>sum+Number(row.productionInProgress),0),
@@ -427,24 +450,7 @@ export async function GET(request:Request) {
       if(used>Number(warehouse.capacity_qty)) warehouseCapacityIssues.push({level:"eta",type:"仓库容量超限",detail:`${warehouse.name}：当前${used}件，容量${warehouse.capacity_qty}件`});
     }
     supplyIssues.unshift(...warehouseCapacityIssues);
-    const myTasks:AnyRow[]=[...await wholesaleTasks(database(),actor),...await reviewTasks(database(),actor),...await afterTasks(database(),actor)];
-    if(actor.role==="运营"){
-      const ownStatus=salesScopeStatus[0];
-      if(ownStatus&&!ownStatus.updatedExpected) myTasks.push({level:"red",title:"导入昨日销售",detail:`${actor.site} · ${actor.channel} ${expectedDate} ${ownStatus.importedExpected?"已导入，待确认完整":"尚未更新"}`,tab:"sales"});
-      const ownMonthly=monthlyStatus.find((row)=>row.site===actor.site&&row.channel===actor.channel);
-      if(ownMonthly&&!ownMonthly.submitted) myTasks.push({level:"amber",title:"提交月度需求",detail:`${currentMonth} 需求尚未提交`,tab:"suggestions"});
-      for(const leg of transportLegViews.filter((row)=>row.stage==="shelf_pending"&&row.pendingShelfQty>0)) myTasks.push({level:"amber",title:"确认上架",detail:`${leg.leg_no} · ${leg.pendingShelfQty}件待转可售`,tab:"batches"});
-    }
-    if(["供应链","管理员"].includes(actor.role)){
-      for(const request of countRequests.filter((row)=>row.status==="pending")) myTasks.push({level:"amber",title:"复核盘点差异",detail:`${request.site} · ${request.channel} · ${request.sku}`,tab:"inventory"});
-      for(const order of purchaseOrders.filter((row)=>["draft","ordered"].includes(row.status)&&!row.supplier_confirmed_at&&(actor.role==="管理员"||row.assigned_supply_user_id===actor.id))) myTasks.push({level:"amber",title:"确认供应商接单",detail:`${order.series_name} · ${order.total_qty}件`,tab:"fulfillment"});
-      for(const order of productionOrders.filter((row)=>["completed","completed_with_variance"].includes(row.status)&&row.qc_status!=="passed")) myTasks.push({level:"red",title:"确认生产质检",detail:`${order.series_name} 已完工待质检`,tab:"fulfillment"});
-      for(const leg of transportLegViews.filter((row)=>["booking","awaiting_receipt"].includes(row.stage))) myTasks.push({level:"amber",title:leg.stage==="booking"?"完成订舱交接":"登记目的地到仓",detail:`${leg.leg_no} · ${leg.site} · ${leg.channel}`,tab:"batches"});
-    }
-    if(actor.role==="工厂") for(const order of productionOrders.filter((row)=>["awaiting_factory","in_production","pending"].includes(row.status))) myTasks.push({level:order.promised_completion_date&&String(order.promised_completion_date)<today?"red":"amber",title:order.status==="in_production"?"更新生产进度":"确认生产接单",detail:`${order.series_name} · ${order.total_planned_qty}件`,tab:"fulfillment"});
-    if(actor.role==="海运") for(const leg of transportLegViews.filter((row)=>row.stage_owner==="海运"&&row.stage!=="on_shelf")) myTasks.push({level:leg.exceptions.some((item:AnyRow)=>item.level==="red")?"red":"amber",title:"更新运输节点",detail:`${leg.leg_no} · ${leg.site} · ${leg.channel}`,tab:"batches"});
-    if(actor.role==="管理员") for(const approval of approvals.filter((row)=>row.status==="pending")) myTasks.push({level:"red",title:approval.creator_id===actor.id?"撤回本人送审计划":"审批月度备货",detail:`${approval.month} ${approval.creator_id===actor.id?"请先撤回，再由供应链重新送审":"计划待审批"}`,tab:"approval"});
-    if(actor.role==="供应链") for(const approval of approvals.filter(row=>["withdrawn","rejected"].includes(row.status))) myTasks.push({level:"red",title:"重新送审月度计划",detail:`${approval.month} ${approval.status==="withdrawn"?"已撤回":"已驳回"}，请核对需求后重新送审`,tab:"approval"});
+    const myTasks:AnyRow[]=await workspaceTasks(database(),actor);
     // Only the two roles that can read approval records receive their timeline.
     const approvalHistory=new Map<string,AnyRow[]>();
     if(["管理员","供应链"].includes(actor.role)&&approvals.length){
@@ -461,7 +467,7 @@ export async function GET(request:Request) {
       ...project,
       records:project.records.map((record:AnyRow)=>record.stage_key==="finance"&&!canReadDomain(actor.role,"finance_detail")?{...record,data:{submitted:true},conclusion:"财务测算已提交"}:record),
     })):[];
-    return Response.json(publicSystemSnapshot({
+    return Response.json(publicSystemSnapshot(moduleSnapshot({
       actor, currentMonth, metrics, myTasks, generatedAt:new Date().toISOString(),
       productionTracking:canReadDomain(actor.role,"production_tracking")?productionTracking(productionOrderRows,productionItemRows,purchaseOrderRows,await all("SELECT entity_id,created_at,actor_name FROM audit_logs WHERE entity_type='series_production_order' AND action='生成工厂订单导出' ORDER BY created_at")):[],
       adSpend:hasPermission(actor.role,"sales.ad_spend")?await all(`SELECT * FROM sales_ad_spend${scope.clause} ORDER BY business_date DESC`,scope.args):[],
@@ -493,7 +499,7 @@ export async function GET(request:Request) {
       salesScopeStatus:canReadDomain(actor.role,"sales")?salesScopeStatus:[],
       salesTopSkus:canReadDomain(actor.role,"sales")?salesTopSkus:[],
       issues:supplyIssues,
-    }));
+    },module),actor.role));
   } catch (error) { return errorResponse(error); }
 }
 
@@ -1701,6 +1707,7 @@ async function saveWarehouse(actor:Actor,payload:AnyRow){
 function errorResponse(error:unknown) {
   if(/inventory_baseline_date/.test(String(error))) return Response.json({error:"已启用2026-09-30期初库存，请选择2026-10-01或之后的销售／费用日期，历史销售不可再次扣库"},{status:409});
   if(/inventory_movements.balance_after|guard_|CHECK constraint|maintenance|closed finance/.test(String(error))) return Response.json({error:"库存或凭证已被更新，本次未覆盖；请刷新后重新核对"},{status:409});
+  if(error instanceof HistoryError)return Response.json({error:error.message},{status:error.status});
   if(error instanceof InboundError)return Response.json({error:error.message,errors:error.errors},{status:error.status});
   if(error instanceof HttpError || error instanceof ConflictError) return Response.json({error:error.message},{status:error.status});
   console.error(error);

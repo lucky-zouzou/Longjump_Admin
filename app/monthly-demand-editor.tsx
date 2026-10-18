@@ -1,5 +1,6 @@
 "use client";
 
+import {useDirtyGuard} from './workspace-hooks';
 import {useRef,useState} from 'react';
 import TableImport,{type ImportRow} from './table-import';
 import {applyMonthlyImport,initialMonthlyDemand,monthlyDemandItems} from '../lib/monthly-demand.mjs';
@@ -11,6 +12,8 @@ type Props={actor:ImportRow;month:string;submissions:ImportRow[];suggestions:Imp
 export default function MonthlyDemandEditor({actor,month,submissions,suggestions,skuSettings,busy,act}:Props) {
   const [initial]=useState(()=>initialMonthlyDemand({actor,month,submissions,suggestions}));
   const [state,setState]=useState<DraftState>(initial);
+  const [saved,setSaved]=useState(()=>JSON.stringify(initial));
+  useDirtyGuard(JSON.stringify(state)!==saved);
   const [newSku,setNewSku]=useState('');
   const [mode,setMode]=useState<'replace'|'merge'>('replace');
   const [notice,setNotice]=useState(initial.saved?'已载入本月已提交的备货计划，可调整后重新提交。':'已按系统建议生成备货清单，可导入文件或手动调整。');
@@ -33,7 +36,7 @@ export default function MonthlyDemandEditor({actor,month,submissions,suggestions
       const items=zeroDemand?[]:monthlyDemandItems(drafts);
       submitting.current=true;
       const result=await act('monthlySubmit',{month,site:actor.site,channel:actor.channel,zeroDemand,zeroReason,items},'本月备货需求已保存并进入完整度检查');
-      if(result){setUndo(null);setNotice(`已保存 ${month} 备货需求，${items.length} 个SKU。`);}
+      if(result){setSaved(JSON.stringify(state));setUndo(null);setNotice(`已保存 ${month} 备货需求，${items.length} 个SKU。`);}
     }catch(err){setError(err instanceof Error?err.message:'提交失败，请检查备货清单');}
     finally{submitting.current=false;}
   };
