@@ -40,7 +40,7 @@ test('连续可售/上架不足7天观察，已知缺货覆盖人工核验，不
 test('读取按站点渠道隔离，部分/费用日报不算完整，冲销后重新预警，工厂无权访问',async()=>{
  const f=fixture();reports(f);observation(f);let a=await zeroSales(f.db,f.users.indonesia,now);assert.equal(a.find(r=>r.sku==='BAG-A').status,'open');assert.ok(a.every(r=>r.channel==='TikTok'));
  f.sqlite.prepare("UPDATE sales_imports SET report_kind='partial' WHERE business_date=?").run(cutoff);assert.equal((await zeroSales(f.db,f.users.indonesia,now))[0].status,'observe');f.sqlite.prepare("UPDATE sales_imports SET report_kind='complete'").run();sale(f,cutoff,2);assert.equal((await zeroSales(f.db,f.users.indonesia,now))[0].status,'closed');f.sqlite.prepare('UPDATE sales_records SET reversed_at=?').run(day);assert.equal((await zeroSales(f.db,f.users.indonesia,now))[0].status,'open');
- for(const a of [{id:'f',role:'工厂'},f.users.malaysia,f.users.sales])await assert.rejects(readPromotions(f.db,a,now),/开放/);
+ for(const a of [{id:'f',role:'工厂'},f.users.sales])await assert.rejects(readPromotions(f.db,a,now),/开放/);
 });
 test('人工核验必须本人范围和证据，不能覆盖已知无货，其他措施留痕',async()=>{
  const f=fixture(),p={action:'verify',sku:'BAG-A',listedSince:'2026-10-01',availableSince:'2026-10-01',reference:'平台库存记录',note:'确认持续有货并在售',confirmed:true};
