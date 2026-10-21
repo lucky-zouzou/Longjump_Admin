@@ -219,7 +219,7 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
         {tab==="overview" && <Overview data={data} go={setTab}/>}
         {tab==="suggestions" && <Suggestions data={data} act={act} busy={busy}/>}
         {tab==="new-products" && <NewProducts data={data} act={act} busy={busy}/>}
-        {["sales","suggestions"].includes(tab)&&["管理员","供应链","运营"].includes(actor.role)&&<div className="notice info"><span>印尼 TikTok／Shopee：跟进连续7天零销量、有库存的商品</span> <button className="btn" onClick={()=>setTab("promotions")}>零销量预警与优惠申请 →</button></div>}
+        {["sales","suggestions"].includes(tab)&&["管理员","供应链","运营","运营主管"].includes(actor.role)&&<div className="notice info"><span>五站 TikTok／Shopee：查看近7天零销量、有库存的商品及日报缺口</span> <button className="btn" onClick={()=>setTab("promotions")}>零销量预警与优惠申请 →</button></div>}
         {tab==="sales" && <SalesImport data={data} act={act} busy={busy}/>}
         {tab==="inventory" && <Inventory data={data} act={act} busy={busy} scope={inventoryScope} clearScope={()=>setInventoryScope(null)}/>}
         {tab==="receipt" && <Receipt data={data} act={act} busy={busy}/>}

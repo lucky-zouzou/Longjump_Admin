@@ -162,6 +162,13 @@
       "when": 1792454400000,
       "tag": "0022_zero_sales_promotions",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "6",
+      "when": 1792540800000,
+      "tag": "0023_five_site_zero_sales",
+      "breakpoints": true
     }
   ]
 }
