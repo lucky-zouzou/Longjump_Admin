@@ -4,7 +4,7 @@ import { canReadDomain, hasPermission, navigationForRole, PERMISSION_LABELS, ROL
 
 test("管理员审批与供应链送审分工，销售导入保持运营专属", () => {
   for (const permission of Object.keys(PERMISSION_LABELS)) {
-    assert.equal(hasPermission("管理员",permission),!["sales.import","plan.submit"].includes(permission),permission);
+    assert.equal(hasPermission("管理员",permission),!["sales.import","plan.submit","promotion.apply","promotion.finance"].includes(permission),permission);
   }
   assert.equal(navigationForRole("管理员").includes("permissions"),true);
 });

@@ -1,4 +1,5 @@
 import http from 'node:http';
+import {schedulePromotionMonitor} from './promotion-monitor.mjs';
 import {Readable} from 'node:stream';
 import {resolve} from 'node:path';
 import {readFileSync} from 'node:fs';
@@ -57,4 +58,5 @@ const server=http.createServer(async(req,res)=>{try{
 server.requestTimeout=120000;server.headersTimeout=15000;
 server.listen(Number(process.env.PORT||3000),process.env.HOST||'0.0.0.0',()=>console.log(`LOONG JUMP ready at ${origin.origin}`));
 if(process.env.LOONGJUMP_BACKUP_DIR){const {scheduleBackups}=await import('./backup.mjs');scheduleBackups(env,process.env.LOONGJUMP_BACKUP_DIR);}
+schedulePromotionMonitor(env.DB);
 for(const signal of ['SIGINT','SIGTERM'])process.on(signal,()=>server.close(()=>{db.close();process.exit(0)}));
