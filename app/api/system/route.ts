@@ -140,7 +140,7 @@ export async function GET(request:Request) {
       return Response.json({dailySeries:row.dailySeries,generatedAt:nowIso()});
     }
     // Independent workspaces fetch their own ledgers; avoid constructing the global forecast.
-    if(["wholesale","reviews","after-sales","audit","users","permissions","production-tracking"].includes(module)){
+    if(["wholesale","reviews","after-sales","promotions","audit","users","permissions","production-tracking"].includes(module)){
       const empty=Object.fromEntries([...new Set(Object.values(MODULE_FIELDS).flat())].filter(key=>!["currentMonth","metrics"].includes(key)).map(key=>[key,[]]));
       const users=["users","permissions"].includes(module)?await all("SELECT id,email,name,role,site,channel,responsibility_unit,active,created_at,updated_at FROM users ORDER BY created_at"):[];
       const tracking=module==="production-tracking"?productionTracking(...await Promise.all([all("SELECT * FROM series_production_orders"),all("SELECT * FROM series_production_order_items"),all("SELECT * FROM series_purchase_orders"),all("SELECT entity_id,created_at,actor_name FROM audit_logs WHERE entity_type='series_production_order' AND action='生成工厂订单导出' ORDER BY created_at")]) as [AnyRow[],AnyRow[],AnyRow[],AnyRow[]]):[];

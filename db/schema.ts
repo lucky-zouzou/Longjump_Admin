@@ -625,3 +625,5 @@ export * from "./review-schema";
 export * from "./after-sales-schema";
 
 export * from "./factory-document-schema";
+
+export * from "./promotion-schema";

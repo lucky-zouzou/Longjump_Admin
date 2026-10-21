@@ -29,6 +29,7 @@ import { translateWholesale } from "../lib/wholesale-i18n.mjs";
 import { lazy,Suspense,useCallback, useEffect, useRef, useState } from "react";
 import { dataDomainsForRole, DATA_DOMAIN_LABELS, hasPermission, navigationForRole, PERMISSION_LABELS, permissionsForRole, ROLE_PERMISSIONS } from "../lib/permissions.mjs";
 
+const Promotions=lazy(()=>import("./promotions"));
 const AfterSales=lazy(()=>import("./after-sales"));
 const SITES = ["马来西亚", "印尼", "泰国", "越南", "菲律宾"];
 const CHANNELS = ["TikTok", "Shopee", "线下分销"];
@@ -66,7 +67,7 @@ type AllocationDraft = { site:string; channel:string; qty:string };
 type Act = (action:string,payload:Row,success:string,onError?:(message:string)=>void)=>Promise<Row|null>;
 
 const navItems = [
-  ["overview","总览","◫"], ["reviews","周报与月度复盘","▤"], ["after-sales","售后反馈","↩"], ["users","用户管理","♙"], ["wholesale","印尼线下批发","▣"], ["suggestions","补货驾驶舱","◎"], ["new-products","新品孵化","◇"], ["sales","销售数据","↗"], ["inventory","库存流水","▦"],
+  ["overview","总览","◫"], ["reviews","周报与月度复盘","▤"], ["promotions","零销量与优惠","↓"], ["after-sales","售后反馈","↩"], ["users","用户管理","♙"], ["wholesale","印尼线下批发","▣"], ["suggestions","补货驾驶舱","◎"], ["new-products","新品孵化","◇"], ["sales","销售数据","↗"], ["inventory","库存流水","▦"],
   ["receipt","历史到仓","↓"], ["monthly","月度计划","▤"], ["approval","审批中心","✓"], ["fulfillment","系列采购生产","▥"], ["production-tracking","生产动态","◉"], ["batches","海运批次","⇢"],
   ["master","主数据","⌘"], ["audit","审计日志","◷"], ["permissions","权限测试","⊙"],
 ];
@@ -213,10 +214,12 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
         {actor.role==="运营" && (!actor.site || !actor.channel) && <div className="notice warn">当前账号尚未绑定站点和渠道，请联系管理员在“用户管理”中完成分配后再录入业务数据。</div>}
         {tab==="wholesale" && <WholesaleLanguageContext.Provider value={wholesaleLocale}><Wholesale onChanged={refresh} route={route} navigate={navigate}/></WholesaleLanguageContext.Provider>}
         {tab==="reviews" && <BusinessReviews initialView={route.view} initialDate={route.entity}/>}
+        {tab==="promotions" && <Promotions initialId={route.entity}/>}
         {tab==="after-sales" && <AfterSales initialMonth={route.month}/>}
         {tab==="overview" && <Overview data={data} go={setTab}/>}
         {tab==="suggestions" && <Suggestions data={data} act={act} busy={busy}/>}
         {tab==="new-products" && <NewProducts data={data} act={act} busy={busy}/>}
+        {["sales","suggestions"].includes(tab)&&["管理员","供应链","运营"].includes(actor.role)&&<div className="notice info"><span>印尼 TikTok／Shopee：跟进连续7天零销量、有库存的商品</span> <button className="btn" onClick={()=>setTab("promotions")}>零销量预警与优惠申请 →</button></div>}
         {tab==="sales" && <SalesImport data={data} act={act} busy={busy}/>}
         {tab==="inventory" && <Inventory data={data} act={act} busy={busy} scope={inventoryScope} clearScope={()=>setInventoryScope(null)}/>}
         {tab==="receipt" && <Receipt data={data} act={act} busy={busy}/>}
