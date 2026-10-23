@@ -1,5 +1,7 @@
 "use client";
 import HistoryBrowser from "./history-browser";
+import Overview from "./overview";
+import WorkspaceIcon from "./workspace-icons";
 import {WorkspaceGuard,useWorkspaceRoute,useVisibleRefresh} from "./workspace-hooks";
 import {NAV_GROUPS,mobileModules} from "../lib/workspace-model.mjs";
 const InboundReceipts=lazy(()=>import("./inbound-receipts"));
@@ -29,6 +31,7 @@ import { translateWholesale } from "../lib/wholesale-i18n.mjs";
 import { lazy,Suspense,useCallback, useEffect, useRef, useState } from "react";
 import { dataDomainsForRole, DATA_DOMAIN_LABELS, hasPermission, navigationForRole, PERMISSION_LABELS, permissionsForRole, ROLE_PERMISSIONS } from "../lib/permissions.mjs";
 
+const SalesTargets=lazy(()=>import("./sales-targets"));
 const BusinessActions=lazy(()=>import("./business-actions"));
 const Promotions=lazy(()=>import("./promotions"));
 const AfterSales=lazy(()=>import("./after-sales"));
@@ -68,7 +71,7 @@ type AllocationDraft = { site:string; channel:string; qty:string };
 type Act = (action:string,payload:Row,success:string,onError?:(message:string)=>void)=>Promise<Row|null>;
 
 const navItems = [
-  ["overview","总览","◫"], ["business-actions","每日经营行动单","✓"], ["reviews","周报与月度复盘","▤"], ["promotions","零销量与优惠","↓"], ["after-sales","售后反馈","↩"], ["quality-incidents","品质与交付异常","⚑"], ["users","用户管理","♙"], ["wholesale","印尼线下批发","▣"], ["suggestions","补货驾驶舱","◎"], ["new-products","新品孵化","◇"], ["sales","销售数据","↗"], ["inventory","库存流水","▦"],
+  ["overview","总览","◫"], ["sales-targets","月度任务与贡献","◎"], ["business-actions","每日经营行动单","✓"], ["reviews","周报与月度复盘","▤"], ["promotions","零销量与优惠","↓"], ["after-sales","售后反馈","↩"], ["quality-incidents","品质与交付异常","⚑"], ["users","用户管理","♙"], ["wholesale","印尼线下批发","▣"], ["suggestions","补货驾驶舱","◎"], ["new-products","新品孵化","◇"], ["sales","销售数据","↗"], ["inventory","库存流水","▦"],
   ["receipt","历史到仓","↓"], ["monthly","月度计划","▤"], ["approval","审批中心","✓"], ["fulfillment","系列采购生产","▥"], ["production-tracking","生产动态","◉"], ["batches","海运批次","⇢"],
   ["master","主数据","⌘"], ["audit","审计日志","◷"], ["permissions","权限测试","⊙"],
 ];
@@ -98,7 +101,11 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
   const {route,navigate}=useWorkspaceRoute();
   const selectedTab=route.page;
   const [more,setMore]=useState(false);
-  const setTab=(page:string,task:Row={})=>{if(navigate({page,entity:task.entity||"",view:task.view||"",month:task.month||"",search:"",status:"all"}))setMore(false);};
+  const [navQuery,setNavQuery]=useState("");
+  const [collapsedGroups,setCollapsedGroups]=useState<Record<string,boolean>>({});
+  useEffect(()=>{const group=NAV_GROUPS.find(g=>g.keys.includes(selectedTab));if(group)setCollapsedGroups(old=>({...old,[group.label]:false}));},[selectedTab]);
+  useEffect(()=>{if(!more)return;const close=(event:KeyboardEvent)=>{if(event.key==="Escape")setMore(false);};window.addEventListener("keydown",close);return()=>window.removeEventListener("keydown",close);},[more]);
+  const setTab=(page:string,task:Row={})=>{if(navigate({page,entity:task.entity||"",view:task.view||"",month:task.month||"",search:"",status:"all"})){setMore(false);setNavQuery("");}};
   const requestGeneration=useRef(0);
   const [data,setData] = useState<Snapshot|null>(null);
   const [loading,setLoading] = useState(true);
@@ -188,25 +195,32 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
   const taskBadge=(key:string)=>taskCount(key)>0?<span className="nav-task-count" aria-label={`${taskCount(key)}项待办`}>{taskCount(key)>99?"99+":taskCount(key)}</span>:null;
   const shellT=(key:string)=>translateWholesale(tab==="wholesale"?wholesaleLocale.language:"zh",key);
 
+  const navLabel=(key:string,label:string)=>shellT(key==="sales"?(actor.role==="运营"?"每日销售导入":"销售看板"):label);
+  const activeItem=visibleNav.find(([key])=>key===tab);
+  const activeGroup=NAV_GROUPS.find(group=>group.keys.includes(tab));
+  const filteredNav=visibleNav.filter(([key,label])=>`${navLabel(key,label)} ${label} ${key}`.toLowerCase().includes(navQuery.trim().toLowerCase()));
+  const navigation=(surface:string)=><>
+    <div className="nav-search"><WorkspaceIcon name="search"/><input aria-label={shellT("搜索工作区")} placeholder={shellT("搜索工作区")} value={navQuery} onChange={event=>setNavQuery(event.target.value)}/>{navQuery&&<button aria-label={shellT("清除搜索")} onClick={()=>setNavQuery("")}><WorkspaceIcon name="close"/></button>}</div>
+    <div className="nav-sections">{NAV_GROUPS.filter(group=>filteredNav.some(([key])=>group.keys.includes(key))).map((group,index)=>{
+      const expanded=Boolean(navQuery.trim())||!collapsedGroups[group.label];
+      const groupId=`nav-${surface}-${index}`;
+      return <div className="nav-group" key={group.label}><button className="nav-group-toggle" aria-expanded={expanded} aria-controls={groupId} onClick={()=>setCollapsedGroups(old=>({...old,[group.label]:!old[group.label]}))} disabled={Boolean(navQuery.trim())}><span>{shellT(group.label)}</span><WorkspaceIcon name="chevron"/></button>
+        <div id={groupId} hidden={!expanded}>{filteredNav.filter(([key])=>group.keys.includes(key)).map(([key,label])=><button key={key} className={classNames("nav-button",tab===key&&"active")} aria-current={tab===key?"page":undefined} onClick={()=>setTab(key)}><span className="nav-icon"><WorkspaceIcon name={key}/></span><span className="nav-label">{navLabel(key,label)}</span>{taskBadge(key)}</button>)}</div></div>;
+    })}{!filteredNav.length&&<div className="nav-no-results">{shellT("没有匹配的工作区")}<button onClick={()=>setNavQuery("")}>{shellT("清除搜索")}</button></div>}</div>
+  </>;
+
   return <div className="app-shell" lang={tab==="wholesale"&&wholesaleLocale.language==="id"?"id":"zh-CN"}>
     <aside className="sidebar">
-      <div className="brand"><img className="brand-logo" src="/loong-jump-logo-white.png" alt="LOONG JUMP"/><p>{shellT("品牌出海供应链控制塔")}</p></div>
-      <nav className="nav" aria-label={shellT("系统导航")}>
-        {NAV_GROUPS.filter(group=>visibleNav.some(([key])=>group.keys.includes(key))).map(group=><div className="nav-group" key={group.label}><small>{shellT(group.label)}</small>{visibleNav.filter(([key])=>group.keys.includes(key)).map(([key,label,icon]) => <button key={key} className={classNames("nav-button",tab===key&&"active")} onClick={()=>setTab(key)}>
-          <span className="nav-icon">{icon}</span><span>{shellT(key==="sales"?(actor.role==="运营"?"每日销售导入":"销售看板"):label)}</span>{taskBadge(key)}
-        </button>)}</div>)}
-      </nav>
-      <div className="account">
-        <strong>{actor.name} · {shellT(actor.role)}</strong>
-        <span>{actor.site ? `${shellT(actor.site)} / ${actor.channel||""}` : shellT(ROLE_LABEL[actor.role])}</span>
-        <span>{identity.email}</span>
-        {identity.userId!=="local-admin" && <a href="/signout-with-chatgpt?return_to=%2F" style={{display:"inline-block",color:"#aeb8ca",fontSize:10,marginTop:9}}>{shellT("退出登录")}</a>}
+      <div className="brand"><img className="brand-logo" src="/loong-jump-logo-white.png" alt="LOONG JUMP"/><p>{shellT("品牌出海供应链控制塔")}</p><span className="brand-workspace">WORKSPACE</span></div>
+      <nav className="nav" aria-label={shellT("系统导航")}>{navigation("desktop")}</nav>
+      <div className="account"><div className="account-profile"><div className="account-avatar" aria-hidden="true">{String(actor.name||"L").slice(0,1)}</div><div><strong>{actor.name}</strong><span>{shellT(actor.role)} · {actor.site ? `${shellT(actor.site)} / ${actor.channel||""}` : shellT(ROLE_LABEL[actor.role])}</span></div></div><span className="account-email">{identity.email}</span>
+        {identity.userId!=="local-admin" && <a className="account-signout" href="/signout-with-chatgpt?return_to=%2F"><WorkspaceIcon name="logout"/>{shellT("退出登录")}</a>}
       </div>
     </aside>
     <main className="main">
       <header className="topbar">
-        <div><h2>{shellT("全链路可视化协同")}</h2><p>{shellT("SKU需求 → 系列采购 → 系列生产 → 海运批次 → 到仓上架")}</p></div>
-        <div style={{display:"flex",alignItems:"center",gap:8}}>
+        <div className="workspace-breadcrumb"><span className="breadcrumb-section">{shellT(activeGroup?.label||"工作台")}</span><WorkspaceIcon name="chevron"/><h2>{activeItem?navLabel(activeItem[0],activeItem[1]):shellT("全链路可视化协同")}</h2></div>
+        <div className="workspace-top-actions">
           {hasPermission(actor.role,"backup.export")&&<button className="btn" onClick={exportBackup}>{shellT("导出备份")}</button>}
           <span className={`status-pill ${connectionError?"connection-failed":""}`} role="status">{connectionError?shellT("更新失败 · 数据可能已过时"):`${shellT(["wholesale","reviews","after-sales","quality-incidents"].includes(selectedTab)?"导航已更新":"工作区已更新")} ${lastSync||"—"}`}</span>{connectionError&&<button className="btn danger" onClick={()=>void refresh().catch(()=>{})}>{shellT("重新连接")}</button>}
         </div>
@@ -215,6 +229,7 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
         {actor.role==="运营" && (!actor.site || !actor.channel) && <div className="notice warn">当前账号尚未绑定站点和渠道，请联系管理员在“用户管理”中完成分配后再录入业务数据。</div>}
         {tab==="wholesale" && <WholesaleLanguageContext.Provider value={wholesaleLocale}><Wholesale onChanged={refresh} route={route} navigate={navigate}/></WholesaleLanguageContext.Provider>}
         {tab==="reviews" && <BusinessReviews initialView={route.view} initialDate={route.entity}/>}
+        {tab==="sales-targets" && <SalesTargets initialMonth={route.month}/>}
         {tab==="business-actions" && <BusinessActions initialId={route.entity}/>}
         {tab==="promotions" && <Promotions initialId={route.entity}/>}
         {["after-sales","quality-incidents"].includes(tab) && <AfterSales key={tab} kind={tab==="quality-incidents"?"quality":"after_sale"} initialMonth={route.month}/>}
@@ -236,10 +251,10 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
         {tab==="permissions" && <PermissionTest data={data}/>}
       </>}</Suspense></div>
     </main>
-    {more&&<div className="mobile-more" role="dialog" aria-label="更多工作区"><div className="panel-head"><h3>{shellT("全部工作区")}</h3><button className="btn" onClick={()=>setMore(false)}>关闭</button></div>{NAV_GROUPS.filter(group=>visibleNav.some(([key])=>group.keys.includes(key))).map(group=><section key={group.label}><h4>{shellT(group.label)}</h4><div>{visibleNav.filter(([key])=>group.keys.includes(key)).map(([key,label,icon])=><button key={key} className={classNames("nav-button",tab===key&&"active")} onClick={()=>setTab(key)}>{icon} {shellT(label)}{taskBadge(key)}</button>)}</div></section>)}</div>}
+    {more&&<div className="mobile-more" role="dialog" aria-label={shellT("更多工作区")}><div className="panel-head"><h3>{shellT("全部工作区")}</h3><button className="btn" aria-label={shellT("关闭导航")} onClick={()=>setMore(false)}><WorkspaceIcon name="close"/>{shellT("关闭")}</button></div>{navigation("mobile")}</div>}
     <nav className="mobile-nav workspace-mobile-nav" aria-label={shellT("移动端导航")}>
-      {mobileModules(actor.role).map((key:string)=>{const [,label,icon]=navItems.find(row=>row[0]===key)!;return <button key={key} className={classNames("nav-button",tab===key&&"active")} onClick={()=>setTab(key)}><span>{icon}</span><span>{shellT(key==="sales"?(actor.role==="运营"?"销售导入":"销售看板"):label)}</span>{taskBadge(key)}</button>})}
-      {visibleNav.length>mobileModules(actor.role).length&&<button className={classNames("nav-button",more&&"active")} aria-expanded={more} onClick={()=>setMore(!more)}><span>•••</span><span>{shellT("更多")}</span></button>}
+      {mobileModules(actor.role).map((key:string)=>{const [,label]=navItems.find(row=>row[0]===key)!;return <button key={key} className={classNames("nav-button",tab===key&&"active")} aria-current={tab===key?"page":undefined} onClick={()=>setTab(key)}><WorkspaceIcon name={key}/><span>{shellT(key==="sales"?(actor.role==="运营"?"销售导入":"销售看板"):label)}</span>{taskBadge(key)}</button>})}
+      {visibleNav.length>mobileModules(actor.role).length&&<button className={classNames("nav-button",more&&"active")} aria-expanded={more} onClick={()=>setMore(!more)}><WorkspaceIcon name="more"/><span>{shellT("更多")}</span></button>}
     </nav>
     {toast && <div className="toast">{shellT(toast)}</div>}
   </div>;
@@ -273,40 +288,6 @@ function Panel({title,desc,children,action,collapsible=false}:{title:string;desc
 function Pill({children,tone="blue"}:{children:React.ReactNode;tone?:string}) { return <span className={`pill ${tone}`}>{children}</span>; }
 function Empty({children}:{children:React.ReactNode}) { return <div className="empty">{children}</div>; }
 
-function Overview({data,go}:{data:Snapshot;go:(tab:string,task?:Row)=>void}) {
-  const [showAllTasks,setShowAllTasks]=useState(false);
-  const m=data.metrics;
-  const completeness=m.monthlyRequired ? m.monthlySubmitted/m.monthlyRequired : 0;
-  return <>
-    <PageHead title="经营协同总览" desc={`${data.currentMonth} · 销量、库存、海运与生产一屏联动`}>
-      <Pill tone={m.actionAlertCount?"red":"green"}>{m.actionAlertCount ? `${m.actionAlertCount}项供应风险` : "供应覆盖正常"}</Pill>
-    </PageHead>
-    <div className="metrics">
-      <div className="metric"><div className="label">当前可售库存</div><div className="value">{fmt(m.inventoryQty)}</div><div className="foot">待上架 {fmt(m.pendingShelfQty)} · 隔离 {fmt(m.quarantineQty)}</div></div>
-      <div className="metric"><div className="label">近7天销量</div><div className="value">{fmt(m.sales7Qty)}</div><div className="foot">{m.salesWindowFrom} — {m.salesWindowTo}<br/>滚动7个自然日，缺报不视为零销量</div></div>
-      <div className="metric"><div className="label">海运在途</div><div className="value">{fmt(m.seaTransitQty)}</div><div className="foot">只统计已进入海运的数量</div></div>
-      <div className="metric"><div className="label">建议启动生产</div><div className="value" style={{color:m.suggestedProductionQty?"var(--amber)":"var(--ink)"}}>{fmt(m.suggestedProductionQty)}</div><div className="foot">已扣库存、海运在途和生产中</div></div>
-    </div>
-    {data.myTasks.length>0&&<Panel title={`我的待办 · ${data.myTasks.length} 项`} desc="红色事项需要处理；完成相应业务后自动移出待办" action={data.myTasks.length>8&&<button className="btn danger" onClick={()=>setShowAllTasks(!showAllTasks)}>{showAllTasks?"收起待办":`展开全部 ${data.myTasks.length} 项`}</button>}><div className="task-grid">{(showAllTasks?data.myTasks:data.myTasks.slice(0,8)).map((task,index)=><button className={`task-card ${task.level}`} key={`${task.title}-${index}`} onClick={()=>go(task.tab,task)}><strong>{task.title}</strong><span>{task.detail}</span><i>{task.level==="red"?"优先处理":"待处理"} →</i></button>)}</div></Panel>}
-    <div className="grid-2">
-      <Panel title="本月提交完整度" desc="五个站点 × TikTok/Shopee，全部提交后才能进入审批" action={navigationForRole(data.actor.role).includes("monthly")?<button className="btn" onClick={()=>go("monthly")}>查看明细</button>:undefined}>
-        <div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:8}}><span>{m.monthlySubmitted}/{m.monthlyRequired} 已提交</span><strong>{pct(completeness)}</strong></div>
-        <div className="bar"><i style={{width:`${Math.min(100,completeness*100)}%`}}/></div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:8,marginTop:14}}>
-          {data.monthlyStatus.map((r)=><div key={`${r.site}-${r.channel}`} style={{fontSize:9,color:r.submitted?"var(--green)":"var(--muted)"}}>{r.submitted?"●":"○"} {r.site}<br/>{r.channel}</div>)}
-        </div>
-      </Panel>
-      <Panel title="动态预警" desc="断货、数据缺口和在途缺ETA优先处理" action={navigationForRole(data.actor.role).includes("suggestions")?<button className="btn" onClick={()=>go("suggestions")}>打开驾驶舱</button>:undefined}>
-        {data.issues.length===0?<Empty>暂无高优先级供应风险</Empty>:data.issues.slice(0,6).map((issue,i)=><div key={i} className={`notice ${issue.level==="critical"?"error":"warn"}`} style={{marginBottom:7}}><strong>{issue.type}</strong><br/>{issue.detail}</div>)}
-      </Panel>
-    </div>
-    <Panel title="全链路实时状态" desc={`当前 ${fmt(m.activeBatchCount)} 个在途批次，${fmt(m.stalledBatchCount)} 个节点停滞，${fmt(m.pendingShelfCount)} 个待上架`} action={navigationForRole(data.actor.role).includes("batches")?<button className="btn" onClick={()=>go("batches")}>查看全部批次</button>:undefined}>
-      <div className="workflow chain-overview">
-        {[["supply_confirm","备货确认"],["factory_production","工厂生产"],["booking","订舱"],["sea_freight","海运"],["port_arrived","到港"],["customs_clearance","清关"],["last_mile_delivery","派送"],["awaiting_receipt","待到仓"],["shelf_pending","待上架"],["on_shelf","已上架"]].map(([key,label])=><div className="workflow-step" key={key}><strong>{fmt(m.batchStageCounts?.[key])}</strong><span>{label}</span></div>)}
-      </div>
-    </Panel>
-  </>;
-}
 
 function supplyKey(row:Row) { return `${row.site}|${row.channel}|${row.sku}`; }
 
