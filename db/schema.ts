@@ -1,5 +1,6 @@
 import { integer, primaryKey, real, sqliteTable, text, uniqueIndex, index } from "drizzle-orm/sqlite-core";
 export * from "./wholesale-schema";
+export * from "./business-action-schema";
 
 export const salesFxSnapshots=sqliteTable('sales_fx_snapshots',{
   id:text('id').primaryKey(),provider:text('provider').notNull(),effectiveAt:text('effective_at').notNull(),
