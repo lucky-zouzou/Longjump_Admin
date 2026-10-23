@@ -1,6 +1,7 @@
 "use client";
 import {useEffect,useMemo,useState} from 'react';
 import {SalesTrend,RankingBars} from './sales-charts';
+import SalesCnySummary from './sales-cny-summary';
 import {SITE_CURRENCIES} from '../lib/sales-data.mjs';
 type Row=Record<string,any>;
 const number=(n:unknown)=>Number(n||0).toLocaleString('zh-CN',{maximumFractionDigits:2});
@@ -20,7 +21,7 @@ export default function SalesDashboard({actor,refreshToken}:{actor:Row;refreshTo
   const [filters,setFilters]=useState({from:ago(29),to:today(),site:actor.role==='运营'?actor.site:'',channel:actor.role==='运营'?actor.channel:''});
   const [report,setReport]=useState<Row|null>(null),[loading,setLoading]=useState(true),[error,setError]=useState(''),[retry,setRetry]=useState(0),[currency,setCurrency]=useState(''),[search,setSearch]=useState(''),[showUnranked,setShowUnranked]=useState(false),[exporting,setExporting]=useState(false),[chartMode,setChartMode]=useState<'qty'|'money'>('qty');
   useEffect(()=>{const controller=new AbortController();setLoading(true);setError('');setReport(previous=>previous&&JSON.stringify(previous.filters)===JSON.stringify(filters)?previous:null);fetch(`/api/sales-dashboard?${new URLSearchParams(filters)}`,{signal:controller.signal,cache:'no-store'}).then(async r=>{const data=await r.json();if(!r.ok)throw Error(data.error||'看板加载失败');return data;}).then(setReport).catch(e=>{if(e.name!=='AbortError')setError(e.message);}).finally(()=>{if(!controller.signal.aborted)setLoading(false);});return()=>controller.abort();},[filters,refreshToken,retry]);
-  const selected=report?.currencies.find((r:Row)=>r.currency===currency)?.currency||report?.currencies.find((r:Row)=>r.currency!=='UNKNOWN')?.currency||'UNKNOWN';
+  const selected=report?.currencies.find((r:Row)=>r.currency===currency)?.currency||report?.currencies.find((r:Row)=>r.currency===SITE_CURRENCIES[filters.site as keyof typeof SITE_CURRENCIES])?.currency||report?.currencies.find((r:Row)=>r.currency!=='UNKNOWN')?.currency||'UNKNOWN';
   const financial=report?.currencies.find((r:Row)=>r.currency===selected);
   const rankings=useMemo(()=>report?.skuRanking.filter((r:Row)=>`${r.sku} ${r.name}`.toLowerCase().includes(search.toLowerCase()))||[],[report,search]);
   const roiRows=useMemo(()=>{let rank=0;return (report?.roiRanking||[]).filter((r:Row)=>r.currency===selected).map((r:Row)=>({...r,rank:r.roas==null?null:++rank})).filter((r:Row)=>showUnranked||r.roas!==null);},[report,selected,showUnranked]);
@@ -36,25 +37,29 @@ export default function SalesDashboard({actor,refreshToken}:{actor:Row;refreshTo
       add('站点渠道',report.scopes.map((r:Row)=>({站点:r.site,渠道:r.channel,销量:r.qty})));
       add('每日销量',report.daily.map((r:Row)=>({日期:r.date,销量:r.qty,日报已齐:r.salesComplete?'是':'待补齐'})));
     }else{
-    add('统计口径',[{起始日期:report.filters.from,截止日期:report.filters.to,站点:report.filters.site||'全部可见站点',渠道:report.filters.channel||'全部可见渠道',总销量:report.totalQty,说明:'ROAS=销售额÷广告成本；不同币种不相加，金额为已填报部分；缺金额或成本不排名；旧估算价格不计销售额；不代表利润率。渠道日总费用优先于同日SKU成本，不重复相加；SKU排名只用可归属的实际成本。'}]);
+    add('统计口径',[{起始日期:report.filters.from,截止日期:report.filters.to,站点:report.filters.site||'全部可见站点',渠道:report.filters.channel||'全部可见渠道',总销量:report.totalQty,说明:'ROAS=销售额÷广告成本；原币分别统计，人民币汇总按同批最新参考汇率折算；金额为已填报部分；缺金额或成本不排名；旧估算价格不计销售额；不代表利润率。渠道日总费用优先于同日SKU成本，不重复相加；SKU排名只用可归属的实际成本。'}]);
     add('全站SKU销量',report.skuRanking.map((r:Row)=>({排名:r.rank,SKU:r.sku,商品:r.name,销售总数量:r.qty,站点数:r.siteCount,销量占比:r.share})));
+    if(report.cny){const c=report.cny;add('人民币汇总',[{开始日期:report.filters.from,结束日期:report.filters.to,销量:report.totalQty,销售额CNY:c.total.revenueCny,销售额完整:c.total.revenueComplete?'是':'仅已知部分',广告费CNY:c.total.adCostCny,广告费完整:c.total.costComplete?'是':'仅已知部分',整体ROAS:c.total.roas,汇率更新时间:c.fx.effectiveAt||'不可用',汇率状态:c.fx.status,来源:c.fx.source,折算口径:c.method}]);add('人民币折算明细',c.scopes.map((r:Row)=>({站点:r.site,渠道:r.channel,原币:r.currency,销量:r.qty,原币销售额:r.revenue,原币广告费:r.adCost,人民币兑换率:r.cnyRate,销售额CNY:r.revenueCny,广告费CNY:r.adCostCny,缺销售额记录:r.revenueMissing,缺成本记录:r.costMissing})));add('参考汇率',report.currencies.map((r:Row)=>({币种:r.currency,一原币折合人民币:c.fx.rates[r.currency]?1/c.fx.rates[r.currency]:null,更新时间:c.fx.effectiveAt||'',来源:c.fx.source,状态:c.fx.status})));}
     add('币种汇总',financialRows(report.currencies));add('SKU投产比',financialRows(report.roiRanking));add('站点渠道',financialRows(report.scopes));add('每日明细',financialRows(report.daily));
     }
     XLSX.writeFile(book,`销售看板_${report.filters.from}_${report.filters.to}.xlsx`);
   }catch(e){setError(e instanceof Error?e.message:'导出失败，请重试');}finally{setExporting(false);}};
   const moneyColumns:Column[]=[{label:'销量',numeric:true,render:r=>number(r.qty)},{label:'销售额',numeric:true,render:r=><>{money(r.revenue)}{r.revenueMissing>0&&<small className="report-missing">部分未填报</small>}</>},{label:'投放成本',numeric:true,render:r=><>{money(r.adCost)}{r.costMissing>0&&<small className="report-missing">部分未填报</small>}</>},{label:'投产比 ROAS',numeric:true,render:r=>ratio(r)}];
   return <section className="sales-dashboard" aria-label="销售经营看板">
-    <Panel title="销售经营看板" desc={actor.role==='工厂'?'按站点与渠道查看销量、趋势和SKU排名':'销量跨站点汇总；金额按币种分别统计。ROAS是销售额÷广告投放成本，不代表利润率。'}>
+    <Panel title="销售经营看板" desc={actor.role==='工厂'?'按站点与渠道查看销量、趋势和SKU排名':'全站金额自动折合人民币，原币明细单独保留。ROAS是销售额÷广告费，不代表利润率。'}>
       <div className="report-filters"><label>开始日期<input type="date" value={filters.from} max={filters.to} onChange={e=>setFilters({...filters,from:e.target.value})}/></label><label>结束日期<input type="date" value={filters.to} min={filters.from} max={today()} onChange={e=>setFilters({...filters,to:e.target.value})}/></label><label>站点<select disabled={actor.role==='运营'} value={filters.site} onChange={e=>setFilters({...filters,site:e.target.value})}><option value="">全部可见站点</option>{Object.keys(SITE_CURRENCIES).map(s=><option key={s}>{s}</option>)}</select></label><label>渠道<select disabled={actor.role==='运营'} value={filters.channel} onChange={e=>setFilters({...filters,channel:e.target.value})}><option value="">全部渠道</option>{['TikTok','Shopee','线下分销'].map(s=><option key={s}>{s}</option>)}</select></label></div>
       <div className="report-actions">{[{label:'近7天',from:ago(6)},{label:'近30天',from:ago(29)},{label:'本月',from:`${today().slice(0,7)}-01`}].map(r=><button className="btn" key={r.label} onClick={()=>setFilters({...filters,from:r.from,to:today()})}>{r.label}</button>)}<button className="btn" disabled={loading} onClick={()=>setRetry(retry+1)}>刷新</button><button className="btn" disabled={!report||exporting} onClick={exportReport}>{exporting?'正在导出…':'导出完整看板'}</button></div>
     </Panel>
     {loading&&<p className="notice info" role="status">{report?"正在更新，当前展示上次成功汇总的数据…":"正在汇总销售数据…"}</p>}{error&&<p className="notice warn" role="alert">{error}</p>}
     {report&&(actor.role==='工厂'?<FactorySalesReport report={report}/>:<>
+      <SalesCnySummary report={report}/>
+      {report.quality&&(report.quality.zeroRevenue>0||report.quality.foreign.length>0||report.quality.repeatedCosts.length>0)&&<details className="panel sales-quality"><summary>数据待核对：{report.quality.zeroRevenue} 条有销量零金额 · {report.quality.foreign.length} 组非站点本币 · {report.quality.repeatedCosts.length} 组相同广告费</summary><p>这些提示不自动判定数据错误，请对照平台报表核实后修订。</p>{report.quality.zeroRevenue>0&&<p>有销量但销售额为0：请确认赠品或补齐漏填金额。</p>}{report.quality.foreign.map((r:Row)=><p key={`${r.site}-${r.channel}-${r.currency}`}>{r.site} · {r.channel}：{r.records} 条记录标记为 {r.currency}，请确认原金额确实使用该币种；更改币种标签不会换算原始数据。</p>)}{report.quality.repeatedCosts.map((r:Row)=><p key={`${r.date}-${r.site}-${r.channel}-${r.currency}-${r.adCost}`}>{r.date} · {r.site} · {r.channel}：{r.records} 行广告费相同（每行 {money(r.adCost)} {r.currency}）。全店总费用只登记一次，未知 SKU 成本留空。</p>)}</details>}
+      <div className="panel-head"><div><h3>原币明细</h3><p>以下按钮仅筛选原币，不执行换汇。人民币总额见上方经营汇总。</p></div></div>
       <p className="notice info">广告费用口径：同日、同站点、同渠道、同币种优先使用渠道总费用，不与 SKU 成本重复相加。SKU 成本未知不参与 SKU 投产比排名。</p>
-      <div className="report-currencies" aria-label="金额统计币种"><strong>金额币种</strong>{report.currencies.map((r:Row)=><button key={r.currency} className={`btn ${selected===r.currency?'primary':''}`} aria-pressed={selected===r.currency} onClick={()=>setCurrency(r.currency)}>{r.currency==='UNKNOWN'?'历史未标币种':r.currency}</button>)}{!report.currencies.length&&<span>暂无销售数据</span>}<span>切换币种只影响金额、投产比和金额明细；销量榜保持所选站点总计。</span></div>
+      <div className="report-currencies" aria-label="金额统计币种"><strong>原币筛选</strong>{report.currencies.map((r:Row)=><button key={r.currency} className={`btn ${selected===r.currency?'primary':''}`} aria-pressed={selected===r.currency} onClick={()=>setCurrency(r.currency)}>{r.currency==='UNKNOWN'?'历史未标币种':r.currency}</button>)}{!report.currencies.length&&<span>暂无销售数据</span>}<span>此处销量与金额使用同一币种范围；全站销量排名仍包含全部币种。</span></div>
       {report.currencies.some((r:Row)=>r.currency==="UNKNOWN")&&<p className="notice info">包含未标币种的历史记录：这些记录仅计入销量，不混入当前币种的销售额或投产比。可切换“历史未标币种”查看。</p>}
       <div className="report-metrics">
-        <Card label="销售总数量" value={`${number(report.totalQty)} 件`} note="当前日期、站点及渠道范围 · 全币种"/><Card label="产生销量的SKU" value={number(report.skuCount)} note="同一SKU跨站点合并后去重"/>
+        <Card label={`原币销量 · ${selected}`} value={`${number(financial?.qty)} 件`} note="仅当前原币记录，与下方金额范围一致"/>
         <Card label={`销售额 · ${selected==='UNKNOWN'?'币种未标':selected}`} value={money(financial?.revenue)} note={financial?.revenueMissing?`有 ${number(financial.revenueMissing)} 条未填报；这里只计已填报金额`:'按实际成交金额统计'}/>
         <Card label={`投放成本 · ${selected==='UNKNOWN'?'币种未标':selected}`} value={money(financial?.adCost)} note={financial?.costMissing?`有 ${number(financial.costMissing)} 条未填报；这里只计已填报成本`:financial?.channelCostDays?`已使用 ${number(financial.channelCostDays)} 个渠道日的总费用`:'明确填写0才视为无投放'}/>
         <Card label="整体投产比 ROAS" value={financial?ratio(financial):'暂无数据'} note="同币种全量金额与成本齐全后计算"/>

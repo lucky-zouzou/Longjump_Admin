@@ -5,3 +5,5 @@
 .as-daily{display:flex;gap:14px;align-items:flex-end;overflow-x:auto;padding:15px 0}.as-daily>div{display:flex;flex-direction:column;align-items:center;gap:6px;min-width:48px;font-size:12px}.as-daily>div>div{background:#4b7de6;width:24px;border-radius:5px 5px 0 0;min-height:2px}
 
 .as-bar progress{-webkit-appearance:none;appearance:none;border:0;border-radius:6px;overflow:hidden;background:#e8eef6}.as-bar progress::-webkit-progress-bar{background:#e8eef6;border-radius:6px}.as-bar progress::-webkit-progress-value{background:#4b7de6;border-radius:6px}.as-bar progress::-moz-progress-bar{background:#4b7de6;border-radius:6px}
+
+.as-stage-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:12px}.as-stage{display:grid;gap:12px;padding:16px;text-align:left;background:#f6f9ff;border:1px solid #d5dfec;border-radius:10px;color:#17263d;cursor:pointer}.as-stage.active{border-color:#2f60ed;background:#e9f0ff}.as-stage span{font-size:13px}.as-stage strong{font-size:20px}

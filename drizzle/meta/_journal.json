@@ -169,6 +169,20 @@
       "when": 1792540800000,
       "tag": "0023_five_site_zero_sales",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1792540800001,
+      "tag": "0024_sales_fx",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1792713600000,
+      "tag": "0025_quality_incidents",
+      "breakpoints": true
     }
   ]
 }

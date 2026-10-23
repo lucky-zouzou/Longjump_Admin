@@ -2,6 +2,7 @@
 import {useWholesaleLanguage} from "./wholesale-language";
 import {useEffect,useId,useRef,useState} from 'react';
 import {IMPORT_MAX_BYTES,IMPORT_SCHEMAS,readImportSheet} from '../lib/tabular-import.mjs';
+import {salesImportWarnings} from '../lib/sales-quality.mjs';
 // Import rows vary by the selected business document.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type ImportRow=Record<string,any>;
@@ -12,7 +13,9 @@ export default function TableImport({kind,busy=false,maxRows,defaults={},context
   const {t}=useWholesaleLanguage();
   const schema=IMPORT_SCHEMAS[kind],inputId=useId(),generation=useRef(0),locked=useRef(false);
   const [loading,setLoading]=useState(false),[saving,setSaving]=useState(false),[rows,setRows]=useState<ImportRow[]>([]),[errors,setErrors]=useState<Array<{row:number;message:string}>>([]),[message,setMessage]=useState(''),[meta,setMeta]=useState<Meta|null>(null),[book,setBook]=useState<import('xlsx').WorkBook|null>(null),[sheet,setSheet]=useState('');
-  const reset=()=>{generation.current++;setRows([]);setErrors([]);setMeta(null);setBook(null);setSheet('');setMessage('');setLoading(false);};
+  const [acknowledged,setAcknowledged]=useState('');
+  const warnings=kind==='sales'?salesImportWarnings(rows,defaults.currency||''):[],warningKey=JSON.stringify({rows,defaultCurrency:defaults.currency});
+  const reset=()=>{setAcknowledged('');generation.current++;setRows([]);setErrors([]);setMeta(null);setBook(null);setSheet('');setMessage('');setLoading(false);};
   useEffect(()=>{reset();return()=>{generation.current++;};},[kind,contextKey,maxRows]); // Clear stale previews when the destination changes.
   const parse=async(workbook:import('xlsx').WorkBook,name:string)=>{
     setRows([]);setErrors([]);setMessage('');
@@ -51,7 +54,7 @@ export default function TableImport({kind,busy=false,maxRows,defaults={},context
     }catch(error){setMessage(error instanceof Error?error.message:'模板下载失败');}
   };
   const apply=async()=>{
-    if(locked.current||busy||loading||!meta||!rows.length||errors.length)return;
+    if(locked.current||busy||loading||!meta||!rows.length||errors.length||warnings.length&&acknowledged!==warningKey)return;
     locked.current=true;setSaving(true);setMessage('');
     try{validate?.(rows);if(await onApply(rows,meta)){reset();setMessage(successMessage);}else setMessage('尚未确认保存，请查看页面错误提示后重试。');}
     catch(error){setMessage(error instanceof Error?error.message:'导入失败，请核对文件后重试');}
@@ -66,6 +69,7 @@ export default function TableImport({kind,busy=false,maxRows,defaults={},context
     <div className="import-controls"><label htmlFor={inputId}>{t("选择导入文件")}<input id={inputId} type="file" accept=".xlsx,.xls,.csv" disabled={busy||loading||saving} onChange={e=>{const f=e.target.files?.[0];e.target.value='';if(f)void readFile(f);}}/></label>{book&&book.SheetNames.length>1&&<label>{t("工作表")}<select value={sheet} disabled={saving||loading} onChange={e=>void changeSheet(e.target.value)}>{book.SheetNames.map(n=><option key={n}>{n}</option>)}</select></label>}{meta&&<span>{meta.fileName}</span>}</div>
     {loading&&<p role="status">{t("正在解析文件…")}</p>}{message&&<p className="notice info" role="status">{t(message)}</p>}
     {errors.length>0&&<div className="notice warn" role="alert"><strong>{t("发现 {0} 行错误，整份文件暂不导入。",[errors.length])}</strong><ul>{errors.slice(0,10).map((e,i)=><li key={i}>{t("第{0}行：{1}",[e.row,t(e.message)])}</li>)}</ul><button className="btn" type="button" onClick={exportErrors}>{t("下载全部错误")}</button></div>}
-    {rows.length>0&&<>{kind==="sales"&&rows.some(r=>r.adCost===''||r.adCost==null||(r.amount===''||r.amount==null)&&(r.unitPrice===''||r.unitPrice==null))&&<p className="notice warn">部分行缺少销售额/成交单价或投放成本。销量仍会导入，相关SKU不会进入完整投产比排名；请先核对预览中的金额列。广告费用不要在多个订单行重复填写。</p>}<p>{t("预览 {0} 行（最多显示20行） · 尚未写入系统",[rows.length])}</p><div className="table-wrap"><table><thead><tr><th>{t("行号")}</th>{schema.columns.map(c=><th key={c.key}>{t(c.label)}</th>)}</tr></thead><tbody>{rows.slice(0,20).map((r,i)=><tr key={i}><td>{r._row}</td>{schema.columns.map(c=><td key={c.key}>{String(r[c.key]??'')}</td>)}</tr>)}</tbody></table></div><div className="form-actions"><button className="btn" type="button" disabled={saving} onClick={reset}>{t("清除文件")}</button><button className="btn primary" type="button" disabled={busy||saving||loading||errors.length>0} onClick={apply}>{t(saving?'正在导入…':confirmLabel)}</button></div></>}
+    {warnings.length>0&&<div className="notice warn" role="alert"><strong>导入前请核对</strong><ul>{warnings.map(w=><li key={w.code}>{w.message}</li>)}</ul><label className="report-toggle"><input type="checkbox" checked={acknowledged===warningKey} onChange={e=>setAcknowledged(e.target.checked?warningKey:'')}/>我已核对以上金额、广告费与币种，确认按此数据导入</label></div>}
+    {rows.length>0&&<>{kind==="sales"&&rows.some(r=>r.adCost===''||r.adCost==null||(r.amount===''||r.amount==null)&&(r.unitPrice===''||r.unitPrice==null))&&<p className="notice warn">部分行缺少销售额/成交单价或投放成本。销量仍会导入，相关SKU不会进入完整投产比排名；请先核对预览中的金额列。广告费用不要在多个订单行重复填写。</p>}<p>{t("预览 {0} 行（最多显示20行） · 尚未写入系统",[rows.length])}</p><div className="table-wrap"><table><thead><tr><th>{t("行号")}</th>{schema.columns.map(c=><th key={c.key}>{t(c.label)}</th>)}</tr></thead><tbody>{rows.slice(0,20).map((r,i)=><tr key={i}><td>{r._row}</td>{schema.columns.map(c=><td key={c.key}>{String(r[c.key]??'')}</td>)}</tr>)}</tbody></table></div><div className="form-actions"><button className="btn" type="button" disabled={saving} onClick={reset}>{t("清除文件")}</button><button className="btn primary" type="button" disabled={busy||saving||loading||errors.length>0||warnings.length>0&&acknowledged!==warningKey} onClick={apply}>{t(saving?'正在导入…':confirmLabel)}</button></div></>}
   </section>;
 }

@@ -1,6 +1,11 @@
 import { integer, primaryKey, real, sqliteTable, text, uniqueIndex, index } from "drizzle-orm/sqlite-core";
 export * from "./wholesale-schema";
 
+export const salesFxSnapshots=sqliteTable('sales_fx_snapshots',{
+  id:text('id').primaryKey(),provider:text('provider').notNull(),effectiveAt:text('effective_at').notNull(),
+  fetchedAt:text('fetched_at').notNull(),nextUpdateAt:text('next_update_at').notNull(),ratesJson:text('rates_json').notNull(),
+},t=>[index('idx_sales_fx_effective').on(t.effectiveAt)]);
+
 export const users = sqliteTable("users", {
   id: text("id").primaryKey(),
   email: text("email").notNull(),
