@@ -1,20 +1,13 @@
 name: PR38 release recovery
 on:
   workflow_dispatch:
-    inputs:
-      recovery_mode:
-        description: Inspect only or clean rebuildable images, back up, and finish the approved PR38 release
-        type: choice
-        options: [inspect, recover]
-        default: inspect
-        required: true
 permissions:
   contents: read
 concurrency:
   group: production-refs/heads/main
   cancel-in-progress: false
 jobs:
-  diagnose:
+  publish:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -28,42 +21,15 @@ jobs:
           cat > ~/.ssh/known_hosts << 'EOF'
           47.238.71.113 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEjWaG0bPAUFRiDNga4FHhCCZ81mDLc0UwYiD69dmfOE
           EOF
-      - name: Read disk use and protected release images
-        run: |
-          ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 root@47.238.71.113 'bash -s' << 'REMOTE'
-          set -eu
-          df -h /
-          df -i /
-          docker system df
-          du -sh /root/loong-jump-v17/backups /root/loong-jump-v17/release-images
-          docker ps --format '{{.Names}} {{.Image}} {{.Status}}'
-          cd /root/loong-jump-v17
-          bash scripts/cleanup-images.sh
-          REMOTE
-      - name: Clean only rebuildable cache and old application images
-        if: inputs.recovery_mode == 'recover'
-        run: |
-          ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 root@47.238.71.113 'bash -s' << 'REMOTE'
-          set -eu
-          cd /root/loong-jump-v17
-          bash scripts/cleanup-images.sh --apply
-          docker builder prune --force --filter until=168h
-          df -h /
-          free_kb=$(df -Pk / | awk 'NR==2 {print $4}')
-          test "$free_kb" -ge 1048576
-          REMOTE
       - name: Verify current data backup before migration
-        if: inputs.recovery_mode == 'recover'
         run: |
           ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 root@47.238.71.113 \
             'cd /root/loong-jump-v17 && docker compose exec -T app node server/cli.mjs backup --output /backups/pre-d6388b234a8d45f8c885e36f2eada84b2a6dc94b-recovery-${{ github.run_id }}.tar'
       - name: Activate the already verified PR38 release image
-        if: inputs.recovery_mode == 'recover'
         run: |
           ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 root@47.238.71.113 \
             'cd /root/loong-jump-v17 && bash scripts/activate-release.sh d6388b234a8d45f8c885e36f2eada84b2a6dc94b ${{ github.run_id }}'
       - name: Verify published release health
-        if: inputs.recovery_mode == 'recover'
         run: |
           for i in $(seq 1 30); do
             if curl --fail --silent --show-error --max-time 15 https://admin.loongjump.com/healthz | node -e "let s='';process.stdin.on('data',c=>s+=c);process.stdin.on('end',()=>{const r=JSON.parse(s);if(r.ok!==true||r.release!=='d6388b234a8d45f8c885e36f2eada84b2a6dc94b')process.exit(1);console.log(JSON.stringify(r));})"; then exit 0; fi
