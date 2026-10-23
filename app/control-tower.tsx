@@ -67,7 +67,7 @@ type AllocationDraft = { site:string; channel:string; qty:string };
 type Act = (action:string,payload:Row,success:string,onError?:(message:string)=>void)=>Promise<Row|null>;
 
 const navItems = [
-  ["overview","总览","◫"], ["reviews","周报与月度复盘","▤"], ["promotions","零销量与优惠","↓"], ["after-sales","售后反馈","↩"], ["users","用户管理","♙"], ["wholesale","印尼线下批发","▣"], ["suggestions","补货驾驶舱","◎"], ["new-products","新品孵化","◇"], ["sales","销售数据","↗"], ["inventory","库存流水","▦"],
+  ["overview","总览","◫"], ["reviews","周报与月度复盘","▤"], ["promotions","零销量与优惠","↓"], ["after-sales","售后反馈","↩"], ["quality-incidents","品质与交付异常","⚑"], ["users","用户管理","♙"], ["wholesale","印尼线下批发","▣"], ["suggestions","补货驾驶舱","◎"], ["new-products","新品孵化","◇"], ["sales","销售数据","↗"], ["inventory","库存流水","▦"],
   ["receipt","历史到仓","↓"], ["monthly","月度计划","▤"], ["approval","审批中心","✓"], ["fulfillment","系列采购生产","▥"], ["production-tracking","生产动态","◉"], ["batches","海运批次","⇢"],
   ["master","主数据","⌘"], ["audit","审计日志","◷"], ["permissions","权限测试","⊙"],
 ];
@@ -207,7 +207,7 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
         <div><h2>{shellT("全链路可视化协同")}</h2><p>{shellT("SKU需求 → 系列采购 → 系列生产 → 海运批次 → 到仓上架")}</p></div>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
           {hasPermission(actor.role,"backup.export")&&<button className="btn" onClick={exportBackup}>{shellT("导出备份")}</button>}
-          <span className={`status-pill ${connectionError?"connection-failed":""}`} role="status">{connectionError?shellT("更新失败 · 数据可能已过时"):`${shellT(["wholesale","reviews","after-sales"].includes(selectedTab)?"导航已更新":"工作区已更新")} ${lastSync||"—"}`}</span>{connectionError&&<button className="btn danger" onClick={()=>void refresh().catch(()=>{})}>{shellT("重新连接")}</button>}
+          <span className={`status-pill ${connectionError?"connection-failed":""}`} role="status">{connectionError?shellT("更新失败 · 数据可能已过时"):`${shellT(["wholesale","reviews","after-sales","quality-incidents"].includes(selectedTab)?"导航已更新":"工作区已更新")} ${lastSync||"—"}`}</span>{connectionError&&<button className="btn danger" onClick={()=>void refresh().catch(()=>{})}>{shellT("重新连接")}</button>}
         </div>
       </header>
       <div className="content"><Suspense fallback={<div className="panel" role="status">正在打开工作区…</div>}>{data.module&&data.module!==tab?<div className="panel" role="status">正在读取当前工作区…{connectionError&&<p>{connectionError}</p>}</div>:<>
@@ -215,7 +215,7 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
         {tab==="wholesale" && <WholesaleLanguageContext.Provider value={wholesaleLocale}><Wholesale onChanged={refresh} route={route} navigate={navigate}/></WholesaleLanguageContext.Provider>}
         {tab==="reviews" && <BusinessReviews initialView={route.view} initialDate={route.entity}/>}
         {tab==="promotions" && <Promotions initialId={route.entity}/>}
-        {tab==="after-sales" && <AfterSales initialMonth={route.month}/>}
+        {["after-sales","quality-incidents"].includes(tab) && <AfterSales key={tab} kind={tab==="quality-incidents"?"quality":"after_sale"} initialMonth={route.month}/>}
         {tab==="overview" && <Overview data={data} go={setTab}/>}
         {tab==="suggestions" && <Suggestions data={data} act={act} busy={busy}/>}
         {tab==="new-products" && <NewProducts data={data} act={act} busy={busy}/>}

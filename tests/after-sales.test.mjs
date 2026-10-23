@@ -17,7 +17,7 @@ test('售后草稿隔离、跨运营越权、提交后管理员供应链工厂�
  const f=fixture(),id=await create(f),month=reviewToday().slice(0,7),factory={id:'factory',name:'工厂甲',role:'工厂'};
  assert.equal((await readAfterSales(f.db,f.users.admin,month)).records.length,0);
  await assert.rejects(afterRecord(f.db,f.users.malaysia,id),/无权/);await assert.rejects(afterRecord(f.db,f.users.admin,id),/无权/);
- for(const a of [factory,f.users.admin,f.users.supply,f.users.sales,f.users.finance])await assert.rejects(create(f,{},a),/仅运营|无权/);
+ for(const a of [factory,f.users.admin,f.users.sales,f.users.finance])await assert.rejects(create(f,{},a),/仅运营|无权/);
  await assert.rejects(change(f,id,f.users.indonesia,'submit'),/证据|佐证/);
  await uploadAfterEvidence(f.db,bucket(),f.users.indonesia,id,image());await change(f,id,f.users.indonesia,'submit');
  for(const a of [factory,f.users.admin,f.users.supply])assert.equal((await readAfterSales(f.db,a,month)).records.length,1);

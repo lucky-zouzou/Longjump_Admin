@@ -6,7 +6,7 @@ import {readHistory,historyCsv,HistoryError} from "../../../lib/history-query.mj
 import {previewInbound,submitInbound,readInboundDocuments,InboundError} from "../../../lib/inbound.mjs";
 import {createCatalogSku,SkuCatalogError} from "../../../lib/sku-catalog.mjs";
 import {productionTracking,productionDocument,productionFingerprint} from "../../../lib/production-workflow.mjs";
-import {saveSalesAdSpend} from "../../../lib/sales-ad-spend.mjs";
+import {saveSalesAdSpend,repairRepeatedAdSpend,SalesAdSpendError} from "../../../lib/sales-ad-spend.mjs";
 import {publicSystemSnapshot} from "../../../lib/system-response.mjs";
 import {normalizeSales,SITE_CURRENCIES} from "../../../lib/sales-data.mjs";
 import {validateImportRows} from "../../../lib/tabular-import.mjs";
@@ -140,7 +140,7 @@ export async function GET(request:Request) {
       return Response.json({dailySeries:row.dailySeries,generatedAt:nowIso()});
     }
     // Independent workspaces fetch their own ledgers; avoid constructing the global forecast.
-    if(["wholesale","reviews","after-sales","promotions","audit","users","permissions","production-tracking"].includes(module)){
+    if(["wholesale","reviews","after-sales","quality-incidents","promotions","audit","users","permissions","production-tracking"].includes(module)){
       const empty=Object.fromEntries([...new Set(Object.values(MODULE_FIELDS).flat())].filter(key=>!["currentMonth","metrics"].includes(key)).map(key=>[key,[]]));
       const users=["users","permissions"].includes(module)?await all("SELECT id,email,name,role,site,channel,responsibility_unit,active,created_at,updated_at FROM users ORDER BY created_at"):[];
       const tracking=module==="production-tracking"?productionTracking(...await Promise.all([all("SELECT * FROM series_production_orders"),all("SELECT * FROM series_production_order_items"),all("SELECT * FROM series_purchase_orders"),all("SELECT entity_id,created_at,actor_name FROM audit_logs WHERE entity_type='series_production_order' AND action='生成工厂订单导出' ORDER BY created_at")]) as [AnyRow[],AnyRow[],AnyRow[],AnyRow[]]):[];
@@ -527,6 +527,7 @@ export async function POST(request:Request) {
     if (action === "receiveInbound") return await receiveInbound(actor, payload);
     if (action === "previewInbound") return Response.json(await previewInbound(database(),actor,payload));
     if (["salesAdSpendSave","salesAdSpendDelete"].includes(action)) return Response.json(await saveSalesAdSpend(database(),actor,payload));
+    if (action==='repairRepeatedAdSpend') return Response.json(await repairRepeatedAdSpend(database(),actor,payload));
     if (["supplyPolicySave","demandCorrectionSave"].includes(action)) return Response.json(await saveForecastData(database(),actor,payload));
     if (PLAN_ACTIONS.has(action)) return Response.json(await managePlan(database(),actor,payload,{buildSeriesOrders}));
     if (action === "monthlySubmit") return await monthlySubmit(actor, payload);
@@ -1722,7 +1723,7 @@ async function saveWarehouse(actor:Actor,payload:AnyRow){
 }
 
 function errorResponse(error:unknown) {
-  if(error instanceof FactoryDocumentError)return Response.json({error:error.message},{status:error.status});
+  if(error instanceof FactoryDocumentError||error instanceof SalesAdSpendError)return Response.json({error:error.message},{status:error.status});
   if(/inventory_baseline_date/.test(String(error))) return Response.json({error:"已启用2026-09-30期初库存，请选择2026-10-01或之后的销售／费用日期，历史销售不可再次扣库"},{status:409});
   if(/inventory_movements.balance_after|guard_|CHECK constraint|maintenance|closed finance/.test(String(error))) return Response.json({error:"库存或凭证已被更新，本次未覆盖；请刷新后重新核对"},{status:409});
   if(error instanceof HistoryError||error instanceof SkuCatalogError)return Response.json({error:error.message},{status:error.status});
