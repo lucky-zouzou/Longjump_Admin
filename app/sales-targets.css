@@ -4,3 +4,5 @@
 @media(prefers-reduced-motion:reduce){.sales-targets *{scroll-behavior:auto!important;transition:none!important}}
 
 .st-kpi>.st-bar+small{min-height:0;margin-top:8px}.st-data-note{font-size:11px;line-height:1.7;color:#7b6c50;background:#fff8ec;border:1px solid #f1e5cd;border-radius:8px;padding:10px 14px;margin:14px 0 0}.st-group-metrics b+small{margin-top:7px}
+
+.st-kpi>strong{font-size:min(31px,calc(280px / var(--st-digits,10)));white-space:nowrap;overflow-wrap:normal}@media(max-width:720px){.st-kpi>strong{font-size:min(24px,calc(215px / var(--st-digits,10)))}}
