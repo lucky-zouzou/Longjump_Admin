@@ -63,6 +63,20 @@ test('独立服务器：公司登录、禁止伪造身份、岗位隔离、出�
  assert.equal(employeeView.body.actor.site,'马来西亚');assert.equal(employeeView.body.actor.channel,'Shopee');
  assert.ok(employeeView.body.inventory.every(row=>row.site==='马来西亚'&&row.channel==='Shopee'));
  assert.equal((await request('newops','/api/users',{...employee,email:'forbidden@example.test'})).status,403);
+ { // Monthly targets use real authenticated routes, scoped reads and admin-only writes.
+ const month=new Date(Date.now()+8*3600000).toISOString().slice(0,7),path='/api/sales-targets?month='+month;
+ assert.equal((await fetch(origin+path)).status,401);
+ for(const who of ['sales','supply'])assert.equal((await request(who,path)).status,403);
+ const p={month,site:'马来西亚',channel:'Shopee',ownerId:accountResult.body.userId,revenueCny:50000,quantity:2000,budgetCny:5000,note:'HTTP integration',reason:'按月确认经营目标',version:0};
+ for(const who of ['finance','newops'])assert.equal((await request(who,path,p)).status,403);
+ assert.equal((await fetch(origin+path,{method:'POST',headers:{origin:'https://attacker.test',cookie:cookies.admin,'content-type':'application/json'},body:JSON.stringify(p)})).status,403);
+ assert.equal((await fetch(origin+path,{method:'POST',headers:{origin,cookie:cookies.admin,'content-type':'application/json'},body:'null'})).status,400);
+ const saved=await request('admin',path,p);assert.equal(saved.status,200,JSON.stringify(saved.body));
+ assert.equal((await request('admin',path,p)).status,409);
+ const own=await request('newops',path);assert.equal(own.status,200,JSON.stringify(own.body));assert.equal(own.body.rows.length,1);assert.equal(own.body.rows[0].target.owner_id,accountResult.body.userId);assert.equal(own.body.canManage,false);
+ assert.equal((await request('finance',path)).body.rows.length,10);
+ assert.equal((await request('newops','/api/sales-targets?history='+saved.body.id)).body.length,1);
+ }
  { // After-sales routes require authentication, protect draft evidence and enforce ownership.
  const afterMonth=new Date(Date.now()+8*3600000).toISOString().slice(0,7);
  assert.equal((await fetch(origin+'/api/after-sales?month='+afterMonth)).status,401);

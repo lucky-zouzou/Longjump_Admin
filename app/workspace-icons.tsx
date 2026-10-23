@@ -3,6 +3,7 @@ import type { CSSProperties } from "react";
 const paths:Record<string,string>={
   overview:"M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z",
   "business-actions":"M9 5H5v16h14V5h-4 M9 3h6v4H9z M8 13l3 3 5-6",
+  "sales-targets":"M12 3a9 9 0 1 0 9 9 M12 7a5 5 0 1 0 5 5 M12 12l8-8 M16 4h4v4",
   reviews:"M4 3h16v18H4z M8 8h8 M8 12h8 M8 16h5",
   promotions:"M20 4H10L3 11l10 10 7-7z M14 8h.01 M9 14l6-3",
   "after-sales":"M9 4 4 9l5 5 M4 9h10a6 6 0 0 1 0 12h-3",

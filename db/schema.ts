@@ -616,6 +616,7 @@ export const auditLogs = sqliteTable("audit_logs", {
 ]);
 
 export * from "./reliability-schema";
+export * from "./sales-target-schema";
 
 export const salesAdSpend = sqliteTable("sales_ad_spend", {
   id: text("id").primaryKey(), site: text("site").notNull(), channel: text("channel").notNull(),
