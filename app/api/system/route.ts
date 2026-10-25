@@ -421,7 +421,7 @@ export async function GET(request:Request) {
       offlineSales7Qty:offlineSales.periodQty,
       seaTransitQty:suggestions.reduce((sum,row)=>sum+Number(row.seaInTransit),0),
       productionInProgressQty:suggestions.reduce((sum,row)=>sum+Number(row.productionInProgress),0),
-      forecastPendingCount:suggestions.filter(r=>r.forecastReady===false).length,
+      forecastPendingCount:suggestions.filter(r=>r.recommendationReady===false).length,
       suggestedProductionQty:suggestions.reduce((sum,row)=>sum+Number(row.suggestedProduction),0),
       criticalAlertCount:suggestions.filter((row)=>row.alertLevel==="critical").length,
       actionAlertCount:suggestions.filter((row)=>["critical","warning","eta"].includes(String(row.alertLevel))).length+shipmentBatches.filter((row)=>row.exceptions.length).length+transportBatches.reduce((sum,row)=>sum+row.exceptions.length,0),

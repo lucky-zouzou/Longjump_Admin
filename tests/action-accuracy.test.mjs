@@ -154,7 +154,7 @@ test('真实预测导出最迟行动日；到货后可避免损失只计缺货�
 test('周期外到货不能抵消本期缺口；短补货周期仍计算完整未来七天',()=>{
  const input={dailySales:Array(56).fill(2),dailyCoverage:Array(56).fill(true),currentQty:1,seaInTransit:1000,arrivalLots:[{days:60,qty:1000}]};
  const plan=forecastPlan(input,{production_days:1,transport_days:1,review_days:1},[],w.today);
- assert.equal(plan.suggestedProduction,5);assert.equal(plan.lateSeaQty,1000);assert.equal(plan.projection.curve.length,8);
+ assert.equal(plan.suggestedProduction,5);assert.equal(plan.suggestedReplenishment,3);assert.equal(plan.lateSeaQty,1000);assert.equal(plan.projection.curve.length,8);
 });
 
 test('完整零销量日的费用行不要求虚构销售额，仍按每日成本计算亏损',async()=>{
