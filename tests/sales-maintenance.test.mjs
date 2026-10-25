@@ -11,9 +11,9 @@ const snapshot=async actor=>{svc.setActor(actor);return (await svc.GET(new Reque
 
 test('昨日待办按完整日报判断；今日导入不能代替昨日，修改后恢复核对提醒',async()=>{
  const f=systemFixture();try{
-  await svc.salesImport(f.users.indonesia,payload({businessDate:day,reportKind:'complete'}));
+  await svc.salesImport(f.users.indonesia,payload({businessDate:day,reportKind:'complete',fullDayConfirmed:true}));
   let s=await snapshot(f.users.indonesia);assert(s.myTasks.some(t=>t.title==='导入昨日销售'));assert.equal(s.salesScopeStatus[0].updatedExpected,false);
-  const p=payload({reportKind:'complete'}),{importId}=await (await svc.salesImport(f.users.indonesia,p)).json();
+  const p=payload({reportKind:'complete',fullDayConfirmed:true}),{importId}=await (await svc.salesImport(f.users.indonesia,p)).json();
   s=await snapshot(f.users.indonesia);assert.equal(s.salesScopeStatus[0].updatedExpected,true);assert(!s.myTasks.some(t=>t.title==='导入昨日销售'));
   await svc.correctSalesImport(f.users.indonesia,{...p,importId,reason:'核对平台实际数量',rows:[{sku:'BAG-A',qty:2,amount:200}]});
   s=await snapshot(f.users.indonesia);assert.equal(s.salesScopeStatus[0].updatedExpected,false);assert.equal(s.salesScopeStatus[0].salesExpected,2);assert(s.myTasks.some(t=>t.title==='导入昨日销售'));
@@ -67,16 +67,17 @@ test('渠道总费用用于整体ROAS，SKU未知不虚构排名；总费用覆�
  }finally{f.sqlite.close();}
 });
 test('费用有投放无销售仍计入整体；币种、日期、渠道独立；零成本与未知区分',async()=>{
+ const day=yesterday,prior=new Date(Date.parse(day)-86400000).toISOString().slice(0,10);
  const f=systemFixture();try{
-  await svc.salesImport(f.users.indonesia,payload());
-  await saveSalesAdSpend(f.db,f.users.indonesia,expense({amount:0}));
+  await svc.salesImport(f.users.indonesia,payload({businessDate:prior}));
+  await saveSalesAdSpend(f.db,f.users.indonesia,expense({businessDate:prior,amount:0}));
   await saveSalesAdSpend(f.db,f.users.indonesia,expense({businessDate:day,amount:20}));
-  await saveSalesAdSpend(f.db,f.users.indonesia,expense({currency:'USD',amount:5}));
-  await saveSalesAdSpend(f.db,f.users.admin,expense({channel:'Shopee',amount:10}));
-  const incomplete=await readSalesDashboard(f.db,f.users.indonesia,{from:yesterday,to:day});assert.equal(incomplete.currencies.find(c=>c.currency==='IDR').roas,null);assert.equal(incomplete.daily.find(c=>c.date===day).revenue,null);
+  await saveSalesAdSpend(f.db,f.users.indonesia,expense({businessDate:prior,currency:'USD',amount:5}));
+  await saveSalesAdSpend(f.db,f.users.admin,expense({businessDate:prior,channel:'Shopee',amount:10}));
+  const incomplete=await readSalesDashboard(f.db,f.users.indonesia,{from:prior,to:day});assert.equal(incomplete.currencies.find(c=>c.currency==='IDR').roas,null);assert.equal(incomplete.daily.find(c=>c.date===day).revenue,null);
   await svc.confirmSalesDay(f.users.indonesia,{site:'印尼',channel:'TikTok',businessDate:day,confirmed:true,note:'核对平台确认为零销售'});
-  const r=await readSalesDashboard(f.db,f.users.indonesia,{from:yesterday,to:day});assert.equal(r.totalQty,3);assert.equal(r.currencies.find(c=>c.currency==='IDR').roas,15);assert.equal(r.currencies.find(c=>c.currency==='USD').adCost,5);assert.equal(r.daily.find(c=>c.currency==='IDR'&&c.date===yesterday).roas,null);
-  const all=await readSalesDashboard(f.db,f.users.admin,{from:yesterday,to:day});assert.equal(all.currencies.find(c=>c.currency==='IDR').adCost,30);
+  const r=await readSalesDashboard(f.db,f.users.indonesia,{from:prior,to:day});assert.equal(r.totalQty,3);assert.equal(r.currencies.find(c=>c.currency==='IDR').roas,15);assert.equal(r.currencies.find(c=>c.currency==='USD').adCost,5);assert.equal(r.daily.find(c=>c.currency==='IDR'&&c.date===prior).roas,null);
+  const all=await readSalesDashboard(f.db,f.users.admin,{from:prior,to:day});assert.equal(all.currencies.find(c=>c.currency==='IDR').adCost,30);
  }finally{f.sqlite.close();}
 });
 test('费用版本冲突、权限、格式校验、备份锁阻止写入，审计保留每个版本',async()=>{

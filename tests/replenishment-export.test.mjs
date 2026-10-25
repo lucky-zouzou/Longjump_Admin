@@ -80,7 +80,7 @@ test('系统真实读取路径的管理员与供应链快照可直接对账导�
       assert.ok(Date.parse(data.generatedAt));
       const sheets=replenishmentExportSheets(data);
       assert.equal(summary(sheets,'可售库存'),data.metrics.inventoryQty);
-      assert.equal(summary(sheets,'建议启动生产'),data.metrics.suggestedProductionQty);
+      assert.equal(summary(sheets,'建议启动生产'),'待核实');assert.ok(data.metrics.forecastPendingCount>0);assert.ok(sheet(sheets,'站点SKU明细').rows.some(r=>r.includes('待核实')));
       assert.equal(f.sqlite.prepare('SELECT total_changes() n').get().n,changes);
     }
   }finally{f.sqlite.close();}

@@ -66,7 +66,7 @@ test('导入提醒区分相同费用、原币不符与零金额；零费用和�
 });
 async function importRepeated(f){
  const rows=Array.from({length:48},(_,i)=>({sku:'BAG-'+i,qty:1,amount:100,adCost:22695,currency:'IDR'}));
- const {importId}=await (await svc.salesImport(f.users.indonesia,{site:'印尼',channel:'TikTok',businessDate:day,sourceBatchRef:crypto.randomUUID(),importKey:crypto.randomUUID(),reportKind:'complete',rows})).json();return importId;
+ const {importId}=await (await svc.salesImport(f.users.indonesia,{site:'印尼',channel:'TikTok',businessDate:day,sourceBatchRef:crypto.randomUUID(),importKey:crypto.randomUUID(),reportKind:'complete',fullDayConfirmed:true,rows})).json();return importId;
 }
 const repairPayload=id=>({importId:id,expectedRows:48,expectedCost:22695,totalAmount:22695,confirmed:true,note:'运营确认该费用为店铺当天总费用，误填在每行'});
 const inventory=f=>JSON.stringify(f.sqlite.prepare('SELECT * FROM inventory_balances ORDER BY site,channel,sku').all());

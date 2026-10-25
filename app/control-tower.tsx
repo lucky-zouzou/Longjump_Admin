@@ -292,25 +292,25 @@ function Empty({children}:{children:React.ReactNode}) { return <div className="e
 function supplyKey(row:Row) { return `${row.site}|${row.channel}|${row.sku}`; }
 
 function SalesTrendChart({row}:{row:Row}) {
-  const series:Array<{date:string;qty:number}> = row?.dailySeries||[];
+  const series:Array<{date:string;qty:number|null;observedQty?:number}> = row?.dailySeries||[];
   if(!series.length) return <Empty>暂无连续销售数据</Empty>;
   const width=780,height=232,padX=38,padTop=18,padBottom=34,innerW=width-padX*2,innerH=height-padTop-padBottom;
   const rolling=series.map((_,index)=>{
     const values=series.slice(Math.max(0,index-6),index+1);
-    return values.reduce((sum,item)=>sum+Number(item.qty||0),0)/values.length;
+    return values.length===7&&values.every(item=>item.qty!=null)?values.reduce((sum,item)=>sum+Number(item.qty),0)/7:null;
   });
-  const maxValue=Math.max(1,...series.map(item=>Number(item.qty||0)),...rolling);
+  const maxValue=Math.max(1,...series.map(item=>Number(item.qty||0)),...rolling.map(v=>v??0));
   const slot=innerW/series.length,barWidth=Math.max(4,slot*.56);
   const y=(value:number)=>padTop+innerH-(value/maxValue)*innerH;
-  const path=rolling.map((value,index)=>`${index?"L":"M"} ${padX+slot*(index+.5)} ${y(value)}`).join(" ");
+  const path=rolling.map((value,index)=>value==null?"":`${index&&rolling[index-1]!=null?"L":"M"} ${padX+slot*(index+.5)} ${y(value)}`).join(" ");
   return <div className="trend-chart">
-    <div className="chart-legend"><span><i className="legend-sales"/>每日销量</span><span><i className="legend-average"/>7日滚动日均</span><strong>预测日均 {Number(row.forecastDaily||0).toFixed(1)}</strong></div>
-    <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${row.site}${row.channel}${row.sku}近28天销量趋势`}>
-      <title>{row.site} {row.channel} {row.sku} 近28天销量趋势</title>
+    <div className="chart-legend"><span><i className="legend-sales"/>完整日销量（空缺非零）</span><span><i className="legend-average"/>完整7日滚动日均</span><strong>预测日均 {row.forecastDaily==null?"待核实":Number(row.forecastDaily).toFixed(1)}</strong></div>
+    <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${row.site}${row.channel}${row.sku}近56天销量趋势`}>
+      <title>{row.site} {row.channel} {row.sku} 近56天销量趋势</title>
       {[0,.5,1].map(ratio=><g key={ratio}><line x1={padX} x2={width-padX} y1={padTop+innerH*ratio} y2={padTop+innerH*ratio} className="chart-grid"/><text x={padX-7} y={padTop+innerH*ratio+4} textAnchor="end" className="chart-label">{Math.round(maxValue*(1-ratio))}</text></g>)}
-      {series.map((item,index)=><rect key={item.date} x={padX+slot*index+(slot-barWidth)/2} y={y(Number(item.qty||0))} width={barWidth} height={Math.max(0,padTop+innerH-y(Number(item.qty||0)))} rx="2" className="chart-bar"/>)}
+      {series.map((item,index)=>item.qty==null?null:<rect key={item.date} x={padX+slot*index+(slot-barWidth)/2} y={y(Number(item.qty||0))} width={barWidth} height={Math.max(0,padTop+innerH-y(Number(item.qty||0)))} rx="2" className="chart-bar"/>)}
       <path d={path} className="chart-line"/>
-      {series.map((item,index)=>[0,6,13,20,27].includes(index)?<text key={item.date} x={padX+slot*(index+.5)} y={height-9} textAnchor="middle" className="chart-label">{item.date.slice(5)}</text>:null)}
+      {series.map((item,index)=>[0,13,27,41,55].includes(index)?<text key={item.date} x={padX+slot*(index+.5)} y={height-9} textAnchor="middle" className="chart-label">{item.date.slice(5)}</text>:null)}
     </svg>
   </div>;
 }
@@ -323,13 +323,13 @@ function SupplyCoverage({rows}:{rows:Row[]}) {
     return <div className="coverage-row" key={supplyKey(row)}>
       <div className="coverage-name"><strong>{row.sku}</strong><span>{row.site} · {row.channel}</span></div>
       <div className="coverage-visual">
-        <div className="coverage-track" aria-label={`${row.sku}目标${fmt(row.targetQty)}件，库存${fmt(row.qty)}件，海运${fmt(sea)}件，生产中${fmt(production)}件`}>
+        <div className="coverage-track" aria-label={`${row.sku}目标${row.targetQty==null?"待核实":fmt(row.targetQty)}件，库存${fmt(row.qty)}件，海运${fmt(sea)}件，生产中${fmt(production)}件`}>
           <i className="coverage-stock" style={{width:`${stock/scale*100}%`}}/><i className="coverage-sea" style={{width:`${sea/scale*100}%`}}/><i className="coverage-production" style={{width:`${production/scale*100}%`}}/>
-          <b className="coverage-target" style={{left:`${Math.min(99,Number(row.targetQty||0)/scale*100)}%`}} title={`目标库存位 ${fmt(row.targetQty)}`}/>
+          {row.targetQty!=null&&<b className="coverage-target" style={{left:`${Math.min(99,Number(row.targetQty||0)/scale*100)}%`}} title={`目标库存位 ${fmt(row.targetQty)}`}/>}
         </div>
-        <div className="coverage-meta"><span>库存 {fmt(row.qty)}</span><span>海运 {fmt(sea)}</span><span>生产中 {fmt(production)}</span><span>目标 {fmt(row.targetQty)}</span></div>
+        <div className="coverage-meta"><span>库存 {fmt(row.qty)}</span><span>海运 {fmt(sea)}</span><span>生产中 {fmt(production)}</span><span>目标 {row.targetQty==null?"待核实":fmt(row.targetQty)}</span></div>
       </div>
-      <div className="coverage-action"><Pill tone={ALERT_TONE[row.alertLevel]||"blue"}>{row.alertLabel}</Pill><strong>生产 {fmt(row.suggestedProduction)}</strong></div>
+      <div className="coverage-action"><Pill tone={ALERT_TONE[row.alertLevel]||"blue"}>{row.alertLabel}</Pill><strong>生产 {row.suggestedProduction==null?"待核实":fmt(row.suggestedProduction)}</strong></div>
     </div>;
   })}</div>;
 }
@@ -360,7 +360,7 @@ function Suggestions({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
       <div className="metric"><div className="label">当前库存</div><div className="value">{fmt(m.inventoryQty)}</div><div className="foot">实际可售库存</div></div>
       <div className="metric"><div className="label">海运在途</div><div className="value">{fmt(m.seaTransitQty)}</div><div className="foot">须维护预计到仓日期</div></div>
       <div className="metric"><div className="label">生产中</div><div className="value">{fmt(m.productionInProgressQty)}</div><div className="foot">尚未进入海运的批次</div></div>
-      <div className="metric"><div className="label">建议启动生产</div><div className="value" style={{color:m.suggestedProductionQty?"var(--amber)":undefined}}>{fmt(m.suggestedProductionQty)}</div><div className="foot">动态缺口合计</div></div>
+      <div className="metric"><div className="label">建议启动生产</div><div className="value" style={{color:m.suggestedProductionQty?"var(--amber)":undefined}}>{fmt(m.suggestedProductionQty)}</div><div className="foot">已核实缺口合计；{m.forecastPendingCount||0} 项待补数据</div></div>
     </div>
     {actor.role==="运营" && <Panel title="提交本月备货需求" desc="系统建议可调整；调整原因与最终提交量一并存档">
       <MonthlyDemandEditor key={`${actor.id}|${data.currentMonth}|${actor.site}|${actor.channel}`} actor={actor} month={data.currentMonth} submissions={data.submissions} suggestions={data.suggestions} skuSettings={data.skuSettings} act={act} busy={busy}/>
@@ -374,7 +374,7 @@ function Suggestions({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
     </Panel>
     <Panel title="动态建议清单" desc="海运补货量解决运输周期缺口；启动生产量覆盖生产＋海运全周期">
       <div className="table-wrap"><table className="supply-table"><thead><tr><th>状态</th><th>站点/渠道</th><th>SKU</th><th className="num">7日日均</th><th className="num">趋势</th><th className="num">库存/可售天数</th><th className="num">海运/ETA</th><th className="num">生产中</th><th className="num">建议海运补货</th><th className="num">建议启动生产</th></tr></thead>
-      <tbody>{data.suggestions.length===0?<tr><td colSpan={10}><Empty>请先录入库存和销售数据，系统将自动形成动态建议</Empty></td></tr>:data.suggestions.map((r)=><tr key={supplyKey(r)}><td><Pill tone={ALERT_TONE[r.alertLevel]||"blue"}>{r.alertLabel}</Pill><div className="cell-note">{r.alertReason}</div></td><td>{r.site}<br/><span className="cell-note">{r.channel}</span></td><td><strong>{r.sku}</strong><br/><span className="cell-note">{r.name||"—"}</span></td><td className="num">{Number(r.avg7).toFixed(1)}</td><td className="num" style={{color:r.trendRate>=.2?"var(--blue)":r.trendRate<0?"var(--green)":undefined}}>{r.previous7>0?`${r.trendRate>=0?"+":""}${pct(r.trendRate)}`:"—"}</td><td className="num" style={{color:r.qty<0?"var(--red)":undefined}}>{fmt(r.qty)}<div className="cell-note">{days(r.stockCoverDays)}</div></td><td className="num">{fmt(r.seaInTransit)}<div className="cell-note">{r.nextSeaEta||"未填写ETA"}</div></td><td className="num">{fmt(r.productionInProgress)}</td><td className="num">{fmt(r.suggestedReplenishment)}</td><td className="num"><strong>{fmt(r.suggestedProduction)}</strong><div className="cell-note">目标 {fmt(r.targetQty)}</div></td></tr>)}</tbody></table></div>
+      <tbody>{data.suggestions.length===0?<tr><td colSpan={10}><Empty>请先录入库存和销售数据，系统将自动形成动态建议</Empty></td></tr>:data.suggestions.map((r)=><tr key={supplyKey(r)}><td><Pill tone={ALERT_TONE[r.alertLevel]||"blue"}>{r.alertLabel}</Pill><div className="cell-note">{r.alertReason}</div></td><td>{r.site}<br/><span className="cell-note">{r.channel}</span></td><td><strong>{r.sku}</strong><br/><span className="cell-note">{r.name||"—"}</span></td><td className="num">{Number(r.avg7).toFixed(1)}</td><td className="num" style={{color:r.trendRate>=.2?"var(--blue)":r.trendRate<0?"var(--green)":undefined}}>{r.previous7>0?`${r.trendRate>=0?"+":""}${pct(r.trendRate)}`:"—"}</td><td className="num" style={{color:r.qty<0?"var(--red)":undefined}}>{fmt(r.qty)}<div className="cell-note">{days(r.stockCoverDays)}</div></td><td className="num">{fmt(r.seaInTransit)}<div className="cell-note">{r.nextSeaEta||"未填写ETA"}</div></td><td className="num">{fmt(r.productionInProgress)}</td><td className="num">{r.suggestedReplenishment==null?"待核实":fmt(r.suggestedReplenishment)}</td><td className="num"><strong>{r.suggestedProduction==null?"待核实":fmt(r.suggestedProduction)}</strong><div className="cell-note">目标 {r.targetQty==null?"待核实":fmt(r.targetQty)}</div></td></tr>)}</tbody></table></div>
     </Panel>
     {hasPermission(actor.role,"sku.manage")&&<Panel collapsible title="SKU系列与供应参数" desc="产品系列是供应链合并下单、工厂合并生产的必要依据">
       <div className="sku-catalog-toolbar"><div><strong>商品建档与供应资料</strong><p>首次入系统先新增 SKU，已有商品选择后维护参数。</p></div><button type="button" className="btn primary" disabled={busy||creatingSku} onClick={()=>{setCreatingSku(true);setSkuNotice('');}}>＋ 新增 SKU</button></div>
@@ -586,8 +586,9 @@ function Field({label,children,span}:{label:string;children:React.ReactNode;span
 function SalesImport({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
   const actor=data.actor;
   const [form,setForm]=useState({businessDate:new Date(Date.parse(localDate())-86400000).toISOString().slice(0,10),site:actor.site||SITES[0],channel:actor.channel||"TikTok",sourceBatchRef:"",reportKind:"complete"});
+  const [fullDayConfirmed,setFullDayConfirmed]=useState(false);
   const [dayConfirmed,setDayConfirmed]=useState(false),[dayNote,setDayNote]=useState("");
-  useEffect(()=>{setDayConfirmed(false);setDayNote("");},[form.businessDate,form.site,form.channel]);
+  useEffect(()=>{setDayConfirmed(false);setDayNote("");setFullDayConfirmed(false);},[form.businessDate,form.site,form.channel,form.reportKind]);
   const [manual,setManual]=useState({sku:"",name:"",qty:"",unitPrice:"",amount:"",adCost:"",currency:SITE_CURRENCIES[actor.site as keyof typeof SITE_CURRENCIES]||"MYR"});
   const addManual=async()=>{
     const result=await act("salesImport",{...form,reportKind:"partial",rows:[{...manual,qty:Number(manual.qty)}],fileName:"手工录入",importKey:`manual|${form.businessDate}|${form.site}|${form.channel}|${crypto.randomUUID()}`},"销售已录入并统一扣减库存");
@@ -605,17 +606,18 @@ function SalesImport({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
       <div className="sales-scope-grid">{data.salesScopeStatus.map(row=><div className={classNames("sales-scope-card",row.updatedExpected?"updated":"pending")} key={`${row.site}-${row.channel}`}><div><strong>{row.site}</strong><span>{row.channel}</span></div><Pill tone={row.updatedExpected?"green":"red"}>{row.updatedExpected?"日报已完整":row.importedExpected?"已导入 · 待核对":"昨日待导入"}</Pill><b>{row.expectedDate} · {fmt(row.salesExpected)}件</b><small>7天 {fmt(row.sales7Qty)}件｜最近 {row.lastSaleDate||"无记录"}</small></div>)}</div>
     </Panel>
     {canImport&&<>
-    <Panel title="导入 Excel / CSV" desc="同一文件或平台报表编号不能重复导入；错误行需全部修正后再提交">
+    <Panel title="导入 Excel / CSV" desc="同日同站点渠道的 SKU 销量只记一次；半天转全天请修订原批次，不能换文件追加">
       <div className="form-grid">
-        <Field label="文件覆盖范围"><select value={form.reportKind} onChange={e=>setForm({...form,reportKind:e.target.value})}><option value="complete">完整销售日报（默认，该日首次导入）</option><option value="partial">部分 / 增量销售</option><option value="cost">仅广告费用补录</option></select></Field>
+        <Field label="文件覆盖范围"><select value={form.reportKind} onChange={e=>setForm({...form,reportKind:e.target.value})}><option value="complete">完整销售日报（默认，该日首次导入）</option><option value="partial">部分日报（补齐用修订）</option><option value="cost">仅广告费用补录</option></select></Field>
         <Field label="销售日期"><input type="date" value={form.businessDate} onChange={e=>setForm({...form,businessDate:e.target.value})}/></Field>
         <Field label="站点"><select disabled={actor.role==="运营"} value={form.site} onChange={e=>setForm({...form,site:e.target.value})}>{SITES.map(s=><option key={s}>{s}</option>)}</select></Field>
         <Field label="渠道"><select disabled={actor.role==="运营"} value={form.channel} onChange={e=>setForm({...form,channel:e.target.value})}>{REQUIRED_CHANNELS.map(s=><option key={s}>{s}</option>)}</select></Field>
         <Field label="平台报表/订单批次号"><input value={form.sourceBatchRef} onChange={e=>setForm({...form,sourceBatchRef:e.target.value})} placeholder="必填，用于识别重复数据"/></Field>
       </div>
+      {form.reportKind==="complete"&&<label className="report-toggle"><input type="checkbox" checked={fullDayConfirmed} onChange={e=>setFullDayConfirmed(e.target.checked)}/>已核对当地全天报表；未勾选或当天尚未结束时，只保存为部分日报，不参与正式预测</label>}
       <TableImport kind="sales" busy={busy} defaults={{currency:SITE_CURRENCIES[form.site as keyof typeof SITE_CURRENCIES]}} contextKey={JSON.stringify(form)} confirmLabel="确认导入销售并扣库" description="每行填写SKU、销量、成交单价或销售额、投放成本、币种（默认站点本币）。销售额优先于单价×销量；金额使用英文小数点、最多两位小数。未提供金额或成本请留空，明确无投放填0；有投放未出单可填销量0。无法取得SKU广告成本时留空，在下方“渠道广告总费用”登记当天总费用。SKU成本只填写可准确归属的费用，不要把整店成本复制到每行。" onApply={async(rows,meta)=>{
         if(form.sourceBatchRef.trim().length<3)throw Error("请先填写至少3个字符的平台报表/订单批次号");
-        return Boolean(await act("salesImport",{...form,rows,...meta,importKey:`file|${form.businessDate}|${form.site}|${form.channel}|${meta.fileHash}`},"销售已导入，库存流水同步生成"));
+        return Boolean(await act("salesImport",{...form,fullDayConfirmed,rows,...meta,importKey:`file|${form.businessDate}|${form.site}|${form.channel}|${meta.fileHash}`},"销售已导入，库存流水同步生成"));
       }}/>
     </Panel>
     <Panel title="确认日报完整 / 零销售" desc="分批导入完成后，在这里确认该日所有销售已核对。后续新增或冲销销量会自动恢复待核对状态；费用补录不影响确认。">

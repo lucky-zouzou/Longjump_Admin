@@ -1,3 +1,5 @@
+import {localDay} from "../../../lib/promotion-model.mjs";
+import {overlapMessage} from "../../../lib/sales-completeness.mjs";
 import {workspaceTasks} from "../../../lib/workspace-tasks.mjs";
 import {purchaseDocumentsForSubmission,FactoryDocumentError,keyOf} from "../../../lib/purchase-documents.mjs";
 import {packingTransportContext} from "../../../lib/factory-documents.mjs";
@@ -419,6 +421,7 @@ export async function GET(request:Request) {
       offlineSales7Qty:offlineSales.periodQty,
       seaTransitQty:suggestions.reduce((sum,row)=>sum+Number(row.seaInTransit),0),
       productionInProgressQty:suggestions.reduce((sum,row)=>sum+Number(row.productionInProgress),0),
+      forecastPendingCount:suggestions.filter(r=>r.recommendationReady===false).length,
       suggestedProductionQty:suggestions.reduce((sum,row)=>sum+Number(row.suggestedProduction),0),
       criticalAlertCount:suggestions.filter((row)=>row.alertLevel==="critical").length,
       actionAlertCount:suggestions.filter((row)=>["critical","warning","eta"].includes(String(row.alertLevel))).length+shipmentBatches.filter((row)=>row.exceptions.length).length+transportBatches.reduce((sum,row)=>sum+row.exceptions.length,0),
@@ -481,7 +484,7 @@ export async function GET(request:Request) {
       receipts:canReadDomain(actor.role,"inventory")?receipts:[],
       inboundDocuments:await readInboundDocuments(database(),actor),
       supplyPolicies:canReadDomain(actor.role,"planning")?policies:[],
-      forecastHistory:canReadDomain(actor.role,"planning")?await all(`SELECT f.*,COALESCE((SELECT SUM(s.qty) FROM sales_records s WHERE s.sku=f.sku AND s.site=f.site AND s.channel=f.channel AND substr(s.business_date,1,7)=f.month AND s.reversed_at IS NULL),0)-COALESCE((SELECT SUM(c.return_qty) FROM sales_demand_corrections c WHERE c.sku=f.sku AND c.site=f.site AND c.channel=f.channel AND substr(c.business_date,1,7)=f.month),0) actual_sales FROM forecast_snapshots f${actor.role==="运营"?" WHERE f.site=? AND f.channel=?":""} ORDER BY month DESC`,actor.role==="运营"?[actor.site,actor.channel]:[]):[],
+      forecastHistory:canReadDomain(actor.role,"planning")?(await all(`SELECT f.*,COALESCE((SELECT SUM(s.qty) FROM sales_records s WHERE s.sku=f.sku AND s.site=f.site AND s.channel=f.channel AND substr(s.business_date,1,7)=f.month AND s.reversed_at IS NULL),0)-COALESCE((SELECT SUM(c.return_qty) FROM sales_demand_corrections c WHERE c.sku=f.sku AND c.site=f.site AND c.channel=f.channel AND substr(c.business_date,1,7)=f.month),0) actual_sales FROM forecast_snapshots f${actor.role==="运营"?" WHERE f.site=? AND f.channel=?":""} ORDER BY month DESC`,actor.role==="运营"?[actor.site,actor.channel]:[])).map((r:AnyRow)=>{const model=parseJson<AnyRow>(r.model_json,{});return {...r,system_qty:model.suggestedProduction===null?null:r.system_qty,forecast_sales:model.forecastReady===false?null:r.forecast_sales};}):[],
       planChanges: ["管理员","供应链"].includes(actor.role)?(await all("SELECT * FROM plan_changes ORDER BY created_at DESC")).map(r=>({...r,old:parseJson(r.old_json,{}),next:parseJson(r.new_json,{})})):[],
       submissions:canReadDomain(actor.role,"planning")?submissions.map((r) => ({ ...r, items:parseJson(r.items_json, []) })):[],
       approvals:canReadDomain(actor.role,"planning")?approvals.map((r) => ({ ...r, payload:parseJson(r.payload_json, {}),history:approvalHistory.get(r.id)||[] })):[],
@@ -596,9 +599,11 @@ async function confirmSalesDay(actor:Actor,payload:AnyRow){
   const site=cleanText(payload.site,20),channel=cleanText(payload.channel,20),date=cleanText(payload.businessDate,10);
   validSiteChannel(site,channel);requireScope(actor,site,channel);
   if(channel==="线下分销"||!/^\d{4}-\d{2}-\d{2}$/.test(date)||!Number.isFinite(Date.parse(date))||new Date(date).toISOString().slice(0,10)!==date||date>chinaDate()||date<chinaDate(-90))throw new HttpError(400,"请选择近90天内有效的线上销售日期");
+  if(date>=localDay(new Date(),site))throw new HttpError(400,"该站点当天尚未结束，只能保存部分日报；次日核对完整后再确认");
   if(payload.confirmed!==true)throw new HttpError(400,"请确认已核对该日全部销售，包括零销售情况");
   const note=cleanText(payload.note,240);if(note.length<4)throw new HttpError(400,"请填写日报核对依据，至少4个字符");
   const db=database(),idsSql="SELECT id FROM sales_imports WHERE site=? AND channel=? AND business_date=? AND total_qty>0 AND reversed_at IS NULL ORDER BY id";
+  if(await db.prepare('SELECT sku FROM sales_records WHERE site=? AND channel=? AND business_date=? AND qty>0 AND reversed_at IS NULL GROUP BY sku HAVING COUNT(DISTINCT import_id)>1 LIMIT 1').bind(site,channel,date).first())throw new HttpError(409,'该日存在多个批次覆盖同一 SKU，请先核对并修订历史重叠报表，再确认日报完整');
   const rows=await all(idsSql,[site,channel,date]),fingerprint=rows.map(r=>r.id).join('|');
   const key=`coverage|${site}|${channel}|${date}`,timestamp=nowIso(),id=makeId('sale_day');
   await db.batch([
@@ -627,9 +632,12 @@ async function salesImport(actor:Actor, payload:AnyRow, staged?:{statements:D1Pr
   const exists = await db.prepare("SELECT id,reversed_at FROM sales_imports WHERE import_key=?").bind(importKey).first<AnyRow>();
   if (exists && !exists.reversed_at) throw new HttpError(409, "该文件或记录已经导入，系统已阻止重复扣库存");
   if(await db.prepare("SELECT id FROM sales_imports WHERE site=? AND channel=? AND business_date=? AND source_batch_ref=? AND reversed_at IS NULL AND id<>?").bind(site,channel,businessDate,sourceBatchRef,staged?.replacesId||"").first()) throw new HttpError(409,"该平台批次或手工凭证号已经导入，系统已阻止重复扣库存");
+  const overlap=await all("SELECT DISTINCT sku FROM sales_records WHERE site=? AND channel=? AND business_date=? AND qty>0 AND reversed_at IS NULL AND import_id<>?",[site,channel,businessDate,staged?.replacesId||""]);
+  const existingSkus=new Set(overlap.map(r=>r.sku));
+  if(rows.some(r=>r.qty>0&&existingSkus.has(r.sku)))throw new HttpError(409,overlapMessage);
   const importId = makeId("sale_import"), timestamp = nowIso();
   const totalQty = rows.reduce((sum,r) => sum + r.qty, 0);
-  const reportKind=totalQty===0?"cost":payload.reportKind==="complete"?"complete":"partial";
+  const reportKind=totalQty===0?"cost":payload.reportKind==="complete"&&payload.fullDayConfirmed===true&&businessDate<localDay(new Date(),site)?"complete":"partial";
   if(payload.reportKind==="cost"&&totalQty>0)throw new HttpError(400,"费用补录只能包含销量为0的费用行");
   if(payload.reportKind==="complete"&&totalQty===0)throw new HttpError(400,"费用文件不能作为完整销售日报；零销售日请使用确认入口");
   const settings = await all("SELECT sku,unit_price,name FROM sku_settings");
@@ -662,7 +670,7 @@ async function salesImport(actor:Actor, payload:AnyRow, staged?:{statements:D1Pr
     );
   });
   statements.push(audit(actor, "销售导入并扣库", "sales_import", importId, { businessDate, site, channel, rows:rows.length, totalQty, importKey,sourceBatchRef }));
-  try { if(staged)staged.statements.push(...statements);else await db.batch(statements); } catch (error) {
+  try { if(staged)staged.statements.push(...statements);else await atomicBatch(db,statements); } catch (error) {
     if (String(error).includes("UNIQUE")) throw new HttpError(409, "该文件或记录已经导入");
     throw error;
   }
@@ -830,8 +838,8 @@ async function monthlySubmit(actor:Actor, payload:AnyRow) {
   if (locked) throw new HttpError(409,"该月计划已锁定：待审批计划请原申请人先撤回，已批准计划请走变更审批");
   const idValue = `monthly_${month}_${site}_${channel}`, timestamp=nowIso(), totalQty=items.reduce((s,r)=>s+r.qty,0);
   const forecasts=await loadForecast(db,{...actor,role:"运营",site,channel});
-  for(const item of items)if(!forecasts.suggestions.some(r=>r.sku===item.sku))forecasts.suggestions.push({sku:item.sku,site,channel,name:item.name,suggestedProduction:0,forecastDaily:0,confidence:"无销量历史",forecastVersion:"7-21-56-v1",note:"运营人工追加SKU，无历史数据可生成系统建议"});
-  const snapshots=forecasts.suggestions.filter((r:AnyRow)=>r.site===site&&r.channel===channel).map((r:AnyRow)=>db.prepare("INSERT INTO forecast_snapshots (id,month,sku,site,channel,system_qty,forecast_sales,operator_qty,model_json,created_at) VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(month,sku,site,channel) DO UPDATE SET system_qty=excluded.system_qty,forecast_sales=excluded.forecast_sales,operator_qty=excluded.operator_qty,model_json=excluded.model_json,created_at=excluded.created_at").bind(makeId("forecast"),month,r.sku,site,channel,r.suggestedProduction,r.forecastDaily*new Date(Number(month.slice(0,4)),Number(month.slice(5,7)),0).getDate(),items.find(i=>i.sku===r.sku)?.qty||0,JSON.stringify(r),timestamp));
+  for(const item of items)if(!forecasts.suggestions.some(r=>r.sku===item.sku))forecasts.suggestions.push({sku:item.sku,site,channel,name:item.name,suggestedProduction:null,forecastDaily:null,forecastReady:false,confidence:"无销量历史",forecastVersion:"complete-days-7-21-56-v2",note:"运营人工追加SKU，无历史数据可生成系统建议"});
+  const snapshots=forecasts.suggestions.filter((r:AnyRow)=>r.site===site&&r.channel===channel).map((r:AnyRow)=>db.prepare("INSERT INTO forecast_snapshots (id,month,sku,site,channel,system_qty,forecast_sales,operator_qty,model_json,created_at) VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(month,sku,site,channel) DO UPDATE SET system_qty=excluded.system_qty,forecast_sales=excluded.forecast_sales,operator_qty=excluded.operator_qty,model_json=excluded.model_json,created_at=excluded.created_at").bind(makeId("forecast"),month,r.sku,site,channel,r.suggestedProduction??0,(r.forecastDaily??0)*new Date(Number(month.slice(0,4)),Number(month.slice(5,7)),0).getDate(),items.find(i=>i.sku===r.sku)?.qty||0,JSON.stringify(r),timestamp));
   await atomicBatch(db,[
     // Removed manual-only SKUs may no longer occur in the current forecast rows.
     // Clear their previous operator demand along with the replaced submission.
@@ -1723,6 +1731,7 @@ async function saveWarehouse(actor:Actor,payload:AnyRow){
 }
 
 function errorResponse(error:unknown) {
+  if(/sales_summary_overlap/.test(String(error)))return Response.json({error:overlapMessage},{status:409});
   if(error instanceof FactoryDocumentError||error instanceof SalesAdSpendError)return Response.json({error:error.message},{status:error.status});
   if(/inventory_baseline_date/.test(String(error))) return Response.json({error:"已启用2026-09-30期初库存，请选择2026-10-01或之后的销售／费用日期，历史销售不可再次扣库"},{status:409});
   if(/inventory_movements.balance_after|guard_|CHECK constraint|maintenance|closed finance/.test(String(error))) return Response.json({error:"库存或凭证已被更新，本次未覆盖；请刷新后重新核对"},{status:409});

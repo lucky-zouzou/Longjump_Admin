@@ -27,7 +27,7 @@ export default function Overview({data,go}:Props){
         {label:'当前可售库存',value:m.inventoryQty,icon:'inventory',note:`待上架 ${number(m.pendingShelfQty)} · 隔离 ${number(m.quarantineQty)}`,tone:'stock'},
         {label:'近7天销量',value:m.sales7Qty,icon:'sales',note:`${m.salesWindowFrom||'—'} — ${m.salesWindowTo||'—'}`,extra:'滚动7个自然日，缺报不视为零销量',tone:'sales'},
         {label:'海运在途',value:m.seaTransitQty,icon:'batches',note:'只统计已进入海运的数量',tone:'transit'},
-        {label:'建议启动生产',value:m.suggestedProductionQty,icon:'fulfillment',note:'已扣库存、海运在途和生产中',tone:'production'},
+        {label:'建议启动生产',value:m.suggestedProductionQty,icon:'fulfillment',note:m.forecastPendingCount?`已核实部分；${m.forecastPendingCount}项待补数据`:'已扣库存、海运在途和生产中',tone:'production'},
       ].map(k=><article className={`overview-kpi ${k.tone}`} key={k.label}><div className="kpi-caption"><span>{k.label}</span><Icon name={k.icon}/></div><div className="kpi-number">{number(k.value)}<small>件</small></div><p>{k.note}{k.extra&&<small>{k.extra}</small>}</p></article>)}
     </section>
     <div className="overview-columns">

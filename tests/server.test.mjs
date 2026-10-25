@@ -119,21 +119,28 @@ test('独立服务器：公司登录、禁止伪造身份、岗位隔离、出�
  assert.equal((await request('admin','/api/system',{action:'bulkImport',kind:'inbound',rows:inboundPreview.body.rows,previewToken:inboundPreview.body.token,confirmed:true,...importMeta})).status,200);
  const invalidBatch=await request('admin','/api/system',{action:'bulkImport',kind:'inbound',rows:[{...importedReceipt,receiptNo:'HTTP-RCV-2'},importedReceipt],...importMeta});assert.equal(invalidBatch.status,409);
  const afterImport=await request('admin','/api/system');assert.ok(!afterImport.body.inboundDocuments.some(r=>r.receipt_no==='HTTP-RCV-2'));
- const salesImport={action:'salesImport',site:'马来西亚',channel:'Shopee',businessDate:new Date(Date.now()+8*3600000).toISOString().slice(0,10),sourceBatchRef:'HTTP-SALES-001',importKey:'http-file-sales-001',rows:[{sku:'HTTP-IMPORT',qty:2}],fileName:'sales.csv'};
+ const salesImport={action:'salesImport',site:'马来西亚',channel:'Shopee',businessDate:new Date(Date.now()+8*3600000-86400000).toISOString().slice(0,10),sourceBatchRef:'HTTP-SALES-001',importKey:'http-file-sales-001',rows:[{sku:'HTTP-IMPORT',qty:2}],fileName:'sales.csv'};
  assert.equal((await request('newops','/api/system',salesImport)).status,200);
  assert.equal((await request('newops','/api/system',salesImport)).status,409);
+ const disguised=await request('newops','/api/system',{...salesImport,fileName:'renamed.xlsx',sourceBatchRef:'ANOTHER-BATCH',importKey:'changed-file-and-batch',rows:[{sku:'NEW-ROW-FIRST',qty:2},{sku:'HTTP-IMPORT',qty:3}]});
+ assert.equal(disguised.status,409);assert.match(disguised.body.error,/重叠/);
+ const noRepeat=await request('newops','/api/system');assert.equal(noRepeat.body.inventory.find(r=>r.sku==='HTTP-IMPORT').qty,10);assert.ok(!noRepeat.body.inventory.some(r=>r.sku==='NEW-ROW-FIRST'));
+ assert.equal(noRepeat.body.imports.find(r=>r.import_key===salesImport.importKey).report_kind,'partial');
+ const forecastPending=noRepeat.body.suggestions.find(r=>r.sku==='HTTP-IMPORT');assert.equal(forecastPending.forecastReady,false);assert.equal(forecastPending.suggestedProduction,null);
+
  assert.equal((await request('newops','/api/system')).body.inventory.find(r=>r.sku==='HTTP-IMPORT').qty,10);
+ assert.equal((await request('newops','/api/system',{action:'confirmSalesDay',site:'马来西亚',channel:'Shopee',businessDate:new Date(Date.now()+8*3600000).toISOString().slice(0,10),confirmed:true,note:'当天仍在营业不可确认'})).status,400);
  const confirmDay={action:'confirmSalesDay',site:'马来西亚',channel:'Shopee',businessDate:salesImport.businessDate,confirmed:true,note:'HTTP核对平台整日销量'};
  assert.equal((await request('finance','/api/system',confirmDay)).status,403);
  assert.equal((await request('newops','/api/system',{...confirmDay,site:'印尼'})).status,403);
  assert.equal((await request('newops','/api/system',confirmDay)).status,200);
- assert.equal((await request('newops','/api/system')).body.salesScopeStatus[0].updatedToday,true);
+ assert.equal((await request('newops','/api/system')).body.salesScopeStatus[0].updatedExpected,true);
 
  // Sales dashboard retains authentication and site scope through the actual router.
  assert.equal((await fetch(origin+'/api/sales-dashboard')).status,401);
  for(const who of ['sales','finance'])assert.equal((await request(who,'/api/sales-dashboard')).status,403);
  assert.equal((await request('newops','/api/sales-dashboard?site='+encodeURIComponent('印尼'))).status,403);
- const performance=await request('newops','/api/system',{...salesImport,sourceBatchRef:'HTTP-PRICE-002',importKey:'http-file-price-002',rows:[{sku:'HTTP-IMPORT',qty:2,amount:50.25,adCost:10,currency:'MYR'},{sku:'HTTP-AD-ONLY',qty:0,adCost:5,currency:'MYR'}]});assert.equal(performance.status,200,JSON.stringify(performance.body));
+ const performance=await request('newops','/api/system',{...salesImport,sourceBatchRef:'HTTP-PRICE-002',importKey:'http-file-price-002',rows:[{sku:'HTTP-PRICE-ONLY',qty:2,amount:50.25,adCost:10,currency:'MYR'},{sku:'HTTP-AD-ONLY',qty:0,adCost:5,currency:'MYR'}]});assert.equal(performance.status,200,JSON.stringify(performance.body));
  const dashboard=await request('newops','/api/sales-dashboard');assert.equal(dashboard.status,200,JSON.stringify(dashboard.body));assert.equal(dashboard.body.totalQty,4);assert.equal(dashboard.body.currencies[0].revenue,50.25);assert.equal(dashboard.body.currencies[0].roas,null);assert.equal(dashboard.body.roiRanking.find(r=>r.sku==='HTTP-AD-ONLY').roas,0);
  assert.ok(dashboard.body.scopes.every(r=>r.site==='马来西亚'&&r.channel==='Shopee'));
  assert.equal((await request('newops','/api/sales-dashboard?from=2026-02-30')).status,400);
