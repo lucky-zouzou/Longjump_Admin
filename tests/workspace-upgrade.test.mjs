@@ -7,12 +7,12 @@ import {readSalesDashboard,reportToday} from '../lib/sales-dashboard.mjs';
 import {moduleSnapshot,mobileModules,readWorkspaceRoute,workspaceUrl,readDraft,writeDraft,draftKey,validOrderDraft} from '../lib/workspace-model.mjs';
 import {wholesaleTasks} from '../lib/wholesale.mjs';
 const day=reportToday(),factory={id:'factory-1',role:'工厂',name:'工厂'};
-function sales(f,n=1){for(let i=0;i<n;i++)f.sqlite.prepare('INSERT INTO sales_records(id,import_id,business_date,site,channel,sku,qty,unit_price,amount,reported_amount,ad_cost,currency,actor_id,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run('r'+String(i).padStart(5,'0'),'i'+i,day,i===0?'马来西亚':'印尼','TikTok','BAG-A',2,919191,1838382,1838382,454545,'IDR',f.users.indonesia.id,day);}
+function sales(f,n=1){for(let i=0;i<n;i++)f.sqlite.prepare('INSERT INTO sales_records(id,import_id,business_date,site,channel,sku,qty,unit_price,amount,reported_amount,ad_cost,currency,actor_id,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run('r'+String(i).padStart(5,'0'),'i'+i,day,i===0?'马来西亚':'印尼','TikTok','SKU-'+i,2,919191,1838382,1838382,454545,'IDR',f.users.indonesia.id,day);}
 test('工厂销售所有响应只含数量；金额、均价、成本及其派生指标不可恢复',async()=>{const f=systemFixture();try{
  sales(f,3);f.sqlite.prepare("UPDATE sku_settings SET unit_price=919191").run();svc.setActor(factory);
  const snapshot=await(await svc.GET(new Request('http://localhost/api/system'))).json();
  for(const value of ['919191','1838382','454545','unit_price','reported_amount','ad_cost','adCost'])assert.equal(JSON.stringify(snapshot).includes(value),false,value);
- const r=await readSalesDashboard(f.db,factory,{from:day,to:day});assert.equal(r.totalQty,6);assert.equal(r.skuRanking[0].qty,6);assert.equal(r.daily[0].qty,6);assert.equal(r.financialVisible,false);
+ const r=await readSalesDashboard(f.db,factory,{from:day,to:day});assert.equal(r.totalQty,6);assert.equal(r.skuRanking.reduce((n,r)=>n+r.qty,0),6);assert.equal(r.daily[0].qty,6);assert.equal(r.financialVisible,false);
  for(const key of ['revenue','averagePrice','adCost','roas','amount'])assert.equal(JSON.stringify(r).includes('"'+key+'"'),false,key);
  const history=await readHistory(f.db,factory,{history:'sales',export:'1'});assert.equal(history.rows.length,3);const csv=historyCsv(history);assert.ok(csv.includes('销量'));for(const value of ['单价','销售金额','广告成本','919191','1838382','454545'])assert.ok(!csv.includes(value),value);
  const admin=await readSalesDashboard(f.db,f.users.admin,{from:day,to:day});assert.equal(admin.currencies[0].revenue,5515146);

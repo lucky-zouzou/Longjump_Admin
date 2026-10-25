@@ -28,23 +28,27 @@ test('站点筛选后的批次不携带其他站点原始分配',()=>scenario(as
  const r=(await get(f,f.users.indonesia)).batches[0];assert.equal(r.qty,3);assert.equal(r.allocations.length,1);assert.ok(!JSON.stringify(r).includes('马来西亚'));assert.ok(!Object.hasOwn(r,'allocations_json'));
 }));
 test('费用和部分导入不改变其他SKU覆盖，完整日确认和冲销正确失效',()=>scenario(async f=>{
- await sale(f,[{sku:'BAG-B',qty:10}],dateAt(-1));
+ const past=dateAt(-1),earlier=dateAt(-2);
+ await sale(f,[{sku:'BAG-B',qty:10}],earlier);
  const forecast=async()=> (await loadForecast(f.db,f.users.admin,day)).suggestions.find(r=>r.sku==='BAG-B'&&r.site==='印尼'&&r.channel==='TikTok');
+ assert.equal((await forecast()).avg7,0);assert.equal((await forecast()).forecastReady,false);
+ await svc.confirmSalesDay(f.users.indonesia,{site:'印尼',channel:'TikTok',businessDate:earlier,confirmed:true,note:'核对已结束整日销售'});
  assert.equal((await forecast()).avg7,10);
- await sale(f,[{sku:'BAG-A',qty:0,adCost:100}]);assert.equal((await forecast()).avg7,10);assert.equal((await get(f,f.users.indonesia)).salesScopeStatus[0].updatedToday,false);
- const costOnly=await readSalesDashboard(f.db,f.users.indonesia,{from:day,to:day});assert.equal(chartDays(costOnly.daily,day,day)[0].qty,null);
- await svc.confirmSalesDay(f.users.indonesia,{site:'印尼',channel:'TikTok',businessDate:day,confirmed:true,note:'平台日报零销售核对'});
- assert.equal((await forecast()).avg7,5);assert.equal((await get(f,f.users.indonesia)).salesScopeStatus[0].updatedToday,true);
- const confirmed=await readSalesDashboard(f.db,f.users.indonesia,{from:day,to:day});assert.equal(chartDays(confirmed.daily,day,day)[0].qty,0);
- await sale(f,[{sku:'BAG-A',qty:0,adCost:20}]);assert.equal((await get(f,f.users.indonesia)).salesScopeStatus[0].updatedToday,true);
- const imported=await(await sale(f,[{sku:'BAG-B',qty:2}])).json();assert.equal((await get(f,f.users.indonesia)).salesScopeStatus[0].updatedToday,false);
- await svc.confirmSalesDay(f.users.indonesia,{site:'印尼',channel:'TikTok',businessDate:day,confirmed:true,note:'补录后全部日报核对'});
- await svc.reverseSalesImport(f.users.admin,{importId:imported.importId,reason:'测试冲销销量失效确认'});assert.equal((await get(f,f.users.indonesia)).salesScopeStatus[0].updatedToday,false);
+ await sale(f,[{sku:'BAG-A',qty:0,adCost:100}],past);assert.equal((await forecast()).avg7,10);assert.equal((await get(f,f.users.indonesia)).salesScopeStatus[0].updatedExpected,false);
+ const costOnly=await readSalesDashboard(f.db,f.users.indonesia,{from:past,to:past});assert.equal(chartDays(costOnly.daily,past,past)[0].qty,null);
+ await svc.confirmSalesDay(f.users.indonesia,{site:'印尼',channel:'TikTok',businessDate:past,confirmed:true,note:'平台日报零销售核对'});
+ assert.equal((await forecast()).avg7,5);assert.equal((await get(f,f.users.indonesia)).salesScopeStatus[0].updatedExpected,true);
+ const confirmed=await readSalesDashboard(f.db,f.users.indonesia,{from:past,to:past});assert.equal(chartDays(confirmed.daily,past,past)[0].qty,0);
+ await sale(f,[{sku:'BAG-A',qty:0,adCost:20}],past);assert.equal((await get(f,f.users.indonesia)).salesScopeStatus[0].updatedExpected,true);
+ const imported=await(await sale(f,[{sku:'BAG-B',qty:2}],past)).json();assert.equal((await get(f,f.users.indonesia)).salesScopeStatus[0].updatedExpected,false);
+ await svc.confirmSalesDay(f.users.indonesia,{site:'印尼',channel:'TikTok',businessDate:past,confirmed:true,note:'补录后全部日报核对'});
+ await svc.reverseSalesImport(f.users.admin,{importId:imported.importId,reason:'测试冲销销量失效确认'});assert.equal((await get(f,f.users.indonesia)).salesScopeStatus[0].updatedExpected,false);
 }));
 test('完整日报不得叠加已有销量，确认日报与新销售并发不会假完成',()=>scenario(async f=>{
- await sale(f,[{sku:'BAG-B',qty:2}]);const stock=f.sqlite.prepare("SELECT qty FROM inventory_balances WHERE site='印尼' AND channel='TikTok' AND sku='BAG-B'").get().qty;
- await assert.rejects(sale(f,[{sku:'BAG-B',qty:2}],day,{reportKind:'complete'}));assert.equal(f.sqlite.prepare("SELECT qty FROM inventory_balances WHERE site='印尼' AND channel='TikTok' AND sku='BAG-B'").get().qty,stock);
- const [confirm,added]=await race(f,()=>svc.confirmSalesDay(f.users.indonesia,{site:'印尼',channel:'TikTok',businessDate:day,confirmed:true,note:'并发核对测试说明'}),()=>sale(f,[{sku:'BAG-A',qty:1}]));
+ const past=dateAt(-1);
+ await sale(f,[{sku:'BAG-B',qty:2}],past);const stock=f.sqlite.prepare("SELECT qty FROM inventory_balances WHERE site='印尼' AND channel='TikTok' AND sku='BAG-B'").get().qty;
+ await assert.rejects(sale(f,[{sku:'BAG-B',qty:2}],past,{reportKind:'complete',fullDayConfirmed:true}));assert.equal(f.sqlite.prepare("SELECT qty FROM inventory_balances WHERE site='印尼' AND channel='TikTok' AND sku='BAG-B'").get().qty,stock);
+ const [confirm,added]=await race(f,()=>svc.confirmSalesDay(f.users.indonesia,{site:'印尼',channel:'TikTok',businessDate:past,confirmed:true,note:'并发核对测试说明'}),()=>sale(f,[{sku:'BAG-A',qty:1}],past));
  assert.equal(added.ok,true);assert.equal(confirm.ok,false);assert.equal((await get(f,f.users.indonesia)).salesScopeStatus[0].updatedToday,false);
 }));
 async function production(f){const id=seedMonthly(f);await svc.decideApproval(f.users.admin,{approvalId:id,version:1,decision:'approve',comment:'测试批准计划'});const po=f.sqlite.prepare('SELECT * FROM series_purchase_orders').get(),mo=f.sqlite.prepare('SELECT * FROM series_production_orders').get();await svc.confirmPurchaseOrder(f.users.supply,{purchaseOrderId:po.id,orderRef:'AUDIT-PO',expectedCompletionDate:day});const exported=await(await svc.exportProductionOrder(f.users.admin,{productionOrderId:mo.id})).json();await svc.acceptProductionOrder(f.users.admin,{productionOrderId:mo.id,promisedCompletionDate:day,evidenceRef:'AUDIT-ACCEPT',exportReceiptId:exported.exportReceiptId,orderReviewed:true});return {order:mo,item:f.sqlite.prepare('SELECT * FROM series_production_order_items').get()};}
@@ -59,8 +63,8 @@ test('两人并发完工只提交一次，不能覆盖已完成的数量',()=>sc
 test('线下需求按实际库存渠道分配计入预测，合计恰好等于实发',()=>scenario(async f=>{
  const day=indonesiaDate();
  const id=await f.create({qty:5,businessDate:day});await f.approve(id);await f.ship(id,5,day);
- const dashboard=await readSalesDashboard(f.db,f.users.admin,{from:day,to:day}),forecast=await loadForecast(f.db,f.users.admin,day);
- const rows=forecast.suggestions.filter(r=>r.site==='印尼'&&r.sku==='BAG-A');assert.equal(dashboard.totalQty,5);assert.equal(rows.reduce((n,r)=>n+r.offlineDailySales.at(-1),0),5);assert.equal(rows.reduce((n,r)=>n+r.forecastDaily,0),5);
+ const dashboard=await readSalesDashboard(f.db,f.users.admin,{from:day,to:day}),forecast=await loadForecast(f.db,f.users.admin,dateAt(1));
+ const rows=forecast.suggestions.filter(r=>r.site==='印尼'&&r.sku==='BAG-A');assert.equal(dashboard.totalQty,5);assert.equal(rows.reduce((n,r)=>n+r.offlineDailySales.at(-1),0),5);assert.equal(rows.reduce((n,r)=>n+r.estimatedForecastDaily,0),5);
 }));
 test('最近100条历史不能挤掉旧待审批',()=>scenario(async f=>{
  const insert=f.sqlite.prepare('INSERT INTO approval_requests(id,type,month,status,stage,creator_id,creator_role,payload_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)');
@@ -69,7 +73,7 @@ test('最近100条历史不能挤掉旧待审批',()=>scenario(async f=>{
  const data=await get(f);assert.ok(data.approvals.some(r=>r.id==='old-pending'));assert.equal(data.myTasks.filter(r=>r.title==='审批月度备货').length,1);
 }));
 test('每批到仓日期独立计入库存，识别两批之间的缺口',()=>scenario(async f=>{
- for(let i=-55;i<=0;i++)await sale(f,[{sku:'BAG-A',qty:10}],dateAt(i),{reportKind:'complete'});f.stock('BAG-A',100,10);
+ for(let i=-56;i<0;i++)await sale(f,[{sku:'BAG-A',qty:10}],dateAt(i),{reportKind:'complete',fullDayConfirmed:true});f.stock('BAG-A',100,10);
  for(const [id,qty,offset] of [['early',10,5],['late',1000,60]])f.sqlite.prepare("INSERT INTO production_batches(id,month,sku,qty,stage,stage_owner,allocations_json,estimated_arrival_date,creator_id,created_at,updated_at) VALUES(?,?,?,?,'sea_freight','海运',?,?,?,?,?)").run(id,day.slice(0,7),'BAG-A',qty,JSON.stringify([{site:'印尼',channel:'TikTok',qty}]),dateAt(offset),f.users.admin.id,day,day);
  const r=(await loadForecast(f.db,f.users.admin,day)).suggestions.find(r=>r.sku==='BAG-A'&&r.site==='印尼'&&r.channel==='TikTok');assert.equal(r.projectedAtNextArrival,60);assert.equal(r.alertLevel,'critical');assert.equal(r.projection.firstShortageDay,12);
 }));

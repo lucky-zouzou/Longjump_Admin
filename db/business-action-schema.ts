@@ -11,3 +11,7 @@ export const businessActionEvents=sqliteTable('business_action_events',{
  id:text('id').primaryKey(),actionId:text('action_id').notNull().references(()=>businessActions.id),event:text('event').notNull(),actorId:text('actor_id').notNull(),actorName:text('actor_name').notNull(),detailJson:text('detail_json').notNull(),createdAt:text('created_at').notNull(),
 },t=>[index('idx_business_action_events').on(t.actionId,t.createdAt)]);
 export const businessActionSourceClock=sqliteTable('business_action_source_clock',{id:text('id').primaryKey(),version:integer('version').notNull().default(1)});
+
+export const businessActionFinanceDays=sqliteTable('business_action_finance_days',{
+ id:text('id').primaryKey(),site:text('site').notNull(),channel:text('channel').notNull(),sku:text('sku').notNull(),businessDate:text('business_date').notNull(),revision:integer('revision').notNull(),currency:text('currency').notNull(),basisHash:text('basis_hash').notNull(),basisJson:text('basis_json').notNull(),dataJson:text('data_json').notNull(),source:text('source').notNull(),note:text('note').notNull(),actorId:text('actor_id').notNull(),createdAt:text('created_at').notNull(),
+},t=>[uniqueIndex('idx_action_finance_day_revision').on(t.site,t.channel,t.sku,t.businessDate,t.revision)]);

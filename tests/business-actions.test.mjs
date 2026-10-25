@@ -1,3 +1,4 @@
+import {forecastPlan} from '../lib/forecast-model.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtempSync,rmSync} from 'node:fs';
@@ -5,7 +6,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fixture} from './fixtures.mjs';
 import {actionWindow,compareActions,evaluateActions,actionKey} from '../lib/business-action-model.mjs';
-import {actionCandidates} from '../lib/business-action-data.mjs';
+import {actionCandidates,actionFinanceDay} from '../lib/business-action-data.mjs';
 import {refreshBusinessActions,readBusinessActions,mutateBusinessAction,actionHistory,businessActionTasks} from '../lib/business-actions.mjs';
 import {createBackup,restoreBackup} from '../server/backup.mjs';
 import {fileBucket,openDatabase} from '../server/storage.mjs';
@@ -21,7 +22,15 @@ function seed(f,{qty=2,prev=2,stock=10}={}){
  f.sqlite.prepare("INSERT INTO promotion_availability VALUES('印尼','TikTok','BAG-A','2026-01-01','2026-01-01',?,'平台历史在售记录','核实有货','id-ops',?)").run(w.cutoff,now.toISOString());
  f.sqlite.prepare('INSERT INTO sales_fx_snapshots VALUES(?,?,?,?,?,?)').run('test','test',now.toISOString(),now.toISOString(),new Date(+now+86400000).toISOString(),JSON.stringify({CNY:1,IDR:2000,MYR:.6,PHP:8,THB:5,VND:3600,USD:.14}));
 }
-async function finance(f,costs={landed:1700,ads:0,platform:0,fulfillment:0,returns:0},at=now){const r=dbrow(f),s=(await actionCandidates(f.db,f.users.finance,at)).find(s=>actionKey(s)===actionKey(r));await call(f,f.users.finance,'loss','finance',{basisHash:s.financeFingerprint,costs,source:'SKU结算单核对成本202610',confirmed:true},at);await refreshBusinessActions(f.db,f.users.admin,at);}
+async function finance(f,costs={landed:1700,ads:0,platform:0,fulfillment:0,returns:0},at=now){
+ const dates=actionWindow('印尼',at).days.slice(-7);
+ for(const [i,date] of dates.entries()){
+  const r=dbrow(f),day=await actionFinanceDay(f.db,r,date);
+  const daily=Object.fromEntries(Object.entries(costs).map(([k,n])=>{const cents=Math.round(n*100),base=Math.floor(cents/7);return [k,(base+(i===6?cents-base*7:0))/100];}));
+  await call(f,f.users.finance,'loss','finance',{businessDate:date,basisHash:day.basisHash,revision:day.revision,costs:daily,source:'SKU结算单核对成本'+date,confirmed:true},at);
+ }
+ await refreshBusinessActions(f.db,f.users.admin,at);
+}
 async function assign(f,kind='loss',at=now){return call(f,f.users.admin,kind,'assign',{ownerId:kind==='stockout'?f.users.supply.id:f.users.indonesia.id,collaborators:[f.users.finance.id],dueAt:new Date(+at+86400000).toISOString(),reviewAt:new Date(+at+3*86400000).toISOString()},at);}
 
 test('经营窗口按五站当地昨日截止，缺报及未知金额不能变成零',async()=>{
@@ -37,8 +46,8 @@ test('独立财务按实际原币逐项核算，重复全店费用不自动分�
  const f=fixture();seed(f);await refreshBusinessActions(f.db,f.users.admin,now);
  assert.equal(JSON.parse(dbrow(f).snapshot_json).profit,null);
  await assert.rejects(call(f,f.users.indonesia,'loss','finance',{}),/仅财务/);
- const snapshot=JSON.parse(dbrow(f).snapshot_json);
- await assert.rejects(call(f,f.users.finance,'loss','finance',{basisHash:snapshot.financeFingerprint,costs:{landed:100,ads:'',platform:0,fulfillment:0,returns:0},source:'结算单',confirmed:true}),/广告/);
+ const snapshot=await actionFinanceDay(f.db,dbrow(f),w.cutoff);
+ await assert.rejects(call(f,f.users.finance,'loss','finance',{businessDate:w.cutoff,basisHash:snapshot.basisHash,revision:snapshot.revision,costs:{landed:100,ads:'',platform:0,fulfillment:0,returns:0},source:'结算单',confirmed:true}),/广告/);
  await finance(f);let s=JSON.parse(dbrow(f).snapshot_json);assert.equal(s.profit,-300);assert.equal(s.delayAmount,42.86);assert.equal(s.recoverableCny,.15);assert.equal(s.condition,'active');
  f.sqlite.prepare("UPDATE sales_records SET reported_amount=reported_amount+1 WHERE business_date=?").run(w.cutoff);await refreshBusinessActions(f.db,f.users.admin,now);s=JSON.parse(dbrow(f).snapshot_json);assert.equal(s.profit,null);assert.equal(s.condition,'verify');
 });
@@ -50,10 +59,11 @@ test('跨币种标签错误阻止利润计算，汇率过期保留原币且不�
 test('优先排序依据证据与统一币种损失，不用GMV或原币大小排序',()=>{
  const base={site:'印尼',channel:'TikTok',sku:'B',kind:'loss'};
  const rs=[{...base,sku:'GMV',reliability:1,delayCny:999999,recoverableCny:999999,revenue:1e12},{...base,sku:'A',reliability:3,delayCny:10,recoverableCny:100},{...base,sku:'B',reliability:3,delayCny:20,recoverableCny:10}].sort(compareActions);
- assert.deepEqual(rs.map(r=>r.sku),['B','A','GMV']);
+ assert.deepEqual(rs.map(r=>r.sku),['A','B','GMV']);
 });
 test('补货逐批匹配ETA，未知与逾期不计及时到货，生产量不重复下单',()=>{
  const b={site:'印尼',channel:'TikTok',sku:'A',name:'A',window:w,available:5,sales:w.days.slice(-7).map(d=>({business_date:d,qty:2,reported_amount:200,currency:'IDR'})),complete:w.days,observations:[],finance:{data:{landed:700,ads:0,platform:0,fulfillment:0,returns:0}},setting:{production_lead_days:2,sea_lead_days:3,review_cycle_days:2,min_order_qty:1,order_multiple:1},forecast:{productionInProgress:3,projection:{curve:[{date:'2026-10-28',arrivalQty:4}],unknownArrivalQty:0}},fx:{status:'fresh',rates:{IDR:2000}}};
+ b.forecast={...forecastPlan({dailySales:Array(56).fill(2),dailyCoverage:Array(56).fill(true),currentQty:5,seaInTransit:4,productionInProgress:3,productionLeadDays:2,seaLeadDays:3,reviewCycleDays:2,arrivalLots:[{days:5,qty:4,etaDate:'2026-10-28'}]}, {}, [], [], w.today),productionInProgress:3};
  let s=evaluateActions(b).find(s=>s.kind==='stockout');assert.equal(s.condition,'active');assert.equal(s.supply.projection.firstShortageDate,'2026-10-26');assert.equal(s.supply.suggestedQty,2);
  b.forecast.projection.unknownArrivalQty=4;s=evaluateActions(b).find(s=>s.kind==='stockout');assert.equal(s.condition,'verify');assert.equal(s.supply.suggestedQty,null);
  b.forecast.projection.unknownArrivalQty=0;b.available=-5;s=evaluateActions(b).find(s=>s.kind==='stockout');assert.equal(s.condition,'verify');assert.equal(s.supply.suggestedQty,null);
@@ -108,9 +118,9 @@ test('并发修改只有一次成功，过期版本不会覆盖责任或执行�
 test('源数据竞争时复查与核算原子回滚，维护锁和完整备份覆盖新台账',async()=>{
  const f=fixture();seed(f);await refreshBusinessActions(f.db,f.users.admin,now);await finance(f);await assign(f);
  const batch=f.db.batch;f.db.batch=async ss=>{f.sqlite.prepare("UPDATE sales_records SET reported_amount=reported_amount+1 WHERE business_date=?").run(w.cutoff);return batch(ss);};
- const count=f.sqlite.prepare('SELECT count(*) n FROM business_action_finance').get().n;await assert.rejects(finance(f),/变化/);assert.equal(f.sqlite.prepare('SELECT count(*) n FROM business_action_finance').get().n,count);f.db.batch=batch;
+ const count=f.sqlite.prepare('SELECT count(*) n FROM business_action_finance_days').get().n;await assert.rejects(finance(f),/变化/);assert.equal(f.sqlite.prepare('SELECT count(*) n FROM business_action_finance_days').get().n,count);f.db.batch=batch;
  const root=mkdtempSync(join(tmpdir(),'business-actions-'));try{const bucket=fileBucket(join(root,'files'));const stream=await backupStream(f.db,bucket,f.users.admin);await assert.rejects(refreshBusinessActions(f.db,f.users.admin,now),/备份|迁移/);assert.throws(()=>f.sqlite.prepare("UPDATE business_actions SET status='resolved'").run(),/maintenance/);await stream.cancel();
- const path=join(root,'backup.tar');await createBackup({DB:f.db,WHOLESALE_FILES:bucket},path);const dir=join(root,'restored');await restoreBackup(path,dir);const db=openDatabase(join(dir,'business.sqlite'));assert.equal(db.sqlite.prepare('SELECT owner_id FROM business_actions WHERE id=?').get(dbrow(f).id).owner_id,'id-ops');assert.ok(db.sqlite.prepare('SELECT count(*) n FROM business_action_events').get().n>0);assert.equal(db.sqlite.prepare('SELECT count(*) n FROM business_action_finance').get().n,count);db.sqlite.close();
+ const path=join(root,'backup.tar');await createBackup({DB:f.db,WHOLESALE_FILES:bucket},path);const dir=join(root,'restored');await restoreBackup(path,dir);const db=openDatabase(join(dir,'business.sqlite'));assert.equal(db.sqlite.prepare('SELECT owner_id FROM business_actions WHERE id=?').get(dbrow(f).id).owner_id,'id-ops');assert.ok(db.sqlite.prepare('SELECT count(*) n FROM business_action_events').get().n>0);assert.equal(db.sqlite.prepare('SELECT count(*) n FROM business_action_finance_days').get().n,count);db.sqlite.close();
  }finally{rmSync(root,{recursive:true,force:true});}
 });
 test('经营待办按责任聚合，不每天为每SKU重复刷屏',async()=>{
