@@ -1,3 +1,4 @@
+import {ticketRows} from './cost-fixture.mjs';
 import * as XLSX from "xlsx";
 import test from 'node:test';import assert from 'node:assert/strict';import {mkdtempSync,rmSync,existsSync} from 'node:fs';import {tmpdir} from 'node:os';import {join} from 'node:path';import {spawn} from 'node:child_process';import {once} from 'node:events';import net from 'node:net';
 import {openDatabase} from '../server/storage.mjs';import {setAccount,verifyPassword} from '../server/accounts.mjs';
@@ -17,6 +18,33 @@ test('独立服务器：公司登录、禁止伪造身份、岗位隔离、出�
  const health=await fetch(origin+'/healthz');assert.equal(health.status,200);assert.deepEqual(await health.json(),{ok:true,release:'local'});
  const cookies={};for(const who of ['admin','sales','supply','finance'])cookies[who]=await login(who,who==='sales');
  const request=async(who,path,payload)=>{const r=await fetch(origin+path,{method:payload?'POST':'GET',headers:{cookie:cookies[who],origin,...(payload?{'content-type':'application/json'}:{})},...(payload?{body:JSON.stringify({...payload,operationId:crypto.randomUUID()})}:{})});const text=await r.text();let body;try{body=JSON.parse(text)}catch{body=text}return {status:r.status,body}};
+
+ { // Cost API uses actual session authentication; migration grants nobody by default.
+ const path='/api/cost-profit';
+ assert.equal((await fetch(origin+path)).status,401);
+ for(const who of ['sales','supply','finance'])assert.equal((await request(who,path)).status,403);
+ assert.equal((await fetch(origin+path,{headers:{'x-local-test-user':'admin','oai-authenticated-user-id':'admin'}})).status,401);
+ assert.equal((await fetch(origin+path,{method:'POST',headers:{origin:'https://attacker.test',cookie:cookies.admin,'content-type':'application/json'},body:'{}'})).status,403);
+ const input=ticketRows({businessKey:'HTTP-COST'}).map(r=>({...r,sku:'HTTP-BAG'}));
+ const beforeDb=openDatabase(join(root,'business.sqlite')).sqlite,beforeStock=beforeDb.prepare('SELECT SUM(qty) n FROM inventory_balances').get().n;beforeDb.close();
+ for(const who of ['sales','supply','finance'])assert.equal((await request(who,path,{action:'previewImport',rows:input})).status,403);
+ const p=await request('admin',path,{action:'previewImport',rows:input});assert.equal(p.status,200,JSON.stringify(p.body));assert.equal(p.body.errors.length,0);
+ assert.equal((await request('admin',path)).body.tickets.length,0); // Cancelling a preview performs zero writes.
+ const args={action:'commitImport',rows:input,fileName:'HTTP.csv',fingerprint:p.body.fingerprint,version:p.body.version};
+ const first=await request('admin',path,args);assert.equal(first.status,200,JSON.stringify(first.body));
+ assert.notEqual((await request('admin',path,args)).status,200);
+ const invalid=[...ticketRows({businessKey:'HTTP-GOOD'}).map(r=>({...r,sku:'HTTP-BAG'})),...ticketRows({businessKey:'HTTP-INVALID'}).map(r=>({...r,sku:'UNKNOWN'}))];
+ const bad=await request('admin',path,{action:'previewImport',rows:invalid});assert.ok(bad.body.errors.length);
+ assert.equal((await request('admin',path,{action:'commitImport',rows:invalid,fileName:'bad.csv',fingerprint:bad.body.fingerprint,version:bad.body.version})).status,400);
+ // A failure on the second insert rolls back even the first ticket and its audit entry.
+ const db=openDatabase(join(root,'business.sqlite')).sqlite;db.exec("CREATE TRIGGER http_cost_failure BEFORE INSERT ON cost_records WHEN NEW.business_key='HTTP-FAIL' BEGIN SELECT RAISE(ABORT,'test rollback'); END;");db.close();
+ const rollback=[...ticketRows({businessKey:'HTTP-FIRST'}),...ticketRows({businessKey:'HTTP-FAIL'})].map(r=>({...r,sku:'HTTP-BAG'}));
+ const rp=await request('admin',path,{action:'previewImport',rows:rollback});assert.equal(rp.body.errors.length,0);
+ assert.equal((await request('admin',path,{action:'commitImport',rows:rollback,fileName:'rollback.csv',fingerprint:rp.body.fingerprint,version:rp.body.version})).status,500);
+ const afterDb=openDatabase(join(root,'business.sqlite')).sqlite;assert.equal(afterDb.prepare('SELECT SUM(qty) n FROM inventory_balances').get().n,beforeStock);assert.equal(afterDb.prepare('SELECT COUNT(*) n FROM cost_records').get().n,1);assert.equal(afterDb.prepare('SELECT COUNT(*) n FROM cost_imports').get().n,1);afterDb.exec('DROP TRIGGER http_cost_failure');afterDb.close();
+ assert.equal((await request('admin',path)).body.tickets.length,1);
+ assert.equal((await request('finance',path,{action:'review',id:first.body.ids[0],taxTreatment:'inventory',note:'越权复核'})).status,403);
+ }
  const system=await request('admin','/api/system');assert.equal(system.status,200,JSON.stringify(system.body));const page=await fetch(origin+'/',{headers:{cookie:cookies.admin}});assert.equal(page.status,200);assert.ok((await page.text()).includes('LOONG'));
  assert.equal((await fetch(origin+'/api/inventory-baseline')).status,401);
  assert.equal((await fetch(origin+'/api/test-cleanup')).status,401);

@@ -35,7 +35,7 @@ const localBindingConfig = {
 };
 
 export default defineConfig(async () => {
-  if(process.env.LOONGJUMP_TARGET==="node")return {plugins:[vinext()],resolve:{alias:{"cloudflare:workers":fileURLToPath(new URL("./server/env.mjs",import.meta.url))}},build:{outDir:"dist-node"}};
+  if(process.env.LOONGJUMP_TARGET==="node")return {cacheDir:".vinext/vite-cache",plugins:[vinext()],resolve:{alias:{"cloudflare:workers":fileURLToPath(new URL("./server/env.mjs",import.meta.url))}},build:{outDir:"dist-node"}};
   // Keep Wrangler and Miniflare state project-local. These are non-secret tool
   // settings; application environment belongs in ignored `.env*` files.
   process.env.WRANGLER_WRITE_LOGS ??= "false";
@@ -46,6 +46,7 @@ export default defineConfig(async () => {
   const { cloudflare } = await import("@cloudflare/vite-plugin");
 
   return {
+    cacheDir:".vinext/vite-cache",
     server: isCodexSeatbeltSandbox
       ? { watch: { useFsEvents: false, usePolling: true } }
       : undefined,

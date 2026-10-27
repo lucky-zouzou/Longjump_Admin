@@ -1,0 +1,55 @@
+{
+  "verifiedAt": "2026-10-27T00:46:47.052Z",
+  "branch": "codex/cost-profit-transparency",
+  "base": "78cd04d",
+  "tests": {
+    "specialized": {
+      "pass": 17,
+      "fail": 0,
+      "skip": 0
+    },
+    "full": {
+      "pass": 370,
+      "fail": 0,
+      "skip": 0
+    }
+  },
+  "typecheck": "passed",
+  "backupManifest": "passed",
+  "nodeBuild": "passed",
+  "cloudflareBuild": "passed",
+  "lint": {
+    "errors": 163,
+    "warnings": 17,
+    "baselineErrors": 163,
+    "baselineWarnings": 17,
+    "added": 0
+  },
+  "ui": {
+    "cancel": {
+      "stage": "after_cancel",
+      "costTickets": 0,
+      "invalidTickets": 0,
+      "inventory": 205
+    },
+    "submit": {
+      "stage": "after_double_click_and_repeat_preview",
+      "costTickets": 1,
+      "invalidTickets": 0,
+      "inventory": 205
+    },
+    "mobileWidth": 390,
+    "documentWidth": 390,
+    "consoleErrors": 0
+  },
+  "hashes": {
+    "app/cost-profit.tsx": "830ccf1d502529f339ed60200690ccbfbb67e9c114e38984e505d9c9e460e272",
+    "app/api/cost-profit/route.ts": "40021875608e19087331e292dd366753fa5e950c116ec532866a6d5b2b6ff425",
+    "lib/cost-profit.mjs": "c3b3ae7d03a6ca0e3d4f21f8e40d36c8bf8cd257045bf0e9989c9850b820cb3c",
+    "lib/cost-profit-model.mjs": "9911dad718e26c156e46dd1ec3f000fc055a061652c9b412a8f65e0ffa3df680",
+    "drizzle/0029_cost_profit.sql": "f438dc402ddb3a4a1ce4b81f335b4a35e9e042b83d7dd0a7848084cc7ce5b91c",
+    "tests/cost-profit.test.mjs": "8bc4400935258538c076722911b163625522a2ec4bd4aa7e9b760edf7e0ff59e",
+    "tests/server.test.mjs": "fe2ec00ad5cedb21857a0a2eefb7f698598c1a0e6986485a7ace67ea2f9f4be5"
+  },
+  "productionChanges": false
+}
