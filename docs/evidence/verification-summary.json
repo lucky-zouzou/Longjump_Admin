@@ -51,5 +51,6 @@
     "tests/cost-profit.test.mjs": "8bc4400935258538c076722911b163625522a2ec4bd4aa7e9b760edf7e0ff59e",
     "tests/server.test.mjs": "fe2ec00ad5cedb21857a0a2eefb7f698598c1a0e6986485a7ace67ea2f9f4be5"
   },
-  "productionChanges": false
+  "productionChanges": false,
+  "templateCheck": "Both UTF-8 BOM CSV copies parse through the same TextDecoder as UI to the 36 schema headers only; no sample rows"
 }
