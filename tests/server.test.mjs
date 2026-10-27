@@ -175,6 +175,14 @@ test('独立服务器：公司登录、禁止伪造身份、岗位隔离、出�
  const reversal=await request('admin','/api/system',{action:'reverseSalesImport',importId:performance.body.importId,reason:'接口测试纠正重复报表'});assert.equal(reversal.status,200,JSON.stringify(reversal.body));
  assert.equal((await request('newops','/api/sales-dashboard')).body.totalQty,2);
  const crossImport=await fetch(origin+'/api/system',{method:'POST',headers:{cookie:cookies.admin,origin:'https://attacker.test','content-type':'application/json'},body:JSON.stringify({action:'bulkImport',kind:'inventory',rows:stockRows,...importMeta})});assert.equal(crossImport.status,403);
+ {
+ const catalogPrice={action:'pricePublish',sku:'HTTP-BAG',priceVersion:0,purchaseCost:'70000',freightCost:'6000',taxCost:'2000',inboundCost:'2000',standardMarkup:'25',minimumMarkup:'20',rounding:'100',validUntil:'2099-01-01',costReference:'HTTP-PRIVATE-COST',reason:'HTTP核对到仓成本',costConfirmed:true};
+ assert.equal((await request('sales','/api/wholesale',catalogPrice)).status,403);
+ assert.equal((await request('supply','/api/wholesale',catalogPrice)).status,403);
+ const published=await request('finance','/api/wholesale',catalogPrice);assert.equal(published.status,200,JSON.stringify(published.body));
+ for(const who of ['sales','supply']){const catalog=(await request(who,'/api/wholesale')).body.catalog;assert.equal(catalog.products.find(p=>p.sku==='HTTP-BAG').available,23);assert.equal(catalog.priceHistory,undefined);assert.ok(!JSON.stringify(catalog).includes('HTTP-PRIVATE-COST'));}
+ assert.equal((await request('finance','/api/cost-profit')).status,403);
+ }
  const c=await request('sales','/api/wholesale',{action:'customerCreate',name:'HTTP客户',contact:'Sari',phone:'08123456',city:'Jakarta',address:'Warehouse 1'});assert.equal(c.status,200,JSON.stringify(c.body));const day=new Date(Date.now()+7*3600000).toISOString().slice(0,10);
  // Field workspace uses the real production router, authentication and file storage.
  assert.equal((await fetch(origin+'/api/field-sales')).status,401);

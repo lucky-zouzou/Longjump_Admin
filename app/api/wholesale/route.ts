@@ -1,10 +1,11 @@
+import {CatalogError} from '../../../lib/wholesale-catalog.mjs';
 import {ConflictError} from "../../../lib/atomic.mjs";
 import { database, ensureSchema } from "../../../lib/database";
 import { HttpError, requireActor } from "../../../lib/auth";
 import { indonesiaDate, mutateWholesale, readWholesale, WholesaleError } from "../../../lib/wholesale.mjs";
 
 function errorResponse(error:unknown){
-  if(error instanceof ConflictError||error instanceof WholesaleError||error instanceof HttpError)return Response.json({error:error.message},{status:error.status});
+  if(error instanceof CatalogError||error instanceof ConflictError||error instanceof WholesaleError||error instanceof HttpError)return Response.json({error:error.message},{status:error.status});
   console.error("Wholesale request failed",error);
   return Response.json({error:"线下业务暂时无法保存，请保留填写内容后重试；请勿重复创建同一订单"},{status:500});
 }

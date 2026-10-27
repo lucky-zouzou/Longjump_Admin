@@ -36,7 +36,7 @@ function compileComponent(file,extra="",overrides={}){
   const url=new URL(file,import.meta.url),require=createRequire(url),module={exports:{}};
   const source=readFileSync(url,"utf8")+extra;
   const compiled=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX,esModuleInterop:true}}).outputText;
-  new Function("require","module","exports",compiled)(name=>overrides[name]??(name==="./workspace-hooks"?compileComponent("../app/workspace-hooks.tsx","",overrides):name==="./wholesale-receipts"?compileComponent("../app/wholesale-receipts.tsx","",overrides):name==="./field-sales"?compileComponent("../app/field-sales.tsx","",overrides):name==="./wholesale-management-ui"?compileComponent("../app/wholesale-management-ui.tsx","",overrides):name==="./table-import"?compileComponent("../app/table-import.tsx","",overrides):require(name)),module,module.exports);
+  new Function("require","module","exports",compiled)(name=>name.endsWith(".css")?{}:overrides[name]??(name==="./wholesale-catalog"?compileComponent("../app/wholesale-catalog.tsx","",overrides):name==="./workspace-hooks"?compileComponent("../app/workspace-hooks.tsx","",overrides):name==="./wholesale-receipts"?compileComponent("../app/wholesale-receipts.tsx","",overrides):name==="./field-sales"?compileComponent("../app/field-sales.tsx","",overrides):name==="./wholesale-management-ui"?compileComponent("../app/wholesale-management-ui.tsx","",overrides):name==="./table-import"?compileComponent("../app/table-import.tsx","",overrides):require(name)),module,module.exports);
   return module.exports;
 }
 test("所有线下表单和对账组件使用印尼语渲染，选项值保持业务编码",()=>{
@@ -53,7 +53,7 @@ test("所有线下表单和对账组件使用印尼语渲染，选项值保持�
 });
 
 test("所有显式界面翻译键都有印尼语文案",()=>{
-  for(const file of ["../app/wholesale-receipts.tsx","../app/wholesale.tsx","../app/control-tower.tsx","../app/wholesale-management-ui.tsx"]){const source=ts.createSourceFile(file,readFileSync(new URL(file,import.meta.url),"utf8"),ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
+  for(const file of ["../app/wholesale-catalog.tsx","../app/wholesale-receipts.tsx","../app/wholesale.tsx","../app/control-tower.tsx","../app/wholesale-management-ui.tsx"]){const source=ts.createSourceFile(file,readFileSync(new URL(file,import.meta.url),"utf8"),ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
     const walk=node=>{if(ts.isCallExpression(node)&&["t","shellT"].includes(node.expression.getText(source))&&node.arguments[0]&&ts.isStringLiteral(node.arguments[0]))assert.ok(Object.hasOwn(WHOLESALE_ID,node.arguments[0].text),node.arguments[0].text);ts.forEachChild(node,walk);};walk(source);
   }
 });
@@ -71,4 +71,13 @@ test("审批失败在订单操作区显示可聚焦红色提示，批准成功�
   o.status="approved";
   const success=render("id","success","审批通过，已锁定库存。订单已进入待打包，等待供应链处理。");
   assert.ok(success.includes('class="wh-order-feedback success" role="status"'));assert.ok(success.includes("menunggu pengemasan"));
+});
+
+test('库存目录、核价、特批表单使用真实印尼语渲染，销售端没有成本编辑入口',()=>{
+ const locale=compileComponent('../app/wholesale-language.tsx'),ui=compileComponent('../app/wholesale-catalog.tsx','\nexport {PriceEditor,PriceRequestForm,PriceDecision};',{'./wholesale-language':locale});
+ const product={sku:'TEST-A',name:'TEST-ONLY Bag',onHand:20,reserved:3,available:17,pending:0,quarantine:0,stockStatus:'ready',price:{version:1,status:'published',standardPrice:100000,minimumPrice:96000,validUntil:'2099-01-01'}},data={actor:{id:'s',role:'销售'},customers:[{id:'c',name:'Test customer',sales_user_id:'s'}],catalog:{products:[product],totals:{available:17,stocked:1,unverified:0,priced:1},requests:[],canManage:false,asOf:'2026-10-27T00:00:00Z'}};
+ const render=(C,props)=>renderToStaticMarkup(React.createElement(locale.WholesaleLanguageContext.Provider,{value:{language:'id',setLanguage:()=>{}}},React.createElement(C,props)));
+ const common={data,busy:false,mutate:async()=>true,close:()=>{},startOrder:()=>{}};
+ const html=render(ui.default,common);assert.ok(!html.includes('Kelola harga'));assert.ok(html.includes('17'));assert.ok(!/[\u3400-\u9fff]/.test(html));
+ for(const [C,props] of [[ui.PriceEditor,{product,history:[]}],[ui.PriceRequestForm,{sku:'TEST-A'}],[ui.PriceDecision,{product,request:{id:'r',sku:'TEST-A',customer_name:'TEST',qty:2,requested_price:90000,requested_reason:'TEST'}}]])assert.ok(!/[\u3400-\u9fff]/.test(render(C,{...common,...props})));
 });

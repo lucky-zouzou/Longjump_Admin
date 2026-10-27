@@ -8,7 +8,7 @@ import { warehouseSheets,OUTBOUND_HEADERS } from "../lib/wholesale-outbound.mjs"
 import { toWholesaleWorkbook,monthlyReconciliation,wholesaleExportSheets } from "../lib/wholesale-finance.mjs";
 
 const day=indonesiaDate(),month=day.slice(0,7);
-const approve=(f,id)=>f.change(f.users.finance,id,"orderApprove",{supplyUserId:f.users.supply.id,stockBasisConfirmed:true,reason:"财务核对业务类型与价格"});
+const approve=(f,id)=>f.change(f.users.finance,id,"orderApprove",{supplyUserId:f.users.supply.id,stockBasisConfirmed:true,priceExceptionConfirmed:true,reason:"财务核对业务类型与价格"});
 const item=(f,id)=>f.sqlite.prepare("SELECT * FROM wholesale_order_items WHERE order_id=?").get(id);
 const settle=(f,id,qty,extra={})=>f.change(f.users.finance,id,"consignmentSettle",{itemId:item(f,id).id,qty,kind:"sale",businessDate:day,reference:crypto.randomUUID(),note:"已核对客户实际售出对账单",...extra});
 
