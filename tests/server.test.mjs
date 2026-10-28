@@ -19,6 +19,13 @@ test('独立服务器：公司登录、禁止伪造身份、岗位隔离、出�
  const cookies={};for(const who of ['admin','sales','supply','finance'])cookies[who]=await login(who,who==='sales');
  const request=async(who,path,payload)=>{const r=await fetch(origin+path,{method:payload?'POST':'GET',headers:{cookie:cookies[who],origin,...(payload?{'content-type':'application/json'}:{})},...(payload?{body:JSON.stringify({...payload,operationId:crypto.randomUUID()})}:{})});const text=await r.text();let body;try{body=JSON.parse(text)}catch{body=text}return {status:r.status,body}};
 
+ { // Financial routes use the same real session and reject unauthorized roles and origins.
+ const path='/api/finance-ledger';assert.equal((await fetch(origin+path)).status,401);
+ for(const who of ['sales','supply'])assert.equal((await request(who,path)).status,403);
+ for(const who of ['admin','finance']){const result=await request(who,path);assert.equal(result.status,200,JSON.stringify(result.body));assert.ok(Array.isArray(result.body.balances));}
+ assert.equal((await fetch(origin+path,{method:'POST',headers:{cookie:cookies.admin,origin:'https://wrong.example','Content-Type':'application/json'},body:'{}'})).status,403);
+ assert.equal((await request('finance',path,{action:'access',userId:'supply',canRead:true,reason:'TEST'})).status,403);
+ }
  { // Cost API uses actual session authentication; migration grants nobody by default.
  const path='/api/cost-profit';
  assert.equal((await fetch(origin+path)).status,401);

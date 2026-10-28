@@ -48,7 +48,7 @@ test('unverified and below-floor orders require explicit financial exception; ve
 test('a refreshed quote must be reviewed; races atomically roll back approval and stock',async()=>{
  const f=setup();await f.call(f.users.admin,'pricePublish',price());const id=await f.create({saleType:'cash'});await f.call(f.users.admin,'pricePublish',price({priceVersion:1}));
  await assert.rejects(f.approve(id),/报价版本/);const original=f.db.batch;
- f.db.batch=async statements=>{f.sqlite.exec("INSERT INTO wholesale_prices SELECT 'race',sku,3,status,purchase_minor,freight_minor,tax_minor,inbound_minor,standard_markup_bp,minimum_markup_bp,rounding,standard_price,minimum_price,valid_until,cost_reference,reason,actor_id,actor_name,created_at FROM wholesale_prices WHERE sku='BAG-A' AND version=2");return original(statements);};
+ f.db.batch=async statements=>{f.sqlite.exec("INSERT INTO wholesale_prices SELECT 'race',sku,3,status,purchase_minor,freight_minor,tax_minor,inbound_minor,standard_markup_bp,minimum_markup_bp,rounding,standard_price,minimum_price,valid_until,cost_reference,reason,actor_id,actor_name,created_at,cost_basis_json FROM wholesale_prices WHERE sku='BAG-A' AND version=2");return original(statements);};
  await assert.rejects(f.change(f.users.finance,id,'orderApprove',{supplyUserId:f.users.supply.id,stockBasisConfirmed:true,priceVersions:{'BAG-A':2}}),e=>e.status===409);
  assert.equal(f.orderRow(id).status,'pending');assert.equal(f.sqlite.prepare('SELECT SUM(reserved_qty) n FROM inventory_balances').get().n,0);assert.equal(f.sqlite.prepare("SELECT COUNT(*) n FROM wholesale_price_snapshots WHERE phase='approval'").get().n,0);f.sqlite.close();
 });

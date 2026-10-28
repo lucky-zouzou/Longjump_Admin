@@ -95,3 +95,5 @@ NODE_ENV=production LOONGJUMP_DATA_DIR="$PWD/work/cost-preview" LOONGJUMP_COST_P
 ```
 
 仅监听 `127.0.0.1:4317`，打开 `http://127.0.0.1:4317/?page=cost-profit`。此独立验收入口固定使用测试用户，不创建凭据、不运行自动监测；不得作为正式服务启动命令。正式服务仍使用原 `server/index.mjs` 真实登录和授权路径。结束验收后终止进程。当前安装依赖的开发模式有RSC重复导出错误，因此验收使用生产构建，不安装/升级依赖。
+
+国内运输与入仓：合计国内运输、保险及入仓等应归属于本批次的费用，列明凭据和范围。未知留空，状态 missing；明确不适用填0及 not_applicable。旧模板未填此项会保持待核实，不能自动视为零。
