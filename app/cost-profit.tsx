@@ -4,6 +4,8 @@ import {useCallback,useEffect,useRef,useState} from 'react';
 import TableImport,{type ImportRow} from './table-import';
 import {COST_LABELS,STATE_LABELS} from '../lib/cost-profit-model.mjs';
 import './cost-profit.css';
+import ProductCosts from './product-costs';
+import {useDirtyGuard} from './workspace-hooks';
 // Persisted evidence documents have different shapes by kind.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Row=Record<string,any>;
@@ -16,7 +18,11 @@ async function api(payload?:Row,query=''){const r=await fetch('/api/cost-profit'
 function Field({label,children}:{label:string;children:React.ReactNode}){return <label className="cp-field"><span>{label}</span>{children}</label>;}
 function Input({label,value,onChange,type='text'}:{label:string;value:unknown;onChange:(v:string)=>void;type?:string}){return <Field label={label}><input type={type} value={String(value??'')} onChange={e=>onChange(e.target.value)}/></Field>;}
 function Fee({title,value,onChange}:{title:string;value:Row;onChange:(v:Row)=>void}){return <fieldset className="cp-fee"><legend>{title}</legend><Field label="状态"><select value={value.state} onChange={e=>onChange({...value,state:e.target.value,amount:['zero','not_applicable'].includes(e.target.value)?'0':['pending','missing'].includes(e.target.value)?'':value.amount})}>{Object.entries(STATE_LABELS).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select></Field><Input label="原币金额" value={value.amount} onChange={amount=>onChange({...value,amount})}/><Input label="凭据编号或缺失原因" value={value.source} onChange={source=>onChange({...value,source})}/></fieldset>;}
-export default function CostProfit(){
+export default function CostWorkspace({role='管理员'}:{role?:string}){
+ const [view,setView]=useState(role==='供应链'?'evidence':'products');const leave=useDirtyGuard(false);
+ return <><nav className="pc-workspace-switch" aria-label="成本工作区">{role!=='供应链'&&<button className={'btn '+(view==='products'?'primary':'')} onClick={()=>{if(leave())setView('products');}}>商品成本与动销</button>}<button className={'btn '+(view==='evidence'?'primary':'')} onClick={()=>{if(leave())setView('evidence');}}>批次成本与结算证据</button></nav>{view==='products'?<ProductCosts/>:<CostProfit/>}</>;
+}
+function CostProfit(){
  const [data,setData]=useState<Row|null>(null),[error,setError]=useState(''),[message,setMessage]=useState(''),[busy,setBusy]=useState(false),[tab,setTab]=useState('dashboard'),[filters,setFilters]=useState({site:'',channel:'',sku:'',ticket:'',from:'',to:''}),[detail,setDetail]=useState<Row|null>(null),[history,setHistory]=useState<Row[]>([]),[pending,setPending]=useState<Row|null>(null),[order,setOrder]=useState<Row>(newOrder),[line,setLine]=useState({lot:'',salesRecordId:'',qty:''}),[review,setReview]=useState<Record<string,Row>>({});
  const lock=useRef(false),generation=useRef(0);
  const [sim,setSim]=useState<Row>({businessKey:'',lot:'',price:'',discount:'0',commission:'',advertising:'',warehouse:''});

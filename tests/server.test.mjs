@@ -182,6 +182,14 @@ test('独立服务器：公司登录、禁止伪造身份、岗位隔离、出�
  const published=await request('finance','/api/wholesale',catalogPrice);assert.equal(published.status,200,JSON.stringify(published.body));
  for(const who of ['sales','supply']){const catalog=(await request(who,'/api/wholesale')).body.catalog;assert.equal(catalog.products.find(p=>p.sku==='HTTP-BAG').available,23);assert.equal(catalog.priceHistory,undefined);assert.ok(!JSON.stringify(catalog).includes('HTTP-PRIVATE-COST'));}
  assert.equal((await request('finance','/api/cost-profit')).status,403);
+ const productPath='/api/product-costs',productInput={action:'preview',currency:'CNY',currencyConfirmed:true,basis:'unconfirmed',effectiveDate:'2026-10-01',fileName:'HTTP-TEST-ONLY.xlsx',fileHash:'d'.repeat(64),reason:'接口成本权限核验',rows:[{sku:'HTTP-BAG',site:'印尼',purchase:20,freight:2,total:22,source:{sheet:'Sheet2',row:3}}]};
+ for(const who of ['sales','supply'])assert.equal((await request(who,productPath)).status,403);
+ assert.equal((await request('newops',productPath,productInput)).status,403);
+ const costPreview=await request('finance',productPath,productInput);assert.equal(costPreview.status,200,JSON.stringify(costPreview.body));
+ assert.equal((await request('finance',productPath,{...productInput,action:'commit',version:costPreview.body.version,fingerprint:costPreview.body.fingerprint})).status,200);
+ assert.equal((await request('finance',productPath)).body.costs[0].unit,220000);
+ const scopedCosts=await request('newops',productPath);assert.equal(scopedCosts.status,200);assert.equal(scopedCosts.body.costs.length,0);assert(!JSON.stringify(scopedCosts.body).includes('HTTP-TEST-ONLY.xlsx'));
+ const badOrigin=await fetch(origin+productPath,{method:'POST',headers:{cookie:cookies.finance,origin:'https://attacker.test','content-type':'application/json'},body:JSON.stringify(productInput)});assert.equal(badOrigin.status,403);
  }
  const c=await request('sales','/api/wholesale',{action:'customerCreate',name:'HTTP客户',contact:'Sari',phone:'08123456',city:'Jakarta',address:'Warehouse 1'});assert.equal(c.status,200,JSON.stringify(c.body));const day=new Date(Date.now()+7*3600000).toISOString().slice(0,10);
  // Field workspace uses the real production router, authentication and file storage.

@@ -230,7 +230,7 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
         {actor.role==="运营" && (!actor.site || !actor.channel) && <div className="notice warn">当前账号尚未绑定站点和渠道，请联系管理员在“用户管理”中完成分配后再录入业务数据。</div>}
         {tab==="wholesale" && <WholesaleLanguageContext.Provider value={wholesaleLocale}><Wholesale onChanged={refresh} route={route} navigate={navigate}/></WholesaleLanguageContext.Provider>}
         {tab==="reviews" && <BusinessReviews initialView={route.view} initialDate={route.entity}/>}
-        {tab==="cost-profit" && <CostProfit/>}
+        {tab==="cost-profit" && <CostProfit role={actor.role}/>}
         {tab==="sales-targets" && <SalesTargets initialMonth={route.month}/>}
         {tab==="business-actions" && <BusinessActions initialId={route.entity}/>}
         {tab==="promotions" && <Promotions initialId={route.entity}/>}

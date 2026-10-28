@@ -637,3 +637,4 @@ export * from "./factory-document-schema";
 export * from "./promotion-schema";
 
 export * from "./wholesale-catalog-schema";
+export * from "./product-cost-schema";
