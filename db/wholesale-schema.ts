@@ -10,6 +10,7 @@ export const wholesaleCustomers = sqliteTable("wholesale_customers", {
 },t=>[uniqueIndex("idx_wh_customer_code").on(t.code),index("idx_wh_customer_owner").on(t.salesUserId)]);
 
 export const wholesaleOrders = sqliteTable("wholesale_orders", {
+  pricingPolicyVersion:integer("pricing_policy_version").notNull().default(0),
   id:text("id").primaryKey(), orderNo:text("order_no").notNull(), site:text("site").notNull().default("印尼"),
   currency:text("currency").notNull().default("IDR"), businessDate:text("business_date").notNull(),
   customerId:text("customer_id").notNull().references(()=>wholesaleCustomers.id), customerJson:text("customer_json").notNull(),
@@ -25,6 +26,7 @@ export const wholesaleOrders = sqliteTable("wholesale_orders", {
 },t=>[uniqueIndex("idx_wh_order_no").on(t.orderNo),index("idx_wh_order_customer").on(t.customerId,t.businessDate),index("idx_wh_order_sales").on(t.salesUserId,t.status),index("idx_wh_order_supply").on(t.supplyUserId,t.status),check("wh_indonesia_only",sql`${t.site}='印尼' AND ${t.currency}='IDR'`)]);
 
 export const wholesaleOrderItems = sqliteTable("wholesale_order_items", {
+  priceRequestId:text("price_request_id"),
   id:text("id").primaryKey(), orderId:text("order_id").notNull().references(()=>wholesaleOrders.id),
   sku:text("sku").notNull(), name:text("name").notNull(), qty:integer("qty").notNull(),
   productColor:text("product_color").notNull().default(""), productSize:text("product_size").notNull().default(""),

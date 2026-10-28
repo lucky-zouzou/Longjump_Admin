@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test,{mock} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync,readdirSync} from 'node:fs';
 import {createHash} from 'node:crypto';
@@ -10,6 +10,9 @@ import {releaseMigrations} from '../lib/backup-version.mjs';
 import {projectInventory} from '../lib/inventory-projection.mjs';
 import {chartDays,chartScale} from '../lib/sales-charts.mjs';
 import {indonesiaDate} from '../lib/wholesale.mjs';
+// These scenarios assume yesterday has ended in Indonesia, independently of
+// when CI runs. Site-local midnight rules are exercised separately.
+mock.timers.enable({apis:['Date'],now:new Date('2026-10-28T05:00:00Z')});
 const day=reportToday(),dateAt=n=>new Date(Date.parse(day)+n*86400000).toISOString().slice(0,10);
 async function scenario(run){const f=systemFixture();try{return await run(f)}finally{f.sqlite.close()}}
 const get=async(f,actor=f.users.admin)=>{svc.setActor(actor);const r=await svc.GET(new Request('http://localhost/api/system'));const body=await r.json();assert.equal(r.status,200,JSON.stringify(body));return body;};

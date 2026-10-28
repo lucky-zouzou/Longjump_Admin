@@ -1,0 +1,13 @@
+{
+  "current": {
+    "errors": 163,
+    "warnings": 17
+  },
+  "baseline": {
+    "errors": 163,
+    "warnings": 17
+  },
+  "added": [],
+  "removed": [],
+  "comparison": "Relative file + rule + severity + first diagnostic line, ignoring absolute root and relocated line numbers/codeframes"
+}

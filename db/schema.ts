@@ -1,3 +1,4 @@
+export * from './cost-profit-schema';
 import { integer, primaryKey, real, sqliteTable, text, uniqueIndex, index } from "drizzle-orm/sqlite-core";
 export * from "./wholesale-schema";
 export * from "./business-action-schema";
@@ -634,3 +635,6 @@ export * from "./after-sales-schema";
 export * from "./factory-document-schema";
 
 export * from "./promotion-schema";
+
+export * from "./wholesale-catalog-schema";
+export * from "./product-cost-schema";

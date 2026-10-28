@@ -142,7 +142,7 @@ test("订单上限跟随SKU档案，205个SKU完整创建、审批、发货且�
     const id=await f.create({items});
     assert.equal(f.orderRow(id).total_qty,410);assert.equal(f.orderRow(id).total_amount,410000);
     assert.equal(f.sqlite.prepare("SELECT COUNT(*) n FROM wholesale_order_items WHERE order_id=?").get(id).n,205);
-    await f.approve(id);
+    await f.change(f.users.admin,id,"orderApprove",{supplyUserId:f.users.supply.id,stockBasisConfirmed:true,priceExceptionConfirmed:true,reason:"测试已核实全部商品单价"});
     assert.equal(f.sqlite.prepare("SELECT SUM(reserved_qty) n FROM inventory_balances WHERE site='印尼'").get().n,410);
     const shipmentItems=f.sqlite.prepare("SELECT id itemId,qty FROM wholesale_order_items WHERE order_id=?").all(id);
     await f.change(f.users.supply,id,"orderShip",{items:shipmentItems,businessDate:indonesiaDate(),carrier:"测试承运商",warehouse:"印尼仓",trackingNo:"CATALOG-SHIP",handoverConfirmed:true});

@@ -1,8 +1,11 @@
-import test from 'node:test';
+import test,{mock} from 'node:test';
 import assert from 'node:assert/strict';
 import {systemFixture,svc,race} from './system-fixture.mjs';
 import {saveSalesAdSpend} from '../lib/sales-ad-spend.mjs';
 import {readSalesDashboard,reportToday} from '../lib/sales-dashboard.mjs';
+// Generic workflows need an ended day in both China and WIB. Explicit midnight
+// boundary coverage lives in action-accuracy/product-cost tests.
+mock.timers.enable({apis:['Date'],now:new Date('2026-10-28T05:00:00Z')});
 const day=reportToday(),yesterday=new Date(Date.parse(day)-86400000).toISOString().slice(0,10);
 const payload=(more={})=>({site:'印尼',channel:'TikTok',businessDate:yesterday,sourceBatchRef:crypto.randomUUID(),importKey:crypto.randomUUID(),rows:[{sku:'BAG-A',qty:3,amount:300}],...more});
 const expense=(more={})=>({action:'salesAdSpendSave',site:'印尼',channel:'TikTok',businessDate:yesterday,currency:'IDR',amount:50,note:'广告后台总费用核对',version:0,...more});

@@ -4,7 +4,7 @@ import {resolve,join} from 'node:path';
 import {createBackup,verifyArchive} from './backup.mjs';
 
 const SITES={'越南仓库':'越南','印尼仓库':'印尼','菲律宾仓库':'菲律宾','马来仓库':'马来西亚','泰国仓库':'泰国'};
-const SALES_TABLES=['sales_demand_corrections','sales_records','sales_imports','sales_ad_spend',
+const SALES_TABLES=['wholesale_price_snapshots','wholesale_price_requests','sales_demand_corrections','sales_records','sales_imports','sales_ad_spend',
  'wholesale_consignment_sales','wholesale_return_resolutions','wholesale_returns','wholesale_finance_entries','wholesale_shipment_items','wholesale_shipments',
  'wholesale_allocations','wholesale_order_items','wholesale_files','wholesale_operations','wholesale_orders',
  'wholesale_bank_events','wholesale_bank_receipts','wholesale_finance_periods'];
@@ -40,6 +40,7 @@ export function validateBaseline(input){
  return {asOf:input.asOf,startDate:'2026-10-01',source:String(input.source||'库存文件'),sourceSha256:input.sha256,payloadHash:hash(input),balances,summary,skus:[...names].map(([sku,name])=>({sku,name})),total:summary.reduce((s,r)=>s+r.total,0)};
 }
 function blockers(db){
+ if(db.prepare("SELECT 1 FROM wholesale_price_requests WHERE created_at>='2026-10-01' LIMIT 1").get())fail("已存在正式批发特价申请，不能清理期初测试数据");
  const unknown=db.prepare("SELECT 1 FROM inventory_balances WHERE site NOT IN ('越南','印尼','菲律宾','马来西亚','泰国') OR channel NOT IN ('TikTok','Shopee','线下分销') LIMIT 1").get();
  if(unknown)fail('存在五站之外的库存，已暂停，避免超范围清理');
  const holds=db.prepare('SELECT COALESCE(SUM(pending_shelf_qty+quarantine_qty),0) n FROM transport_leg_items').get().n;
@@ -59,7 +60,7 @@ const now=()=>new Date().toISOString();
 function requireAdmin(actor){if(actor?.role!=='管理员')fail('仅管理员可执行期初切换',403);}
 function audit(db,actor,action,id,detail){db.prepare('INSERT INTO audit_logs(id,action,entity_type,entity_id,detail_json,actor_id,actor_name,created_at) VALUES(?,?,?,?,?,?,?,?)').run(randomUUID(),action,'inventory-baseline',id,JSON.stringify(detail),actor.id,actor.name,now());}
 export function transaction(db,fn){
- db.exec('BEGIN IMMEDIATE');try{const result=fn();if(db.prepare('PRAGMA foreign_key_check').all().length)fail('外键核验失败，操作已回滚');if(db.prepare('PRAGMA integrity_check').get().integrity_check!=='ok')fail('数据库完整性检查失败');db.exec('COMMIT');return result;}catch(e){db.exec('ROLLBACK');throw e;}
+ db.exec('BEGIN IMMEDIATE; PRAGMA defer_foreign_keys=ON');try{const result=fn();if(db.prepare('PRAGMA foreign_key_check').all().length)fail('外键核验失败，操作已回滚');if(db.prepare('PRAGMA integrity_check').get().integrity_check!=='ok')fail('数据库完整性检查失败');db.exec('COMMIT');return result;}catch(e){db.exec('ROLLBACK');throw e;}
 }
 // Only delete guards for the explicitly archived sales tables are suspended inside
 // the transaction. Concurrent connections see neither intermediate data nor guards.
@@ -108,7 +109,7 @@ export function undoBaseline(env,actor,id){
   for(const t of triggers)db.exec(`DROP TRIGGER ${q(t.name)}`);
   for(const t of SNAPSHOT_TABLES)db.exec(`DELETE FROM ${q(t)}`);
   // FK insertion order is reversed for sales children; independent tables follow.
-  for(const t of [...SNAPSHOT_TABLES].reverse())for(const r of snapshot.original[t]){const cols=Object.keys(r);db.prepare(`INSERT INTO ${q(t)}(${cols.map(q).join(',')}) VALUES(${cols.map(()=>'?').join(',')})`).run(...cols.map(c=>r[c]));}
+  for(const t of [...SNAPSHOT_TABLES].reverse())for(const r of snapshot.original[t]||[]){const cols=Object.keys(r);db.prepare(`INSERT INTO ${q(t)}(${cols.map(q).join(',')}) VALUES(${cols.map(()=>'?').join(',')})`).run(...cols.map(c=>r[c]));}
   for(const t of triggers)db.exec(t.sql);
   // Movements and audit are immutable history: append compensating movements.
   const old=new Map(snapshot.original.inventory_balances.map(r=>[[r.site,r.channel,r.sku].join('|'),r]));

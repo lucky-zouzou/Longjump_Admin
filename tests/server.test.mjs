@@ -1,3 +1,4 @@
+import {ticketRows} from './cost-fixture.mjs';
 import * as XLSX from "xlsx";
 import test from 'node:test';import assert from 'node:assert/strict';import {mkdtempSync,rmSync,existsSync} from 'node:fs';import {tmpdir} from 'node:os';import {join} from 'node:path';import {spawn} from 'node:child_process';import {once} from 'node:events';import net from 'node:net';
 import {openDatabase} from '../server/storage.mjs';import {setAccount,verifyPassword} from '../server/accounts.mjs';
@@ -17,6 +18,40 @@ test('独立服务器：公司登录、禁止伪造身份、岗位隔离、出�
  const health=await fetch(origin+'/healthz');assert.equal(health.status,200);assert.deepEqual(await health.json(),{ok:true,release:'local'});
  const cookies={};for(const who of ['admin','sales','supply','finance'])cookies[who]=await login(who,who==='sales');
  const request=async(who,path,payload)=>{const r=await fetch(origin+path,{method:payload?'POST':'GET',headers:{cookie:cookies[who],origin,...(payload?{'content-type':'application/json'}:{})},...(payload?{body:JSON.stringify({...payload,operationId:crypto.randomUUID()})}:{})});const text=await r.text();let body;try{body=JSON.parse(text)}catch{body=text}return {status:r.status,body}};
+
+ { // Financial routes use the same real session and reject unauthorized roles and origins.
+ const path='/api/finance-ledger';assert.equal((await fetch(origin+path)).status,401);
+ for(const who of ['sales','supply'])assert.equal((await request(who,path)).status,403);
+ for(const who of ['admin','finance']){const result=await request(who,path);assert.equal(result.status,200,JSON.stringify(result.body));assert.ok(Array.isArray(result.body.balances));}
+ assert.equal((await fetch(origin+path,{method:'POST',headers:{cookie:cookies.admin,origin:'https://wrong.example','Content-Type':'application/json'},body:'{}'})).status,403);
+ assert.equal((await request('finance',path,{action:'access',userId:'supply',canRead:true,reason:'TEST'})).status,403);
+ }
+ { // Cost API uses actual session authentication; migration grants nobody by default.
+ const path='/api/cost-profit';
+ assert.equal((await fetch(origin+path)).status,401);
+ for(const who of ['sales','supply','finance'])assert.equal((await request(who,path)).status,403);
+ assert.equal((await fetch(origin+path,{headers:{'x-local-test-user':'admin','oai-authenticated-user-id':'admin'}})).status,401);
+ assert.equal((await fetch(origin+path,{method:'POST',headers:{origin:'https://attacker.test',cookie:cookies.admin,'content-type':'application/json'},body:'{}'})).status,403);
+ const input=ticketRows({businessKey:'HTTP-COST'}).map(r=>({...r,sku:'HTTP-BAG'}));
+ const beforeDb=openDatabase(join(root,'business.sqlite')).sqlite,beforeStock=beforeDb.prepare('SELECT SUM(qty) n FROM inventory_balances').get().n;beforeDb.close();
+ for(const who of ['sales','supply','finance'])assert.equal((await request(who,path,{action:'previewImport',rows:input})).status,403);
+ const p=await request('admin',path,{action:'previewImport',rows:input});assert.equal(p.status,200,JSON.stringify(p.body));assert.equal(p.body.errors.length,0);
+ assert.equal((await request('admin',path)).body.tickets.length,0); // Cancelling a preview performs zero writes.
+ const args={action:'commitImport',rows:input,fileName:'HTTP.csv',fingerprint:p.body.fingerprint,version:p.body.version};
+ const first=await request('admin',path,args);assert.equal(first.status,200,JSON.stringify(first.body));
+ assert.notEqual((await request('admin',path,args)).status,200);
+ const invalid=[...ticketRows({businessKey:'HTTP-GOOD'}).map(r=>({...r,sku:'HTTP-BAG'})),...ticketRows({businessKey:'HTTP-INVALID'}).map(r=>({...r,sku:'UNKNOWN'}))];
+ const bad=await request('admin',path,{action:'previewImport',rows:invalid});assert.ok(bad.body.errors.length);
+ assert.equal((await request('admin',path,{action:'commitImport',rows:invalid,fileName:'bad.csv',fingerprint:bad.body.fingerprint,version:bad.body.version})).status,400);
+ // A failure on the second insert rolls back even the first ticket and its audit entry.
+ const db=openDatabase(join(root,'business.sqlite')).sqlite;db.exec("CREATE TRIGGER http_cost_failure BEFORE INSERT ON cost_records WHEN NEW.business_key='HTTP-FAIL' BEGIN SELECT RAISE(ABORT,'test rollback'); END;");db.close();
+ const rollback=[...ticketRows({businessKey:'HTTP-FIRST'}),...ticketRows({businessKey:'HTTP-FAIL'})].map(r=>({...r,sku:'HTTP-BAG'}));
+ const rp=await request('admin',path,{action:'previewImport',rows:rollback});assert.equal(rp.body.errors.length,0);
+ assert.equal((await request('admin',path,{action:'commitImport',rows:rollback,fileName:'rollback.csv',fingerprint:rp.body.fingerprint,version:rp.body.version})).status,500);
+ const afterDb=openDatabase(join(root,'business.sqlite')).sqlite;assert.equal(afterDb.prepare('SELECT SUM(qty) n FROM inventory_balances').get().n,beforeStock);assert.equal(afterDb.prepare('SELECT COUNT(*) n FROM cost_records').get().n,1);assert.equal(afterDb.prepare('SELECT COUNT(*) n FROM cost_imports').get().n,1);afterDb.exec('DROP TRIGGER http_cost_failure');afterDb.close();
+ assert.equal((await request('admin',path)).body.tickets.length,1);
+ assert.equal((await request('finance',path,{action:'review',id:first.body.ids[0],taxTreatment:'inventory',note:'越权复核'})).status,403);
+ }
  const system=await request('admin','/api/system');assert.equal(system.status,200,JSON.stringify(system.body));const page=await fetch(origin+'/',{headers:{cookie:cookies.admin}});assert.equal(page.status,200);assert.ok((await page.text()).includes('LOONG'));
  assert.equal((await fetch(origin+'/api/inventory-baseline')).status,401);
  assert.equal((await fetch(origin+'/api/test-cleanup')).status,401);
@@ -147,6 +182,22 @@ test('独立服务器：公司登录、禁止伪造身份、岗位隔离、出�
  const reversal=await request('admin','/api/system',{action:'reverseSalesImport',importId:performance.body.importId,reason:'接口测试纠正重复报表'});assert.equal(reversal.status,200,JSON.stringify(reversal.body));
  assert.equal((await request('newops','/api/sales-dashboard')).body.totalQty,2);
  const crossImport=await fetch(origin+'/api/system',{method:'POST',headers:{cookie:cookies.admin,origin:'https://attacker.test','content-type':'application/json'},body:JSON.stringify({action:'bulkImport',kind:'inventory',rows:stockRows,...importMeta})});assert.equal(crossImport.status,403);
+ {
+ const catalogPrice={action:'pricePublish',sku:'HTTP-BAG',priceVersion:0,purchaseCost:'70000',freightCost:'6000',taxCost:'2000',inboundCost:'2000',standardMarkup:'25',minimumMarkup:'20',rounding:'100',validUntil:'2099-01-01',costReference:'HTTP-PRIVATE-COST',reason:'HTTP核对到仓成本',costConfirmed:true};
+ assert.equal((await request('sales','/api/wholesale',catalogPrice)).status,403);
+ assert.equal((await request('supply','/api/wholesale',catalogPrice)).status,403);
+ const published=await request('finance','/api/wholesale',catalogPrice);assert.equal(published.status,200,JSON.stringify(published.body));
+ for(const who of ['sales','supply']){const catalog=(await request(who,'/api/wholesale')).body.catalog;assert.equal(catalog.products.find(p=>p.sku==='HTTP-BAG').available,23);assert.equal(catalog.priceHistory,undefined);assert.ok(!JSON.stringify(catalog).includes('HTTP-PRIVATE-COST'));}
+ assert.equal((await request('finance','/api/cost-profit')).status,403);
+ const productPath='/api/product-costs',productInput={action:'preview',currency:'CNY',currencyConfirmed:true,basis:'unconfirmed',effectiveDate:'2026-10-01',fileName:'HTTP-TEST-ONLY.xlsx',fileHash:'d'.repeat(64),reason:'接口成本权限核验',rows:[{sku:'HTTP-BAG',site:'印尼',purchase:20,freight:2,total:22,source:{sheet:'Sheet2',row:3}}]};
+ for(const who of ['sales','supply'])assert.equal((await request(who,productPath)).status,403);
+ assert.equal((await request('newops',productPath,productInput)).status,403);
+ const costPreview=await request('finance',productPath,productInput);assert.equal(costPreview.status,200,JSON.stringify(costPreview.body));
+ assert.equal((await request('finance',productPath,{...productInput,action:'commit',version:costPreview.body.version,fingerprint:costPreview.body.fingerprint})).status,200);
+ assert.equal((await request('finance',productPath)).body.costs[0].unit,220000);
+ const scopedCosts=await request('newops',productPath);assert.equal(scopedCosts.status,200);assert.equal(scopedCosts.body.costs.length,0);assert(!JSON.stringify(scopedCosts.body).includes('HTTP-TEST-ONLY.xlsx'));
+ const badOrigin=await fetch(origin+productPath,{method:'POST',headers:{cookie:cookies.finance,origin:'https://attacker.test','content-type':'application/json'},body:JSON.stringify(productInput)});assert.equal(badOrigin.status,403);
+ }
  const c=await request('sales','/api/wholesale',{action:'customerCreate',name:'HTTP客户',contact:'Sari',phone:'08123456',city:'Jakarta',address:'Warehouse 1'});assert.equal(c.status,200,JSON.stringify(c.body));const day=new Date(Date.now()+7*3600000).toISOString().slice(0,10);
  // Field workspace uses the real production router, authentication and file storage.
  assert.equal((await fetch(origin+'/api/field-sales')).status,401);

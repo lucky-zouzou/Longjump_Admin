@@ -25,7 +25,9 @@ function seed(f,{qty=2,prev=2,stock=10}={}){
 async function finance(f,costs={landed:1700,ads:0,platform:0,fulfillment:0,returns:0},at=now){
  const dates=actionWindow('印尼',at).days.slice(-7);
  for(const [i,date] of dates.entries()){
-  const r=dbrow(f),day=await actionFinanceDay(f.db,r,date);
+  const r=dbrow(f);
+  if(costs.ads>0)f.sqlite.prepare("INSERT OR IGNORE INTO sales_ad_spend(id,site,channel,business_date,currency,amount,note,actor_id,updated_at) VALUES(?,'印尼','TikTok',?,'IDR',10,'TEST-ONLY 每日广告来源','finance-1',?)").run('ad-'+date,date,date);
+  const day=await actionFinanceDay(f.db,r,date);
   const daily=Object.fromEntries(Object.entries(costs).map(([k,n])=>{const cents=Math.round(n*100),base=Math.floor(cents/7);return [k,(base+(i===6?cents-base*7:0))/100];}));
   await call(f,f.users.finance,'loss','finance',{businessDate:date,basisHash:day.basisHash,revision:day.revision,costs:daily,source:'SKU结算单核对成本'+date,confirmed:true},at);
  }
@@ -144,4 +146,15 @@ test('止损后销量归零仍须核实广告等费用，确认无持续损失�
  await assert.rejects(call(f,f.users.finance,'loss','review',{source:'平台结算报表核查',outcome:'resolved'},at),/证据未齐/);
  await finance(f,{landed:0,ads:10,platform:0,fulfillment:0,returns:0},at);s=JSON.parse(dbrow(f).snapshot_json);assert.equal(s.condition,'active');assert.equal(s.profit,-10);
  await finance(f,{landed:0,ads:0,platform:0,fulfillment:0,returns:0},at);await call(f,f.users.finance,'loss','review',{source:'核对无销量且无剩余费用',outcome:'resolved'},at);assert.equal(dbrow(f).status,'resolved');
+});
+
+test('两个SKU并发核算同店广告费用，已保存分配合计不能超过当天费用池',async()=>{
+ const f=fixture();seed(f);f.stock('BAG-B',10,10);
+ for(const date of w.days)f.sqlite.prepare("INSERT INTO sales_records(id,import_id,business_date,site,channel,sku,qty,currency,reported_amount,actor_id,created_at) VALUES(?,?,?,'印尼','TikTok','BAG-B',2,'IDR',200,'id-ops',?)").run(crypto.randomUUID(),'imp-'+date,date,date);
+ f.sqlite.prepare("INSERT INTO sales_ad_spend(id,site,channel,business_date,currency,amount,note,actor_id,updated_at) VALUES('shared-ad','印尼','TikTok',?,'IDR',10,'TEST-ONLY 日费用','finance-1',?)").run(w.cutoff,now.toISOString());await refreshBusinessActions(f.db,f.users.admin,now);
+ const actions=f.sqlite.prepare("SELECT * FROM business_actions WHERE site='印尼' AND channel='TikTok' AND kind='loss' AND sku IN ('BAG-A','BAG-B')").all();assert.equal(actions.length,2);
+ const inputs=await Promise.all(actions.map(async r=>({id:r.id,version:r.version,action:'finance',businessDate:w.cutoff,...await actionFinanceDay(f.db,r,w.cutoff),costs:{landed:100,ads:7,platform:0,fulfillment:0,returns:0},source:'TEST-ONLY 独立核对店铺费用分配',confirmed:true,note:'并发分摊测试'})));
+ // Finance revision is independent of the business-action revision.
+ const results=await Promise.allSettled(inputs.map((p,i)=>mutateBusinessAction(f.db,f.users.finance,{...p,id:actions[i].id,version:actions[i].version},now)));
+ assert.equal(results.filter(r=>r.status==='fulfilled').length,1);const saved=f.sqlite.prepare('SELECT data_json FROM business_action_finance_days').all();assert.equal(saved.length,1);assert.equal(JSON.parse(saved[0].data_json).ads,7);
 });
