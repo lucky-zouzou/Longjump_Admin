@@ -2,13 +2,14 @@
 import {useState} from "react";
 import {navigationForRole} from "../lib/permissions.mjs";
 import Icon from "./workspace-icons";
+import SupplyChain from "./supply-chain";
 
 // These rows are already filtered by the server's role and site boundaries.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Row=Record<string,any>;
 type Props={data:{metrics:Row;actor:Row;currentMonth:string;myTasks:Row[];monthlyStatus:Row[];issues:Row[]};go:(tab:string,task?:Row)=>void};
 const number=(value:unknown)=>Number(value||0).toLocaleString("zh-CN");
-const steps=[['supply_confirm','备货确认'],['factory_production','工厂生产'],['booking','订舱'],['sea_freight','海运'],['port_arrived','到港'],['customs_clearance','清关'],['last_mile_delivery','派送'],['awaiting_receipt','待到仓'],['shelf_pending','待上架'],['on_shelf','已上架']];
+
 
 export default function Overview({data,go}:Props){
   const [allTasks,setAllTasks]=useState(false),[allIssues,setAllIssues]=useState(false);
@@ -49,10 +50,6 @@ export default function Overview({data,go}:Props){
         {data.issues.length?<><div className="overview-risk-list">{(allIssues?issues:issues.slice(0,4)).map((issue,i)=><article className={issue.level==='critical'?'critical':'warning'} key={`${issue.type}-${i}`}><div><span className="risk-dot"/><strong>{issue.type}</strong><small>{issue.level==='critical'?'优先':'关注'}</small></div><p>{issue.detail}</p></article>)}</div><footer>{data.issues.length>4&&<button className="overview-link" aria-expanded={allIssues} onClick={()=>setAllIssues(!allIssues)}>{allIssues?'收起预警':`展开本页 ${data.issues.length} 条预警`}</button>}{actionLink('suggestions','进入驾驶舱')}</footer></>:<div className="overview-empty"><Icon name="approval"/><strong>暂无高优先级供应风险</strong><span>持续关注销售与库存变化。</span></div>}
       </section>
     </div>
-    <section className="overview-card overview-chain">
-      <header><div><h2>全链路实时状态</h2><p>从备货到上架，追踪每一个履约节点。</p></div>{actionLink('batches','查看全部批次')}</header>
-      <div className="overview-chain-meta"><span><i className="transit-dot"/>{number(m.activeBatchCount)} 个在途批次</span><span className={m.stalledBatchCount?'stalled':''}>{number(m.stalledBatchCount)} 个节点停滞</span><span>{number(m.pendingShelfCount)} 个待上架</span></div>
-      <div className="overview-stage-grid">{steps.map(([key,label],index)=><div className={`overview-stage ${Number(m.batchStageCounts?.[key])>0?'has-value':''} ${key==='on_shelf'?'finished':''}`} key={key}><span className="stage-number">{String(index+1).padStart(2,'0')}</span><strong>{number(m.batchStageCounts?.[key])}</strong><span>{label}</span><Icon name="chevron"/></div>)}</div>
-    </section>
+    <SupplyChain metrics={m} allowed={allowed} go={go}/>
   </div>;
 }

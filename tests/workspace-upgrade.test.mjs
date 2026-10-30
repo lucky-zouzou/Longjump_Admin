@@ -50,7 +50,7 @@ test('模块摘要不携带其他页面或所有SKU日曲线；趋势按选中SK
 test('任务携带具体订单定位，路由保留过滤并正确转义',async()=>{const f=systemFixture();try{
  const id=await f.create();const tasks=await wholesaleTasks(f.db,f.users.finance);assert.equal(tasks[0].entity,id);assert.equal(tasks[0].view,'orders');
  const route={page:'wholesale',entity:id,view:'orders',month:'2026-10',search:'客户 & SKU/1',status:'pending'};assert.deepEqual(readWorkspaceRoute(workspaceUrl(route).split('?')[1]),route);
- assert.deepEqual(mobileModules('销售'),['wholesale','production-tracking']);assert.ok(mobileModules('管理员').length<=4);
+ assert.deepEqual(mobileModules('销售'),['wholesale','quality-incidents','production-tracking']);assert.ok(mobileModules('管理员').length<=4);
  }finally{f.sqlite.close();}});
 test('订单草稿按账号隔离、过期和损坏安全处理，多SKU内容原样恢复',()=>{
  const map=new Map(),store={getItem:k=>map.get(k),setItem:(k,v)=>map.set(k,v)};
