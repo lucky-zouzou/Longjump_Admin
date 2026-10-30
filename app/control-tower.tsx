@@ -4,6 +4,7 @@ import Overview from "./overview";
 import WorkspaceIcon from "./workspace-icons";
 import {WorkspaceGuard,useWorkspaceRoute,useVisibleRefresh} from "./workspace-hooks";
 import {NAV_GROUPS,mobileModules} from "../lib/workspace-model.mjs";
+import {parseWorkspaceResponse} from "../lib/workspace-response.mjs";
 const InboundReceipts=lazy(()=>import("./inbound-receipts"));
 const BusinessReviews=lazy(()=>import("./business-reviews"));
 import SalesAdSpend from "./sales-ad-spend";
@@ -89,11 +90,7 @@ const classNames = (...values:Array<string|false|undefined>) => values.filter(Bo
 const permissionLabel = (key:string) => (PERMISSION_LABELS as Readonly<Record<string,string>>)[key]||key;
 const isKnownRole = (role:string) => Object.prototype.hasOwnProperty.call(ROLE_PERMISSIONS,role);
 
-async function parseResponse(response:Response) {
-  const result = await response.json().catch(() => ({ error:"服务器返回了无法识别的结果" }));
-  if (!response.ok) throw new Error(result.error || "操作失败");
-  return result;
-}
+const parseResponse= parseWorkspaceResponse;
 
 export default function ControlTower({identity}:{identity:Identity}) {return <WorkspaceGuard><ControlTowerWorkspace identity={identity}/></WorkspaceGuard>;}
 function ControlTowerWorkspace({ identity }: { identity:Identity }) {
@@ -118,7 +115,7 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
 
   const refresh = useCallback(async () => {
     const generation=++requestGeneration.current;
-    try{const result=await parseResponse(await fetch(`/api/system?module=${encodeURIComponent(selectedTab)}`,{cache:"no-store",signal:AbortSignal.timeout(20000)}));
+    try{const result=await parseResponse(await fetch(`/api/system?module=${encodeURIComponent(selectedTab)}`,{cache:"no-store",signal:AbortSignal.timeout(20000)}),{snapshot:true});
       if(generation!==requestGeneration.current)return;
       setData(result);setConnectionError("");setLastSync(new Date().toLocaleTimeString("zh-CN"));
       if(selectedTab==="home")navigate({page:result.module},true);
@@ -191,7 +188,7 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
   const actor=data.actor;
   const roleNav=navigationForRole(actor.role).filter(key=>key!=="wholesale"||actor.role!=="运营"||actor.site==="印尼");
   const tab=roleNav.includes(selectedTab)?selectedTab:roleNav[0];
-  const visibleNav = navItems.filter(([key]) => roleNav.includes(key));
+  const visibleNav = navItems.filter(([key]) => roleNav.includes(key)&&key!=="after-sales");
   const taskCount=(key:string)=>key==="overview"?data.myTasks.length:data.myTasks.filter(task=>task.tab===key).length;
   const taskBadge=(key:string)=>taskCount(key)>0?<span className="nav-task-count" aria-label={`${taskCount(key)}项待办`}>{taskCount(key)>99?"99+":taskCount(key)}</span>:null;
   const shellT=(key:string)=>translateWholesale(tab==="wholesale"?wholesaleLocale.language:"zh",key);
@@ -234,7 +231,7 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
         {tab==="sales-targets" && <SalesTargets initialMonth={route.month}/>}
         {tab==="business-actions" && <BusinessActions initialId={route.entity}/>}
         {tab==="promotions" && <Promotions initialId={route.entity}/>}
-        {["after-sales","quality-incidents"].includes(tab) && <AfterSales key={tab} kind={tab==="quality-incidents"?"quality":"after_sale"} initialMonth={route.month}/>}
+        {["after-sales","quality-incidents"].includes(tab) && <AfterSales key={tab} kind="all" initialMonth={route.month}/>}
         {tab==="overview" && <Overview data={data} go={setTab}/>}
         {tab==="suggestions" && <Suggestions data={data} act={act} busy={busy}/>}
         {tab==="new-products" && <NewProducts data={data} act={act} busy={busy}/>}

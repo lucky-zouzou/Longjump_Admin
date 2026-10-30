@@ -32,7 +32,7 @@ test('品质异常独立台账按发现环节分类，未知损失不冒充0，�
  const report=await readAfterSales(f.db,f.users.admin,month,'quality');assert.equal(report.summary.cases,5);assert.equal(report.summary.qty,20);assert(report.summary.stages.every(s=>s.cases===1));assert.equal(report.summary.currencies[0].lossMissing,5);
  assert.equal((await readAfterSales(f.db,f.users.admin,month)).summary.cases,0);
  const factory=await readAfterSales(f.db,{role:'工厂',id:'factory'},month,'quality');assert.equal(factory.records.length,5);assert.equal(factory.canCreate,false);
- for(const actor of [f.users.indonesia,f.users.finance,f.users.sales])await assert.rejects(readAfterSales(f.db,actor,month,'quality'),e=>e.status===403);
+ for(const actor of [f.users.indonesia,f.users.sales])assert.equal((await readAfterSales(f.db,actor,month,'quality')).records.length,0);assert.equal((await readAfterSales(f.db,f.users.finance,month,'quality')).records.length,5);
  assert.equal(report.records[0].data.discoveredUtc,new Date(Date.parse(local+'+08:00')).toISOString());
  }finally{f.sqlite.close();}
 });
@@ -59,7 +59,22 @@ test('异常全流程留痕、整改和赔偿结清后关闭，不修改库存�
  }finally{f.sqlite.close();}
 });
 test('异常导航仅开放协作岗位且路由可恢复',()=>{
- for(const role of ['管理员','供应链','工厂'])assert(navigationForRole(role).includes('quality-incidents'));
- for(const role of ['运营','财务','销售','海运'])assert(!navigationForRole(role).includes('quality-incidents'));
+ for(const role of ['管理员','供应链','工厂','运营','财务','销售'])assert(navigationForRole(role).includes('quality-incidents'));
+ for(const role of ['海运'])assert(!navigationForRole(role).includes('quality-incidents'));
  assert(Object.hasOwn(MODULE_FIELDS,'quality-incidents'));assert(NAV_GROUPS.some(g=>g.keys.includes('quality-incidents')));assert.equal(readWorkspaceRoute('?page=quality-incidents&month=2026-10').page,'quality-incidents');
+});
+
+test('统一台账包含历史售后、品质及证据，财务可读不能定责，线下运营只能本人范围',async()=>{
+ const f=fixture();try{
+ const id=await create(f);await submit(f,id);
+ const sale=await mutateAfterSales(f.db,f.users.sales,{action:'create',kind:'after_sale',businessDate:date,caseNo:'OFFLINE',orderNo:'W1',sku:'BAG',qty:2,reason:'商品质量问题',description:'客户反馈拉链破损',refundAmount:'10'});
+ const row=await afterRecord(f.db,f.users.sales,sale.id);assert.equal(row.site,'印尼');assert.equal(row.channel,'线下批发');
+ await uploadAfterEvidence(f.db,bucket,f.users.sales,sale.id,photo);await change(f,sale.id,f.users.sales,'submit');
+ const report=await readAfterSales(f.db,f.users.finance,month,'all');assert.equal(report.records.length,2);assert.equal(report.files.length,2);assert.equal(report.summary.cases,2);assert.equal(report.summary.stages.find(s=>s.id==='customer').cases,1);
+ assert.equal((await readAfterSales(f.db,f.users.sales,month,'all')).records.length,1);
+ await assert.rejects(change(f,id,f.users.finance,'confirm',{responsibility:'工厂',liableName:'工厂甲',claimAmount:'20',note:'未经授权财务定责'}),e=>e.status===403);
+ await assert.rejects(mutateAfterSales(f.db,f.users.sales,{action:'create',...input(),site:'泰国'}),e=>e.status===403);
+ const op=await create(f,{site:f.users.indonesia.site,channel:f.users.indonesia.channel},f.users.indonesia);assert.equal((await afterRecord(f.db,f.users.indonesia,op)).record_kind,'quality');
+ await assert.rejects(create(f,{site:'印尼',channel:'线下批发',caseNo:'OFFLINE',sku:'BAG'}),e=>e.status===409);
+ }finally{f.sqlite.close();}
 });

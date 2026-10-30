@@ -8,6 +8,9 @@ import {issueDispatchNotice,readFactoryDocuments,changeDispatch,dispatchAvailabi
 import {uploadFactoryFile,readFactoryFile} from '../lib/factory-document-files.mjs';
 import {purchaseWorkbook,noticeWorkbook,packingWorkbook} from '../lib/factory-document-export.mjs';
 import {REQUIRED_MONTHLY_SCOPES} from '../lib/rules.mjs';
+import {ticketRows,orderPayload,importRows,review} from './cost-fixture.mjs';
+import {mutateCost,readCostProfit} from '../lib/cost-profit.mjs';
+import {localDay} from '../lib/promotion-model.mjs';
 async function setup({modern=true,complete=true}={}){
  const f=systemFixture();seedMonthly(f);f.factory={id:'factory-1',name:'工厂甲',role:'工厂'};
  if(modern){f.sqlite.prepare('DELETE FROM approval_requests').run();for(const scope of REQUIRED_MONTHLY_SCOPES)await svc.monthlySubmit({...f.users.indonesia,...scope},{month:'2026-09',...scope,...(scope.site==='印尼'&&scope.channel==='TikTok'?{items:[{sku:'BAG-A',qty:10,name:'测试包'}]}:{zeroDemand:true,zeroReason:'本月无需备货'})});await preparePurchase(f);await svc.submitPlan(f.users.supply,{month:'2026-09'});}
@@ -43,6 +46,38 @@ test('三单闭环：装箱复核后按实发转海运，不改海外库存、�
  assert.deepEqual(f.sqlite.prepare('SELECT * FROM inventory_balances').all(),before);assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM inventory_movements').get().n,0);
  const view=await readFactoryDocuments(f.db,f.users.admin),wb=packingWorkbook(X,view.notices[0]);assert.equal(wb.Sheets['商品装箱清单'].F6.v,8);assert.equal(wb.Sheets['商品装箱清单'].H6.v,1);for(const col of [5,7,12])assert.ok(!wb.Sheets['商品装箱清单']['!merges'].some(m=>m.s.r<=6&&m.e.r>=6&&m.s.c<=col&&m.e.c>=col),'装箱合计不能被合并覆盖');assert.equal(wb.Sheets['商品装箱清单'].L6.v,.085956);assert.equal(noticeWorkbook(X,view.notices[0]).Sheets['发货通知单'].G7.v,10);
  svc.setActor(f.users.sales);const tracked=await(await svc.GET(new Request('http://localhost/api/system?module=production-tracking'))).json();assert.ok(tracked.productionTracking[0].events.some(e=>e.label==='已按装箱清单建立海运批次'));assert.ok(!JSON.stringify(tracked).includes('purchasePrice'));
+ }finally{f.sqlite.close();}
+});
+test('同一真实业务链：月度需求采购→工厂质检装箱→运输到仓上架→销售扣库→成本结算与销售修订',async()=>{
+ const f=await setup();try{
+  const post=async(actor,action,payload)=>{svc.setActor(actor);const response=await svc.POST(new Request('http://localhost/api/system',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,...payload})}));return {status:response.status,body:await response.json()};};
+  const stock=()=>f.sqlite.prepare("SELECT qty FROM inventory_balances WHERE site='印尼' AND channel='TikTok' AND sku='BAG-A'").get().qty;
+  const initial=stock(),n=await f.issue();await changeDispatch(f.db,f.factory,await f.pack(n.id));
+  await changeDispatch(f.db,f.users.supply,{action:'reviewPacking',noticeId:n.id,version:2,decision:'confirm',reason:'TEST-ONLY 实发十件核对'});
+  const created=await post(f.users.supply,'createTransportBatch',{noticeId:n.id,noticeVersion:3,batchNo:'TEST-E2E',carrierName:'承运商'});assert.equal(created.status,200,JSON.stringify(created.body));
+  const leg=()=>f.sqlite.prepare('SELECT * FROM transport_legs').get();
+  for(let i=0;i<5;i++){
+   const r=await post(i===0?f.users.supply:{id:'sea',role:'海运',name:'海运'},'advanceTransportLeg',{legId:leg().id,version:leg().version,evidenceRef:`TEST-E2E-${i}`,note:'隔离环境运输凭证',etd:today(),eta:today(),ata:today(),portName:'TEST-PORT'});assert.equal(r.status,200,JSON.stringify(r.body));
+  }
+  const item=f.sqlite.prepare('SELECT * FROM transport_leg_items').get();
+  const received=await post(f.users.supply,'receiveTransportLeg',{legId:leg().id,receiptNo:'TEST-RCV-E2E',proofRef:'TEST-RECEIVED',items:[{id:item.id,receivedQty:10,quarantineQty:0}]});assert.equal(received.status,200,JSON.stringify(received.body));assert.equal(stock(),initial);
+  for(const qty of [4,6]){const r=await post(f.users.indonesia,'confirmTransportShelf',{legItemId:item.id,shelvedQty:qty,listingRef:'TEST-LISTING',note:'隔离环境确认上架'});assert.equal(r.status,200,JSON.stringify(r.body));}
+  assert.equal(leg().stage,'on_shelf');assert.equal(stock(),initial+10);
+  assert.notEqual((await post(f.users.indonesia,'confirmTransportShelf',{legItemId:item.id,shelvedQty:1,listingRef:'TEST-LISTING',note:'重复上架必须拒绝'})).status,200);assert.equal(stock(),initial+10);
+  const date=localDay(new Date(),'印尼'),sale={site:'印尼',channel:'TikTok',businessDate:date,sourceBatchRef:'TEST-E2E-SALES',importKey:'TEST-E2E-IMPORT',reportKind:'complete',fullDayConfirmed:true,rows:[{sku:'BAG-A',qty:2,amount:100,currency:'CNY'}]};
+  const imported=await(await svc.salesImport(f.users.indonesia,sale)).json();assert.equal(stock(),initial+8);
+  assert.equal(f.sqlite.prepare('SELECT report_kind FROM sales_imports WHERE id=?').get(imported.importId).report_kind,'partial','当天报表不能提前视为完整');
+  await assert.rejects(svc.salesImport(f.users.indonesia,{...sale,importKey:crypto.randomUUID(),sourceBatchRef:'RENAMED'}),/重叠|重复/);assert.equal(stock(),initial+8);
+  for(const u of [f.users.supply,f.users.finance])f.sqlite.prepare('INSERT INTO cost_access VALUES(?,?,?,?)').run(u.id,1,1,u.role==='财务'?1:0);
+  const rows=[{...ticketRows({businessKey:'TEST-E2E-COST',businessDate:date,effectiveAt:date,warehouse:'印尼仓',legId:leg().id,seaAmount:20})[0],qty:10,unitCost:25.5}];
+  const cost=await importRows(f,rows);await review(f,cost.ids[0]);
+  const source=f.sqlite.prepare('SELECT id FROM sales_records WHERE import_id=?').get(imported.importId);
+  const settlement=orderPayload({businessKey:'TEST-E2E-SETTLEMENT',businessDate:date,revenue:90,platform:{amount:10,state:'actual',source:'TEST-已扣佣金'},advertising:{amount:0,state:'zero',source:'TEST-确认零广告'},warehouse:{state:'actual',source:'TEST-履约账单',perOrder:3,perParcel:0,perItem:1,parcels:1},lines:[{ticketKey:'TEST-E2E-COST',lineKey:'A',salesRecordId:source.id,qty:2}]});
+  await mutateCost(f.db,f.users.admin,settlement);
+  const ledger=await readCostProfit(f.db,f.users.admin);assert.equal(ledger.orders[0].contribution,3000,'100收入 - 55到仓 - 10佣金 - 5履约 = 30 CNY');assert.equal(ledger.uncovered.length,0);assert.equal(stock(),initial+8,'财务结算不得二次扣库存');
+  await svc.correctSalesImport(f.users.admin,{...sale,importId:imported.importId,reason:'TEST-平台核对实际销售三件',rows:[{sku:'BAG-A',qty:3,amount:150,currency:'CNY'}]});assert.equal(stock(),initial+7);
+  assert.equal((await readCostProfit(f.db,f.users.admin)).orders[0].contribution,null,'源销售修订必须使旧利润待核实');
+  assert.equal(f.sqlite.prepare('PRAGMA foreign_key_check').all().length,0);
  }finally{f.sqlite.close();}
 });
 test('发货通知必须质检通过、属于供应链负责人、遵守站点和累计数量',async()=>{

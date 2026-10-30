@@ -2,6 +2,8 @@ import {ticketRows} from './cost-fixture.mjs';
 import * as XLSX from "xlsx";
 import test from 'node:test';import assert from 'node:assert/strict';import {mkdtempSync,rmSync,existsSync} from 'node:fs';import {tmpdir} from 'node:os';import {join} from 'node:path';import {spawn} from 'node:child_process';import {once} from 'node:events';import net from 'node:net';
 import {openDatabase} from '../server/storage.mjs';import {setAccount,verifyPassword} from '../server/accounts.mjs';
+import {NAVIGATION_BY_ROLE} from '../lib/permissions.mjs';
+import {parseWorkspaceResponse} from '../lib/workspace-response.mjs';
 // Production Node build is a required gate; do not silently skip this integration test.
 test('独立服务器：公司登录、禁止伪造身份、岗位隔离、出库销售和Excel导出',async()=>{
  assert.ok(existsSync('dist-node/server/index.js'),'Run pnpm build:server before tests');const root=mkdtempSync(join(tmpdir(),'lj-http-')),sqlite=openDatabase(join(root,'business.sqlite')).sqlite,password='test-only-'+crypto.randomUUID();
@@ -18,6 +20,20 @@ test('独立服务器：公司登录、禁止伪造身份、岗位隔离、出�
  const health=await fetch(origin+'/healthz');assert.equal(health.status,200);assert.deepEqual(await health.json(),{ok:true,release:'local'});
  const cookies={};for(const who of ['admin','sales','supply','finance'])cookies[who]=await login(who,who==='sales');
  const request=async(who,path,payload)=>{const r=await fetch(origin+path,{method:payload?'POST':'GET',headers:{cookie:cookies[who],origin,...(payload?{'content-type':'application/json'}:{})},...(payload?{body:JSON.stringify({...payload,operationId:crypto.randomUUID()})}:{})});const text=await r.text();let body;try{body=JSON.parse(text)}catch{body=text}return {status:r.status,body}};
+
+ { // Navigate every role through real company sessions, not the route-test identity shim.
+ const roles=Object.entries(NAVIGATION_BY_ROLE),accounts=openDatabase(join(root,'business.sqlite')).sqlite;
+ for(const [index,[role]] of roles.entries())setAccount(accounts,{id:`nav${index}`,email:`nav${index}@example.test`,name:`TEST-${role}`,role,site:role==='运营'||role==='销售'?'印尼':null,channel:role==='运营'?'TikTok':null,password});accounts.close();
+ for(const [index,[role,modules]] of roles.entries()){
+  const cookie=await login(`nav${index}`);
+  for(const module of modules){
+   const response=await fetch(origin+'/api/system?module='+module,{headers:{cookie}});
+   assert.equal(response.status,200,`${role}/${module}: ${await response.clone().text()}`);
+   const snapshot=await parseWorkspaceResponse(response,{snapshot:true});assert.equal(snapshot.actor.role,role);
+  }
+  if(role!=='管理员')assert.equal((await fetch(origin+'/api/system?module=users',{headers:{cookie}})).status,403);
+ }
+ }
 
  { // Financial routes use the same real session and reject unauthorized roles and origins.
  const path='/api/finance-ledger';assert.equal((await fetch(origin+path)).status,401);
@@ -115,7 +131,7 @@ test('独立服务器：公司登录、禁止伪造身份、岗位隔离、出�
  { // After-sales routes require authentication, protect draft evidence and enforce ownership.
  const afterMonth=new Date(Date.now()+8*3600000).toISOString().slice(0,7);
  assert.equal((await fetch(origin+'/api/after-sales?month='+afterMonth)).status,401);
- assert.equal((await request('finance','/api/after-sales?month='+afterMonth)).status,403);
+ assert.equal((await request('finance','/api/after-sales?month='+afterMonth)).status,200);
  const afterCreated=await request('newops','/api/after-sales',{action:'create',businessDate:afterMonth+'-01',caseNo:'HTTP-AFTER-1',orderNo:'HTTP-ORDER-1',sku:'HTTP-SKU',qty:1,reason:'商品质量问题',description:'客户反馈拉链损坏',refundAmount:'5.25'});
  assert.equal(afterCreated.status,200,JSON.stringify(afterCreated.body));const afterId=afterCreated.body.id;
  assert.equal((await request('admin','/api/after-sales?history='+afterId)).status,404);
@@ -123,11 +139,13 @@ test('独立服务器：公司登录、禁止伪造身份、岗位隔离、出�
  const uploaded=await fetch(origin+'/api/after-sales/files',{method:'POST',headers:{origin,cookie:cookies.newops},body:form});assert.equal(uploaded.status,200);const proof=await uploaded.json();
  assert.equal((await request('admin','/api/after-sales/files?id='+proof.id)).status,404);
  assert.equal((await request('newops','/api/after-sales/files?id='+proof.id)).status,200);
+ assert.equal((await request('finance','/api/after-sales/files?id='+proof.id)).status,404);
+ assert.equal((await request('finance','/api/after-sales?month='+afterMonth)).body.records.some(r=>r.id===afterId),false);
  const afterRows=await request('newops','/api/after-sales?month='+afterMonth);const afterRow=afterRows.body.records.find(r=>r.id===afterId);
  const crossAfter=await fetch(origin+'/api/after-sales',{method:'POST',headers:{origin:'https://attacker.test',cookie:cookies.newops,'content-type':'application/json'},body:JSON.stringify({action:'submit',id:afterId,version:afterRow.version})});assert.equal(crossAfter.status,403);
  assert.equal((await request('newops','/api/after-sales',{action:'submit',id:afterId,version:afterRow.version})).status,200);
  assert.equal((await request('admin','/api/after-sales/files?id='+proof.id)).status,200);
- assert.equal((await request('finance','/api/after-sales/files?id='+proof.id)).status,403);
+ assert.equal((await request('finance','/api/after-sales/files?id='+proof.id)).status,200);
  }
 
  let updatedUsers=await request('admin','/api/system');
