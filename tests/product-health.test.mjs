@@ -1,0 +1,6 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {healthSummary,healthPriority,healthAdvice,healthKey} from '../lib/product-health.mjs';
+const row=(sku,category,available,stockCost,basis='landed')=>({sku,site:'印尼',channel:'TikTok',cost:{basis},stockCost,performance:{category,available}});
+test('健康汇总跨站点去重SKU、分类按站点平台，未知库存和成本不归零',()=>{const items=[row('A','hero',10,100000),{...row('A','slow',20,200000),channel:'Shopee'},row('B',null,null,null),row('C','slow',5,50000,'unconfirmed')];const s=healthSummary(items);assert.equal(s.uniqueSkus,3);assert.equal(s.scopes,4);assert.equal(s.groups.slow.available,25);assert.equal(s.groups.slow.value,200000);assert.equal(s.groups.slow.unknownCost,1);assert.equal(s.groups.observe.unknownStock,1);assert.notEqual(healthKey(items[0]),healthKey(items[1]));});
+test('去库存仅确认滞销优先，缺成本不丢失，爆款不作为盈利承诺',()=>{const list=[row('A',null,1000,null),row('B','hero',100,99900000),row('C','slow',10,100000),row('D','slow',90,null),row('E','slow',20,200000)].sort(healthPriority);assert.deepEqual(list.map(r=>r.sku),['E','C','D','B','A']);assert.match(healthAdvice(list[4]),/先补齐/);assert.match(healthAdvice(list[3]),/销量高不等于盈利/);assert.match(healthAdvice(list[0]),/财务核对/);});

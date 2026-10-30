@@ -51,9 +51,13 @@ test('异常全流程留痕、整改和赔偿结清后关闭，不修改库存�
  assert.equal((await afterTasks(f.db,f.users.admin))[0].tab,'quality-incidents');
  await change(f,id,{role:'工厂',id:'factory',name:'工厂甲'},'comment',{note:'已安排重新打印标签并补送'});
  await change(f,id,f.users.admin,'confirm',{responsibility:'工厂',liableName:'工厂甲',claimAmount:0,note:'工厂已补送正确标签，无现金赔偿'});
- await assert.rejects(change(f,id,f.users.admin,'close',{note:'管理员核实完成'}),/整改措施/);
+ await assert.rejects(change(f,id,f.users.admin,'close',{note:'管理员核实完成'}),/独立复查/);
  await change(f,id,f.users.supply,'improve',{note:'供应链张三已安排仓库换标并复核全部外箱，验收完成'});
- await change(f,id,f.users.admin,'close',{note:'核对证据及整改完成，确认结案'});
+ await assert.rejects(change(f,id,f.users.admin,'close',{note:'核对改进文字仍不等于独立复查'}),/独立复查/);
+ await change(f,id,f.users.supply,'rectifyPlan',{ownerId:f.users.supply2.id,reviewDate:new Date(Date.now()+8*3600000).toISOString().slice(0,10),rootCause:'标签校对缺失',measure:'增加标签打印后独立核验',validationBatch:'TEST-VALIDATION-BATCH',note:'隔离测试整改计划'});
+ const proof=await uploadAfterEvidence(f.db,{put:async()=>{},delete:async()=>{}},f.users.supply,id,new File(['%PDF-1.4 corrected'],'review.pdf',{type:'application/pdf'}));
+ await change(f,id,f.users.admin,'rectifyReview',{outcome:'effective',fileIds:[proof.id],note:'验证批次标签逐一核验通过'});
+ await change(f,id,f.users.admin,'close',{note:'核对证据及独立整改复查完成，确认结案'});
  assert.equal(state(f,id).status,'closed');assert.equal((await afterHistory(f.db,f.users.admin,id)).filter(h=>h.action==='after_sales.close').length,1);
  assert.equal(JSON.stringify(f.sqlite.prepare('SELECT * FROM inventory_balances').all()),before);assert.equal((await afterTasks(f.db,f.users.supply)).length,0);
  }finally{f.sqlite.close();}

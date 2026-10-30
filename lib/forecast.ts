@@ -124,7 +124,7 @@ export async function loadForecast(db:any,actor:any,asOf?:string):Promise<{sugge
         dailyCoverage:dayKeys.map((date)=>importedDates.has(date)),
         offlineDailySales:offlineSales.get(key)??Array(56).fill(0),
         offlineCoverage:dayKeys.map(date=>Boolean(offlineStarts.get(key)&&date>=offlineStarts.get(key)!)),
-        arrivalLots:arrivals,asOf,
+        arrivalLots:arrivals,asOf,inventoryKnown:inventoryByKey.has(key),
         currentQty:Number(row.qty)-Number(row.reserved_qty||0),
         pendingShelf:warehousePending.get(key)??Number(row.pending_shelf_qty||0),
         seaInTransit:seaTransit.get(key)??0,
@@ -140,7 +140,7 @@ export async function loadForecast(db:any,actor:any,asOf?:string):Promise<{sugge
         daysSinceLastImport:scopeCoverage.last_sale_date ? Math.max(0,-Number(daysFromToday(scopeCoverage.last_sale_date))) : null,
       },policy,corrections.filter((c:AnyRow)=>c.sku===sku&&c.site===site&&c.channel===channel),dayKeys,chinaDate());
       return {
-        ...row,...plan,bookQty:Number(row.qty),qty:Number(row.qty)-Number(row.reserved_qty||0),
+        ...row,...plan,bookQty:inventoryByKey.has(key)?Number(row.qty):null,qty:inventoryByKey.has(key)?Number(row.qty)-Number(row.reserved_qty||0):null,
         seaInTransit:seaTransit.get(key)??0,
         productionInProgress:productionPipeline.get(key)??0,
         pendingShelfQty:warehousePending.get(key)??Number(row.pending_shelf_qty||0),

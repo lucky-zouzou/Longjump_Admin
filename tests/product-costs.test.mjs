@@ -74,3 +74,10 @@ test('商品成本及规则随完整备份恢复，时钟不产生初始行冲�
  const {mkdtempSync,rmSync}=await import('node:fs'),{tmpdir}=await import('node:os'),{join}=await import('node:path'),{createBackup,restoreBackup}=await import('../server/backup.mjs'),{fileBucket,openDatabase}=await import('../server/storage.mjs');const root=mkdtempSync(join(tmpdir(),'product-cost-backup-'));
  try{await commit(f);await mutateProductCosts(f.db,f.users.admin,{action:'rules',version:0,rules:DEFAULT_RULES,reason:'备份规则验证'});const path=join(root,'archive.tar');await createBackup({DB:f.db,WHOLESALE_FILES:fileBucket(join(root,'files'))},path);await restoreBackup(path,join(root,'restore'));const db=openDatabase(join(root,'restore/business.sqlite'));try{const d=await readProductCosts(db,f.users.admin,{},now);assert.equal(d.costs[0].total,223900);assert.equal(d.ruleVersion,1);}finally{db.sqlite.close();}}finally{rmSync(root,{recursive:true,force:true});}
 }));
+
+test('全局健康视图包含仅建档SKU且库存未知，运营不获得未授权商品',()=>scenario(async f=>{
+ f.sqlite.prepare("INSERT INTO sku_settings(sku,name,updated_at) VALUES('MASTER-ONLY','仅建档商品','2026-10-30')").run();
+ const admin=await readProductCosts(f.db,f.users.admin,{},now),r=admin.items.find(r=>r.sku==='MASTER-ONLY');
+ assert.equal(r.performance.available,null);assert.equal(r.performance.qty28,null);assert.equal(r.performance.category,null);assert.match(r.performance.reasons[0],/尚无站点/);
+ assert(!(await readProductCosts(f.db,f.users.indonesia,{},now)).items.some(r=>r.sku==='MASTER-ONLY'));
+}));

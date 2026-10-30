@@ -31,17 +31,18 @@ test('重复售后单SKU被阻止，金额和数量日期严格校验，不同SK
  for(const p of [{qty:-1},{qty:1.5},{businessDate:'2026-02-30'},{refundAmount:''},{refundAmount:'1.234'},{reason:'伪造类型'}])await assert.rejects(create(f,p));
  assert.equal(money('0.29','退款'),29);assert.throws(()=>money(Infinity,'退款'));assert.throws(()=>money(null,'退款'));
 });
-test('证据需真实支持格式、最多6张、去重且仅本人草稿可上传，失败不留下孤立文件',async()=>{
+test('证据格式与去重严格校验，提交后可追加PDF，最多30份且失败不留孤立文件',async()=>{
  const f=fixture(),id=await create(f),b=bucket();
  await assert.rejects(uploadAfterEvidence(f.db,b,f.users.indonesia,id,new File(['<svg/>'],'x.jpg',{type:'image/jpeg'})),/仅支持/);
  await uploadAfterEvidence(f.db,b,f.users.indonesia,id,image());assert.equal((await uploadAfterEvidence(f.db,b,f.users.indonesia,id,image())).replayed,true);
- for(let i=1;i<6;i++)await uploadAfterEvidence(f.db,b,f.users.indonesia,id,image(i));
- await assert.rejects(uploadAfterEvidence(f.db,b,f.users.indonesia,id,image(7)));assert.equal(b.files.size,6);
- await change(f,id,f.users.indonesia,'submit');await assert.rejects(uploadAfterEvidence(f.db,b,f.users.indonesia,id,image(8)),/草稿/);
- await assert.rejects(uploadAfterEvidence(f.db,b,f.users.supply,id,image(8)),/本人/);
+ await assert.rejects(uploadAfterEvidence(f.db,b,f.users.supply,id,image(8)),/无权/);
+ await change(f,id,f.users.indonesia,'submit');
+ await uploadAfterEvidence(f.db,b,f.users.supply,id,new File(['%PDF-1.4 TEST-ONLY'],'proof.pdf',{type:'application/pdf'}));
+ for(let i=1;i<29;i++)await uploadAfterEvidence(f.db,b,f.users.indonesia,id,image(i));
+ await assert.rejects(uploadAfterEvidence(f.db,b,f.users.indonesia,id,image(30)));assert.equal(b.files.size,30);
 });
-test('管理员定责、部分实赔、重复凭证和超额拦截、结清才能关闭，操作全留痕',async()=>{
- const f=fixture(),id=await submitted(f);await change(f,id,f.users.admin,'confirm',decision);
+test('其他责任方保留部分赔付登记、重复及超额拦截，结清才能关闭，操作留痕',async()=>{
+ const f=fixture(),id=await submitted(f,{reason:'仓库发错货'}),decision={responsibility:'仓库',liableName:'仓库甲',claimAmount:100,note:'核对仓库错发责任'};await change(f,id,f.users.admin,'confirm',decision);
  const pay={amount:'40',reference:'PAY-001',date:reviewToday(),note:'收到工厂赔付款，银行流水核验'};
  await change(f,id,f.users.admin,'payment',pay);await assert.rejects(change(f,id,f.users.admin,'payment',pay),/重复/);
  await assert.rejects(change(f,id,f.users.admin,'confirm',{...decision,claimAmount:'39'}),/小于/);
@@ -60,7 +61,7 @@ test('取消及描述不符需运营改进才能结案，退回和作废保留�
  const draft=await create(f);await change(f,draft,f.users.indonesia,'void',{note:'错误录入，保留作废依据'});assert.equal(state(f,draft).status,'void');
 });
 test('旧版本不能覆盖新处理，赔付并发不双记',async()=>{
- const f=fixture(),id=await submitted(f);await change(f,id,f.users.admin,'confirm',decision);const version=state(f,id).version;
+ const f=fixture(),id=await submitted(f);await change(f,id,f.users.admin,'confirm',{...decision,responsibility:'仓库',liableName:'仓库甲'});const version=state(f,id).version;
  const p={action:'payment',id,version,amount:60,reference:'PAY-CONCURRENT',date:reviewToday(),note:'到账后登记并核对流水'};
  const results=await Promise.allSettled([mutateAfterSales(f.db,f.users.admin,p),mutateAfterSales(f.db,f.users.admin,p)]);
  assert.equal(results.filter(r=>r.status==='fulfilled').length,1);assert.equal(JSON.parse(state(f,id).data_json).payments.length,1);
