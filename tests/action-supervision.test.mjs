@@ -19,7 +19,7 @@ test('证据缺失且未分配不能制造执行逾期；明确分工及复查�
 test('总览待办与行动页共用到期口径，待核实保留但不错误标红',async()=>{
  const f=systemFixture();try{
   f.sqlite.prepare("INSERT INTO business_actions(id,site,channel,sku,kind,status,snapshot_json,opened_at,updated_at,due_at,review_at) VALUES('TEST-VERIFY','印尼','TikTok','BAG-A','loss','open',?,'2026-10-26','2026-10-26',?,?)").run(JSON.stringify(base.snapshot),base.due_at,base.review_at);
-  let tasks=await businessActionTasks(f.db,f.users.admin,now);assert.equal(tasks.length,1);assert.equal(tasks[0].level,'amber');assert.match(tasks[0].detail,/1条证据待核实/);assert.doesNotMatch(tasks[0].detail,/已到期/);
+  let tasks=await businessActionTasks(f.db,f.users.admin,now);assert.equal(tasks.length,1);assert.equal(tasks[0].level,'amber');assert.match(tasks[0].detail,/1个站点渠道有共同证据待核对/);assert.doesNotMatch(tasks[0].detail,/已到期/);
   f.sqlite.prepare("UPDATE business_actions SET owner_id=?").run(f.users.indonesia.id);
   tasks=await businessActionTasks(f.db,f.users.indonesia,now);assert.equal(tasks[0].level,'red');assert.match(tasks[0].detail,/1条已到期/);
  }finally{f.sqlite.close();}

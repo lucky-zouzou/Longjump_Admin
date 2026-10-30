@@ -1,0 +1,3 @@
+import {HEALTH_LABELS} from '../lib/product-health.mjs';
+import './product-health.css';
+export default function SkuHealthBadge({category}:{category?:string|null}){const k=category||'observe',label=(HEALTH_LABELS as Record<string,string>)[k]||HEALTH_LABELS.observe;return <span className={'sku-health-tag sh-'+k} title={'动销分类：'+label} aria-label={'动销分类：'+label}><span aria-hidden="true">{k==='hero'?<svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M13 1c1 6-4 6-3 10-2-1-3-3-3-5C0 13 4 23 12 23c9 0 13-11 5-17 1 5-2 6-2 6 1-4 0-8-2-11Z"/><path fill="#ffc875" d="M12 13c0 3-4 4-3 7 4 3 8-2 3-7Z"/></svg>:({hot:'↗',steady:'●',slow:'◷',observe:'?'} as Record<string,string>)[k]}</span>{label}</span>;}
