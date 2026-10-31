@@ -2,7 +2,7 @@
 
 import {useEffect,useRef,useState,type ReactNode} from "react";
 
-const ROLES=["管理员","销售","运营","运营主管","新品开发","财务","供应链","工厂","海运"];
+const ROLES=["管理员","销售","运营","运营主管","新品开发","达人BD","财务","供应链","工厂","海运"];
 const SITES=["马来西亚","印尼","泰国","越南","菲律宾"];
 const CHANNELS=["TikTok","Shopee"];
 

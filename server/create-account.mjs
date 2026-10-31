@@ -23,7 +23,7 @@ export function createCompanyAccount(db,actor,input){
   const role=field(input,'role','角色',20,true);
   const responsibilityUnit=field(input,'responsibilityUnit','责任单位',120)||null;
   if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))throw new AccountError(400,'请填写有效的邮箱地址');
-  if(!['管理员','销售','运营','运营主管','新品开发','财务','供应链','工厂','海运'].includes(role))throw new AccountError(400,'角色无效');
+  if(!['管理员','销售','运营','运营主管','新品开发','达人BD','财务','供应链','工厂','海运'].includes(role))throw new AccountError(400,'角色无效');
   let site=null,channel=null;
   if(role==='运营'){
     site=field(input,'site','站点',20,true);

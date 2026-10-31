@@ -131,7 +131,7 @@ export async function GET(request:Request) {
       const result=await readHistory(database(),actor,Object.fromEntries(requestUrl.searchParams));
       return requestUrl.searchParams.get("export")==="1"?new Response(historyCsv(result),{headers:{"content-type":"text/csv; charset=utf-8","content-disposition":`attachment; filename="${result.kind}-history.csv"`,"cache-control":"no-store"}}):Response.json(result);
     }
-    const requestedModule=requestUrl.searchParams.get("module")||"";
+    const requestedModule=requestUrl.searchParams.get("module")||(actor.role==="达人BD"?"creators":"");
     const module=requestedModule==="home"?(mobileModules(actor.role)[0]||"overview"):requestedModule;
     if(module&&!navigationForRole(actor.role).includes(module))throw new HttpError(403,"当前账号无权打开此工作区");
     const forecastTrend=requestUrl.searchParams.get("forecastTrend");
@@ -142,7 +142,7 @@ export async function GET(request:Request) {
       return Response.json({dailySeries:row.dailySeries,generatedAt:nowIso()});
     }
     // Independent workspaces fetch their own ledgers; avoid constructing the global forecast.
-    if(["cost-profit","sales-targets","wholesale","reviews","after-sales","quality-incidents","promotions","business-actions","audit","users","permissions","production-tracking"].includes(module)){
+    if(["creators","cost-profit","sales-targets","wholesale","reviews","after-sales","quality-incidents","promotions","business-actions","audit","users","permissions","production-tracking"].includes(module)){
       const empty=Object.fromEntries([...new Set(Object.values(MODULE_FIELDS).flat())].filter(key=>!["currentMonth","metrics"].includes(key)).map(key=>[key,[]]));
       const users=["users","permissions"].includes(module)?await all("SELECT id,email,name,role,site,channel,responsibility_unit,active,created_at,updated_at FROM users ORDER BY created_at"):[];
       const tracking=module==="production-tracking"?productionTracking(...await Promise.all([all("SELECT * FROM series_production_orders"),all("SELECT * FROM series_production_order_items"),all("SELECT * FROM series_purchase_orders"),all("SELECT entity_id,created_at,actor_name FROM audit_logs WHERE entity_type='series_production_order' AND action='生成工厂订单导出' ORDER BY created_at")]) as [AnyRow[],AnyRow[],AnyRow[],AnyRow[]]):[];
