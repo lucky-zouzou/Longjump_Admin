@@ -32,6 +32,13 @@ test('独立服务器：公司登录、禁止伪造身份、岗位隔离、出�
    const snapshot=await parseWorkspaceResponse(response,{snapshot:true});assert.equal(snapshot.actor.role,role);
   }
   if(role!=='管理员')assert.equal((await fetch(origin+'/api/system?module=users',{headers:{cookie}})).status,403);
+  if(role==='达人BD'){
+   const ledger=await fetch(origin+'/api/creators',{headers:{cookie}});assert.equal(ledger.status,200);assert.deepEqual((await ledger.json()).profiles,[]);
+   for(const path of ['/api/business-actions','/api/finance-ledger','/api/sales-dashboard','/api/after-sales','/api/cost-profit','/api/system?history=imports'])assert.equal((await fetch(origin+path,{headers:{cookie}})).status,403,path);
+   assert.equal((await fetch(origin+'/api/system',{method:'POST',headers:{cookie,origin,'Content-Type':'application/json'},body:'{"action":"salesImport"}'})).status,403);
+   assert.equal((await fetch(origin+'/api/creators',{method:'POST',headers:{cookie,origin:'https://wrong.example','Content-Type':'application/json'},body:'{}'})).status,403);
+   assert.equal((await fetch(origin+'/api/creators',{method:'POST',headers:{cookie,origin,'Content-Type':'application/json'},body:'{'})).status,400);
+  }
  }
  }
 

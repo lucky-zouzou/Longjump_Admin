@@ -32,6 +32,7 @@ import { translateWholesale } from "../lib/wholesale-i18n.mjs";
 import { lazy,Suspense,useCallback, useEffect, useRef, useState } from "react";
 import { dataDomainsForRole, DATA_DOMAIN_LABELS, hasPermission, navigationForRole, PERMISSION_LABELS, permissionsForRole, ROLE_PERMISSIONS } from "../lib/permissions.mjs";
 
+const CreatorWorkspace=lazy(()=>import("./creator-workspace"));
 const CostProfit=lazy(()=>import("./cost-profit"));
 const SalesTargets=lazy(()=>import("./sales-targets"));
 const BusinessActions=lazy(()=>import("./business-actions"));
@@ -40,7 +41,7 @@ const AfterSales=lazy(()=>import("./after-sales"));
 const SITES = ["马来西亚", "印尼", "泰国", "越南", "菲律宾"];
 const CHANNELS = ["TikTok", "Shopee", "线下分销"];
 const REQUIRED_CHANNELS = ["TikTok", "Shopee"];
-const ROLE_LABEL:Record<string,string> = { 管理员:"全局管理", 销售:"印尼线下销售", 运营:"站点运营", 运营主管:"运营统筹", 新品开发:"新品开发", 财务:"财务测算", 供应链:"供应链协同", 工厂:"工厂生产", 海运:"跨境物流" };
+const ROLE_LABEL:Record<string,string> = { 达人BD:"达人商务协作", 管理员:"全局管理", 销售:"印尼线下销售", 运营:"站点运营", 运营主管:"运营统筹", 新品开发:"新品开发", 财务:"财务测算", 供应链:"供应链协同", 工厂:"工厂生产", 海运:"跨境物流" };
 const BATCH_LABEL:Record<string,string> = {
   supply_confirm:"供应链确认", factory_production:"工厂生产", channel_allocation:"渠道分配",
   sea_freight:"海运运输", port_arrived:"已到港", last_mile_delivery:"派送中",
@@ -73,6 +74,7 @@ type AllocationDraft = { site:string; channel:string; qty:string };
 type Act = (action:string,payload:Row,success:string,onError?:(message:string)=>void)=>Promise<Row|null>;
 
 const navItems = [
+  ["creators","达人与直播 BD","◉"],
   ["overview","总览","◫"], ["cost-profit","成本利润透明","◈"], ["sales-targets","月度任务与贡献","◎"], ["business-actions","每日经营行动单","✓"], ["reviews","周报与月度复盘","▤"], ["promotions","零销量与优惠","↓"], ["after-sales","售后反馈","↩"], ["quality-incidents","品质与交付异常","⚑"], ["users","用户管理","♙"], ["wholesale","印尼线下批发","▣"], ["suggestions","补货驾驶舱","◎"], ["new-products","新品孵化","◇"], ["sales","销售数据","↗"], ["inventory","库存流水","▦"],
   ["receipt","历史到仓","↓"], ["monthly","月度计划","▤"], ["approval","审批中心","✓"], ["fulfillment","系列采购生产","▥"], ["production-tracking","生产动态","◉"], ["batches","海运批次","⇢"],
   ["master","主数据","⌘"], ["audit","审计日志","◷"], ["permissions","权限测试","⊙"],
@@ -227,6 +229,7 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
         {actor.role==="运营" && (!actor.site || !actor.channel) && <div className="notice warn">当前账号尚未绑定站点和渠道，请联系管理员在“用户管理”中完成分配后再录入业务数据。</div>}
         {tab==="wholesale" && <WholesaleLanguageContext.Provider value={wholesaleLocale}><Wholesale onChanged={refresh} route={route} navigate={navigate}/></WholesaleLanguageContext.Provider>}
         {tab==="reviews" && <BusinessReviews initialView={route.view} initialDate={route.entity}/>}
+        {tab==="creators" && <CreatorWorkspace initialId={route.entity}/>}
         {tab==="cost-profit" && <CostProfit role={actor.role}/>}
         {tab==="sales-targets" && <SalesTargets initialMonth={route.month}/>}
         {tab==="business-actions" && <BusinessActions initialId={route.entity}/>}
@@ -853,8 +856,9 @@ function MasterData({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}){
   </>;
 }
 
-const ROLE_TEST_ORDER=["管理员","销售","运营","供应链","工厂","海运","运营主管","新品开发","财务"];
+const ROLE_TEST_ORDER=["管理员","销售","运营","供应链","工厂","海运","运营主管","新品开发","财务","达人BD"];
 const ROLE_BOUNDARY:Record<string,string>={
+  达人BD:"仅管理分配店铺的达人商务、合作提案与关系维护，不能审批本人合作或确认财务款项",
   销售:"仅印尼本人客户和批发订单；申请出库、查询发货、回款和开票，不能自审或确认收款",
   管理员:"全局查看、配置、审批和必要越级处理；销售仍由运营导入，越级推进必须填写原因",
   运营:"仅本人绑定的站点＋渠道：销售导入、盘点差异提交、月度需求和上架确认",

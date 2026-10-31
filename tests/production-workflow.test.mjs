@@ -16,7 +16,7 @@ async function setup(){
  f.accept=(exportReceiptId,actor=f.factory)=>svc.acceptProductionOrder(actor,{productionOrderId:f.order().id,promisedCompletionDate:day,evidenceRef:'FACTORY-CONFIRM',note:'核对订单无误',orderReviewed:true,exportReceiptId});
  return f;
 }
-const read=async actor=>{svc.setActor(actor);return (await svc.GET(new Request('http://localhost/api/system'))).json();};
+const read=async (actor,module='')=>{svc.setActor(actor);return (await svc.GET(new Request('http://localhost/api/system'+(module?'?module='+module:'')))).json();};
 test('工厂导出核对→生产进度→完工待质检→供应链放行，全程留痕且不改库存',async()=>{
  const f=await setup();try{
  const before=f.sqlite.prepare('SELECT * FROM inventory_balances').all();
@@ -59,10 +59,10 @@ test('所有已知岗位共享生产动态，独立工厂业务范围与敏感�
  f.sqlite.prepare("UPDATE series_production_orders SET evidence_json=?").run(JSON.stringify([{stage:'factory_accepted',at:new Date().toISOString(),by:'工厂甲',reference:'PRIVATE-REPORT',note:'PRIVATE-NOTE'}]));
  for(const role of Object.keys(ROLE_PERMISSIONS)){
   const actor=role==='工厂'?{...f.factory,id:'other-factory'}:role==='运营'?f.users.indonesia:{...f.users.sales,role};
-  const data=await read(actor);assert.equal(data.productionTracking.length,1,role);
+  const data=await read(actor,'production-tracking');assert.equal(data.productionTracking.length,1,role);
   assert.ok(navigationForRole(role).includes('production-tracking'));assert.equal(canReadDomain(role,'production_tracking'),true);
   const text=JSON.stringify(data.productionTracking);for(const privateValue of ['PRIVATE-REPORT','PRIVATE-NOTE','assigned_user_id','creator_id','evidence_json'])assert.equal(text.includes(privateValue),false,role+privateValue);
-  if(['销售','财务','新品开发','海运','工厂'].includes(role))assert.equal(data.productionOrders.length,0,role);
+  if(['销售','财务','新品开发','海运','工厂','达人BD'].includes(role))assert.equal(data.productionOrders.length,0,role);
  }
  }finally{f.sqlite.close();}
 });

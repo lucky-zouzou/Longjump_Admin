@@ -1,7 +1,7 @@
 import { getChatGPTUser } from "../app/chatgpt-auth";
 import { database, ensureSchema, nowIso } from "./database";
 
-export const ROLES = ["管理员", "销售", "运营", "运营主管", "新品开发", "财务", "供应链", "工厂", "海运"] as const;
+export const ROLES = ["管理员", "销售", "运营", "运营主管", "新品开发", "达人BD", "财务", "供应链", "工厂", "海运"] as const;
 export type Role = (typeof ROLES)[number];
 export type Actor = { id:string; email:string; name:string; role:Role; site:string|null; channel:string|null; active:boolean };
 
@@ -29,6 +29,7 @@ export async function requireActor(request: Request): Promise<Actor> {
     row = { ...row, email:identity.email, name:identity.displayName };
   }
   if (!row || Number(row.active) !== 1) throw new HttpError(403, "账号已停用，请联系管理员");
+  if(row.role==='达人BD'&&url.pathname.startsWith('/api/')&&!(url.pathname==='/api/creators'||url.pathname==='/api/system'&&request.method==='GET'))throw new HttpError(403,'达人BD账号仅可访问已分配的达人协作及脱敏生产动态');
   return { id:String(row.id), email:String(row.email), name:String(row.name), role:row.role as Role, site:row.site ? String(row.site) : null, channel:row.channel ? String(row.channel) : null, active:true };
 }
 

@@ -1,6 +1,7 @@
 import type { CSSProperties } from "react";
 
 const paths:Record<string,string>={
+  creators:"M8 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8 M2 21v-2a6 6 0 0 1 12 0v2 M16 5l6 4-6 4z M18 17h4 M20 15v4",
   overview:"M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z",
   "business-actions":"M9 5H5v16h14V5h-4 M9 3h6v4H9z M8 13l3 3 5-6",
   "cost-profit":"M4 4h16v16H4z M8 8h8 M8 12h3 M8 16h8",
