@@ -4,6 +4,7 @@ import {fixture} from './fixtures.mjs';
 import {classifyProduct,DEFAULT_RULES,parseProductCostSheet,mergeProductCostSheets,validateRules} from '../lib/product-cost-model.mjs';
 import {previewProductCosts,mutateProductCosts,readProductCosts} from '../lib/product-costs.mjs';
 import {shiftDay} from '../lib/promotion-model.mjs';
+import {SITE_RULE_DEFAULTS} from '../lib/site-product-classification.mjs';
 const now=new Date('2026-11-05T05:00:00Z');
 const payload=(rows=[{sku:'bag-a',site:'印尼',purchase:20,freight:2.3863,total:22.39,source:{sheet:'Sheet2',row:3}}])=>({rows,currency:'CNY',currencyConfirmed:true,basis:'unconfirmed',effectiveDate:'2026-10-28',fileName:'TEST-ONLY-cost.xlsx',fileHash:'a'.repeat(64),reason:'测试核对成本表'});
 async function commit(f,p=payload(),actor=f.users.admin){const v=await previewProductCosts(f.db,actor,p);return mutateProductCosts(f.db,actor,{...p,action:'commit',version:v.version,fingerprint:v.fingerprint});}
@@ -52,9 +53,9 @@ test('缺报、缺货、新品不被伪判滞销；站点午夜边界正确',()=
 test('真实读取按日报完整度分类；部分日报和重叠批次暂停分类，撤销重叠后恢复',()=>scenario(async f=>{
  const s=sample(10);
  f.sqlite.prepare("INSERT INTO promotion_availability VALUES('印尼','TikTok','BAG-A','2026-09-01','2026-09-01','2026-11-04','TEST-ONLY','测试连续有货','id-ops','2026-11-04')").run();
- for(const d of s.completeDates){
-  f.sqlite.prepare("INSERT INTO sales_imports(id,import_key,business_date,site,channel,row_count,total_qty,actor_id,created_at,report_kind) VALUES(?,?,?,'印尼','TikTok',1,10,'id-ops',?,'complete')").run('i-'+d,'k-'+d,d,d);
-  f.sqlite.prepare("INSERT INTO sales_records(id,import_id,business_date,site,channel,sku,qty,currency,actor_id,created_at) VALUES(?,?,?,'印尼','TikTok','BAG-A',10,'IDR','id-ops',?)").run('s-'+d,'i-'+d,d,d);
+ for(const d of s.completeDates)for(const channel of ['TikTok','Shopee']){
+  f.sqlite.prepare("INSERT INTO sales_imports(id,import_key,business_date,site,channel,row_count,total_qty,actor_id,created_at,report_kind) VALUES(?,?,?,'印尼',?,1,10,'id-ops',?,'complete')").run('i-'+channel+d,'k-'+channel+d,d,channel,d);
+  f.sqlite.prepare("INSERT INTO sales_records(id,import_id,business_date,site,channel,sku,qty,currency,actor_id,created_at) VALUES(?,?,?,'印尼',?,'BAG-A',10,'IDR','id-ops',?)").run('s-'+channel+d,'i-'+channel+d,d,channel,d);
  }
  const perf=async()=>(await readProductCosts(f.db,f.users.indonesia,{},now)).items.find(r=>r.sku==='BAG-A').performance;
  assert.equal((await perf()).category,'hero');
@@ -65,14 +66,14 @@ test('真实读取按日报完整度分类；部分日报和重叠批次暂停�
  f.sqlite.prepare("INSERT INTO sales_records(id,import_id,business_date,site,channel,sku,qty,currency,actor_id,created_at) VALUES('overlap','other','2026-11-04','印尼','TikTok','BAG-A',10,'IDR','id-ops','2026-11-04')").run();
  assert.equal((await perf()).category,null);assert.deepEqual((await perf()).missing,['2026-11-04']);
  f.sqlite.prepare("UPDATE sales_records SET reversed_at='2026-11-05' WHERE id='overlap'").run();
- assert.equal((await perf()).category,'hero');assert.equal((await perf()).qty28,280);
+ assert.equal((await perf()).category,'hero');assert.equal((await perf()).qty28,560);
 }));
 test('规则修改仅管理员，版本冲突与无效阈值被拒绝',()=>scenario(async f=>{
- const p={action:'rules',version:0,rules:DEFAULT_RULES,reason:'测试规则确认'};await assert.rejects(mutateProductCosts(f.db,f.users.finance,p),e=>e.status===403);await mutateProductCosts(f.db,f.users.admin,p);await assert.rejects(mutateProductCosts(f.db,f.users.admin,p),e=>e.status===409);assert.throws(()=>validateRules({...DEFAULT_RULES,hotDaily:20}));assert.throws(()=>validateRules({...DEFAULT_RULES,minAge:7}));assert.equal((await readProductCosts(f.db,f.users.admin,{},now)).ruleVersion,1);
+ const p={action:'rules',site:'印尼',version:0,rules:SITE_RULE_DEFAULTS.印尼,reason:'测试规则确认'};await assert.rejects(mutateProductCosts(f.db,f.users.finance,p),e=>e.status===403);await mutateProductCosts(f.db,f.users.admin,p);await assert.rejects(mutateProductCosts(f.db,f.users.admin,p),e=>e.status===409);assert.throws(()=>validateRules({...DEFAULT_RULES,hotDaily:20}));assert.throws(()=>validateRules({...DEFAULT_RULES,minAge:7}));assert.equal((await readProductCosts(f.db,f.users.admin,{},now)).ruleVersion,1);
 }));
 test('商品成本及规则随完整备份恢复，时钟不产生初始行冲突',()=>scenario(async f=>{
  const {mkdtempSync,rmSync}=await import('node:fs'),{tmpdir}=await import('node:os'),{join}=await import('node:path'),{createBackup,restoreBackup}=await import('../server/backup.mjs'),{fileBucket,openDatabase}=await import('../server/storage.mjs');const root=mkdtempSync(join(tmpdir(),'product-cost-backup-'));
- try{await commit(f);await mutateProductCosts(f.db,f.users.admin,{action:'rules',version:0,rules:DEFAULT_RULES,reason:'备份规则验证'});const path=join(root,'archive.tar');await createBackup({DB:f.db,WHOLESALE_FILES:fileBucket(join(root,'files'))},path);await restoreBackup(path,join(root,'restore'));const db=openDatabase(join(root,'restore/business.sqlite'));try{const d=await readProductCosts(db,f.users.admin,{},now);assert.equal(d.costs[0].total,223900);assert.equal(d.ruleVersion,1);}finally{db.sqlite.close();}}finally{rmSync(root,{recursive:true,force:true});}
+ try{await commit(f);await mutateProductCosts(f.db,f.users.admin,{action:'rules',site:'印尼',version:0,rules:SITE_RULE_DEFAULTS.印尼,reason:'备份规则验证'});const path=join(root,'archive.tar');await createBackup({DB:f.db,WHOLESALE_FILES:fileBucket(join(root,'files'))},path);await restoreBackup(path,join(root,'restore'));const db=openDatabase(join(root,'restore/business.sqlite'));try{const d=await readProductCosts(db,f.users.admin,{},now);assert.equal(d.costs[0].total,223900);assert.equal(d.ruleVersion,1);}finally{db.sqlite.close();}}finally{rmSync(root,{recursive:true,force:true});}
 }));
 
 test('全局健康视图包含仅建档SKU且库存未知，运营不获得未授权商品',()=>scenario(async f=>{
