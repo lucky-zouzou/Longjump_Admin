@@ -7,7 +7,15 @@ attempt=${2:?Expected run attempt}
 source_image="loongjump-release:$release"
 compose=(docker compose)
 if [ -f compose.inquiry-sync.yaml ]; then
-  compose+=(-f compose.yaml -f compose.inquiry-sync.yaml)
+  if [ -n "${COMPOSE_FILE:-}" ]; then
+    IFS="${COMPOSE_PATH_SEPARATOR:-:}" read -r -a configured_files <<< "$COMPOSE_FILE"
+    for file in "${configured_files[@]}"; do compose+=(-f "$file"); done
+  else
+    compose+=(-f compose.yaml)
+    if [ -f compose.override.yaml ]; then compose+=(-f compose.override.yaml);
+    elif [ -f compose.override.yml ]; then compose+=(-f compose.override.yml); fi
+  fi
+  compose+=(-f compose.inquiry-sync.yaml)
 fi
 docker image inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$source_image" | grep -Fxq "LOONGJUMP_RELEASE=$release"
 app_image=$("${compose[@]}" config --images app)

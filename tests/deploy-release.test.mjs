@@ -7,12 +7,12 @@ import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 
 const release='a'.repeat(40),script=fileURLToPath(new URL('../scripts/activate-release.sh',import.meta.url));
-function activate(overrides={},withSync=false){
+function activate(overrides={},withSync=false,withOverride=false){
  const dir=mkdtempSync(join(tmpdir(),'lj-deploy-'));
  try{
   writeFileSync(join(dir,'docker'),`#!/bin/bash
 printf '%s\\n' "$*" >> "$MOCK_LOG"
-if [ "$1" = compose ] && [ "$2" = -f ]; then shift 5; set -- compose "$@"; fi
+if [ "$1" = compose ]; then shift; while [ "$1" = -f ]; do shift 2; done; set -- compose "$@"; fi
 case "$1 $2" in
  'image inspect') printf 'LOONGJUMP_RELEASE=%s\\n' "$MOCK_RELEASE" ;;
  'compose config') printf '%s\\n' "$MOCK_IMAGE" ;;
@@ -23,6 +23,7 @@ case "$1 $2" in
 esac
 `,{mode:0o755});
   if(withSync)writeFileSync(join(dir,'compose.inquiry-sync.yaml'),'services: {}\n');
+  if(withOverride)writeFileSync(join(dir,'compose.override.yaml'),'services: {}\n');
   const result=spawnSync('/bin/bash',[script,release,'2'],{cwd:dir,encoding:'utf8',env:{...process.env,PATH:dir+':'+process.env.PATH,MOCK_LOG:join(dir,'calls'),MOCK_RELEASE:release,MOCK_IMAGE:'existing-project-app',MOCK_CONTAINER:'running-app',...overrides}});
   return {...result,calls:readFileSync(join(dir,'calls'),'utf8').trim().split('\n')};
  }finally{rmSync(dir,{recursive:true,force:true})}
@@ -36,6 +37,10 @@ test('配置询盘桥接时使用持久私有环境覆盖文件，保留原 Comp
  assert.ok(r.calls.includes('compose -f compose.yaml -f compose.inquiry-sync.yaml config --images app'));
  assert.equal(r.calls.at(-1),'compose -f compose.yaml -f compose.inquiry-sync.yaml up -d --no-build --pull never app');
  assert.ok(r.calls.includes(`tag sha256:previous-image loongjump-rollback:${release}-2`));
+});
+test('询盘环境扩展保留原服务器默认覆盖与显式 Compose 文件组合',()=>{
+ const a=activate({},true,true);assert.equal(a.status,0,a.stderr);assert.equal(a.calls.at(-1),'compose -f compose.yaml -f compose.override.yaml -f compose.inquiry-sync.yaml up -d --no-build --pull never app');
+ const b=activate({COMPOSE_FILE:'compose.yaml:custom.yaml'},true);assert.equal(b.status,0,b.stderr);assert.equal(b.calls.at(-1),'compose -f compose.yaml -f custom.yaml -f compose.inquiry-sync.yaml up -d --no-build --pull never app');
 });
 test('版本不匹配、应用镜像配置不明确或原容器缺失时不覆盖镜像、不重启',()=>{
  for(const invalid of [{MOCK_RELEASE:'old'},{MOCK_IMAGE:''},{MOCK_IMAGE:'one\ntwo'},{MOCK_IMAGE:'repo@sha256:fixed'},{MOCK_CONTAINER:''},{MOCK_CONTAINER:'one\ntwo'}]){
