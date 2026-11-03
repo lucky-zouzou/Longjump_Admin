@@ -1,3 +1,4 @@
+import {signInquiry} from '../lib/website-inquiry-auth.mjs';
 import {ticketRows} from './cost-fixture.mjs';
 import * as XLSX from "xlsx";
 import test from 'node:test';import assert from 'node:assert/strict';import {mkdtempSync,rmSync,existsSync} from 'node:fs';import {tmpdir} from 'node:os';import {join} from 'node:path';import {spawn} from 'node:child_process';import {once} from 'node:events';import net from 'node:net';
@@ -13,7 +14,7 @@ test('独立服务器：公司登录、禁止伪造身份、岗位隔离、出�
   cleanFixture.prepare("INSERT INTO new_product_projects(id,cycle_month,sku,stage_started_at,current_due_at,created_by,created_at,updated_at) VALUES(?,?,'HTTP-BAG','2026-09-01','2026-09-04','admin','2026-09-01','2026-09-01')").run(month,month);
   cleanFixture.prepare("INSERT INTO new_product_stage_records(id,project_id,stage_key,data_json,actor_id,actor_name,submitted_at,updated_at) VALUES(?,?,'candidate','{}','admin','管理员','2026-09-01','2026-09-01')").run(month,month);
  }cleanFixture.close();
- const free=net.createServer();free.listen(0,'127.0.0.1');await once(free,'listening');const port=free.address().port;await new Promise(r=>free.close(r));const origin=`http://127.0.0.1:${port}`;let logs='';const child=spawn(process.execPath,['server/index.mjs'],{env:{...process.env,NODE_ENV:'production',LOONGJUMP_DATA_DIR:root,LOONGJUMP_ORIGIN:origin,LOONGJUMP_ALLOW_HTTP:'1',PORT:String(port),HOST:'127.0.0.1'},stdio:['ignore','pipe','pipe']});child.stdout.on('data',b=>logs+=b);child.stderr.on('data',b=>logs+=b);
+ const free=net.createServer();free.listen(0,'127.0.0.1');await once(free,'listening');const port=free.address().port;await new Promise(r=>free.close(r));const origin=`http://127.0.0.1:${port}`;let logs='';const child=spawn(process.execPath,['server/index.mjs'],{env:{...process.env,LOONGJUMP_INQUIRY_SYNC_SECRET:'test-http-inquiry-secret-32-characters',NODE_ENV:'production',LOONGJUMP_DATA_DIR:root,LOONGJUMP_ORIGIN:origin,LOONGJUMP_ALLOW_HTTP:'1',PORT:String(port),HOST:'127.0.0.1'},stdio:['ignore','pipe','pipe']});child.stdout.on('data',b=>logs+=b);child.stderr.on('data',b=>logs+=b);
  try{await new Promise((res,rej)=>{const timer=setTimeout(()=>rej(Error('Server startup timeout: '+logs)),15000);child.stdout.on('data',b=>{if(String(b).includes('ready at')){clearTimeout(timer);res()}});child.once('exit',code=>{clearTimeout(timer);rej(Error(`Server exited ${code}: ${logs}`))})});
  const forged=await fetch(origin+'/api/system',{headers:{'oai-authenticated-user-id':'admin','oai-authenticated-user-email':'admin@example.test','x-local-test-user':'admin'}});assert.equal(forged.status,401);
  const login=async (who,remember=false)=>{const page=await fetch(origin+'/signin-with-chatgpt'),html=await page.text(),csrf=html.match(/name="csrf" value="([a-f0-9]+)"/)[1],pre=page.headers.getSetCookie()[0].split(';')[0];const r=await fetch(origin+'/signin-with-chatgpt',{method:'POST',redirect:'manual',headers:{origin,'content-type':'application/x-www-form-urlencoded',cookie:pre},body:new URLSearchParams({csrf,email:`${who}@example.test`,password,remember:remember?'1':'0'})});assert.equal(r.status,303,await r.text());const session=r.headers.getSetCookie().find(c=>c.startsWith('lj_session='));assert.match(session,new RegExp('Max-Age='+(remember?2592000:28800)));assert.match(session,/HttpOnly/);return session.split(';')[0]};
@@ -21,6 +22,24 @@ test('独立服务器：公司登录、禁止伪造身份、岗位隔离、出�
  const cookies={};for(const who of ['admin','sales','supply','finance'])cookies[who]=await login(who,who==='sales');
  const request=async(who,path,payload)=>{const r=await fetch(origin+path,{method:payload?'POST':'GET',headers:{cookie:cookies[who],origin,...(payload?{'content-type':'application/json'}:{})},...(payload?{body:JSON.stringify({...payload,operationId:crypto.randomUUID()})}:{})});const text=await r.text();let body;try{body=JSON.parse(text)}catch{body=text}return {status:r.status,body}};
 
+ {
+ const path='/api/integrations/website-inquiries',secret='test-http-inquiry-secret-32-characters';
+ const raw=JSON.stringify({schemaVersion:1,source:'loongjump-website',externalId:'LJ-HTTP-001',revision:1,createdAt:'2026-11-01T00:00:00Z',updatedAt:'2026-11-01T00:00:00Z',assignee:{id:'website-user'},details:{topic:'Grosir',name:'TEST ONLY',contactType:'Email',contact:'test@example.test',city:'Jakarta',items:[]}}),timestamp=String(Date.now());
+ const signedHeaders={'Content-Type':'application/json','x-loongjump-timestamp':timestamp,'x-loongjump-signature':await signInquiry(secret,timestamp,raw)};
+ assert.equal((await fetch(origin+path,{method:'POST',body:raw})).status,401);
+ assert.equal((await fetch(origin+path,{method:'GET'})).status,405);
+ const received=await fetch(origin+path,{method:'POST',headers:signedHeaders,body:raw});assert.equal(received.status,200);const ack=await received.json();
+ assert.equal((await (await fetch(origin+path,{method:'POST',headers:signedHeaders,body:raw})).json()).leadId,ack.leadId);
+ assert.equal((await fetch(origin+'/api/website-leads')).status,401);
+ assert.equal((await request('finance','/api/website-leads')).status,403);
+ assert.equal((await request('sales','/api/website-leads')).body.total,0);
+ const pool=await request('admin','/api/website-leads?status=pool');assert.equal(pool.status,200);assert.equal(pool.body.total,1);
+ const lead=pool.body.records[0];
+ assert.equal((await request('admin','/api/website-leads',{action:'assign',id:lead.id,version:lead.version,ownerId:'sales',reason:'核实两边账号对应',saveMapping:true})).status,200);
+ assert.equal((await request('sales','/api/website-leads?id='+lead.id)).body.detail.owner_id,'sales');
+ assert.equal((await fetch(origin+'/api/website-leads',{method:'POST',headers:{cookie:cookies.admin,origin:'https://wrong.example'},body:'{}'})).status,403);
+ assert.equal((await fetch(origin+'/api/wholesale',{method:'POST',headers:signedHeaders,body:raw})).status,403);
+ }
  { // Navigate every role through real company sessions, not the route-test identity shim.
  const roles=Object.entries(NAVIGATION_BY_ROLE),accounts=openDatabase(join(root,'business.sqlite')).sqlite;
  for(const [index,[role]] of roles.entries())setAccount(accounts,{id:`nav${index}`,email:`nav${index}@example.test`,name:`TEST-${role}`,role,site:role==='运营'||role==='销售'?'印尼':null,channel:role==='运营'?'TikTok':null,password});accounts.close();
