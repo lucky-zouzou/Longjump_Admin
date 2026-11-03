@@ -92,7 +92,7 @@ jobs:
         run: |
           ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes \
             root@47.238.71.113 \
-            'cd /root/loong-jump-v17 && bash scripts/activate-release.sh ${{ github.sha }} ${{ github.run_attempt }}'
+            'cd /root/loong-jump-v17 && python3 scripts/configure-inquiry-sync.py && bash scripts/activate-release.sh ${{ github.sha }} ${{ github.run_attempt }}'
 
       - name: Wait for healthy
         env:

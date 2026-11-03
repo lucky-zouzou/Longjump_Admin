@@ -1,4 +1,5 @@
 import http from 'node:http';
+import {handleWebsiteInquiry} from '../lib/website-inquiry-handler.mjs';
 import {schedulePromotionMonitor} from './promotion-monitor.mjs';
 import {scheduleBusinessActionMonitor} from './business-action-monitor.mjs';
 import {Readable} from 'node:stream';
@@ -23,6 +24,10 @@ async function smallBody(req){let chunks=[],size=0;for await(const b of req){siz
 const server=http.createServer(async(req,res)=>{try{
  res.setHeader('Permissions-Policy','camera=(), microphone=(), geolocation=(self)');res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('X-Frame-Options','DENY');res.setHeader('Referrer-Policy','same-origin');res.setHeader('Cache-Control','no-store');
  if(req.headers.host!==origin.host){res.writeHead(400);res.end('Invalid host');return}const url=new URL(req.url,origin);
+ if(url.pathname==='/api/integrations/website-inquiries'){
+  const request=new Request(url,{method:req.method,headers:req.headers,...(req.method==='POST'?{body:Readable.toWeb(req),duplex:'half'}:{})});
+  await sendWebResponse(await handleWebsiteInquiry(request,env.DB,process.env.LOONGJUMP_INQUIRY_SYNC_SECRET,process.env.LOONGJUMP_INQUIRY_SOURCE||'loongjump-website'),req,res,true);return;
+ }
  if(!['GET','HEAD','POST'].includes(req.method)){res.writeHead(405);res.end();return}
  if(req.method==='POST'&&req.headers.origin!==origin.origin){res.writeHead(403);res.end('Invalid origin');return}
  if(url.pathname==='/healthz'&&req.method==='GET'){

@@ -23,6 +23,7 @@ import ForecastSettings from "./forecast-settings";
 import SkuCreate from "./sku-create";
 import ProductionTracking,{ProductionOrders} from "./production-workflow";
 import ReplenishmentExport from "./replenishment-export";
+import ReplenishmentHistory from "./replenishment-history";
 import TransportLegCard,{TransportCreated} from "./transport-workflow";
 import PlanChanges,{SupplyPicker,PurchaseReassign} from "./plan-changes";
 const Wholesale=lazy(()=>import("./wholesale"));
@@ -354,6 +355,7 @@ function Suggestions({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
     <PageHead title="补货与生产驾驶舱" desc="每日销量驱动，按站点＋渠道＋SKU独立判断断货、补货和生产时点">
       <div className="replenishment-actions"><ReplenishmentExport snapshot={data}/><Pill tone={m.actionAlertCount?"red":"green"}>{m.actionAlertCount?`${m.actionAlertCount}项供应风险`:"供应覆盖正常"}</Pill></div>
     </PageHead>
+    <ReplenishmentHistory actor={actor as {role:string}} currentMonth={data.currentMonth} refreshToken={data.generatedAt}/>
     <div className="model-strip">
       <div><span>需求速度</span><strong>滚动7／21／56天加权，结合需求修正</strong></div><b>×</b><div><span>覆盖周期</span><strong>生产＋海运＋7天复盘</strong></div><b>＋</b><div><span>安全库存</span><strong>销量波动 × 服务水平</strong></div><b>－</b><div><span>供应链库存位</span><strong>库存＋海运＋生产中</strong></div>
     </div>
@@ -697,6 +699,7 @@ function Monthly({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
     <PageHead title="月度备货计划" desc="提交完整度是进入审批的硬门槛，不允许部分站点计划提前审批">
       {submitted===data.monthlyStatus.length?<Pill tone="green">已全部提交</Pill>:<Pill tone="red">待提交 {data.monthlyStatus.length-submitted} 项</Pill>}
     </PageHead>
+    <ReplenishmentHistory actor={data.actor as {role:string}} currentMonth={data.currentMonth} refreshToken={data.generatedAt}/>
     <Panel title={`${data.currentMonth} 提交矩阵`} desc="五个站点的TikTok与Shopee">
       <div className="table-wrap"><table><thead><tr><th>站点</th><th>TikTok</th><th>Shopee</th></tr></thead><tbody>{SITES.map(site=><tr key={site}><td><strong>{site}</strong></td>{REQUIRED_CHANNELS.map(channel=>{const r=data.monthlyStatus.find(x=>x.site===site&&x.channel===channel);return <td key={channel}>{r?.submitted?<Pill tone="green">已提交</Pill>:<Pill tone="red">未提交</Pill>}</td>})}</tr>)}</tbody></table></div>
       <div className="notice info" style={{marginTop:14}}>月度计划由供应链账号送审、管理员审批。{locked?currentPlan.status==="pending"?"本月已送审；需要调整时，请原申请人到审批中心撤回。":"本月已批准，后续调整请提交变更审批。":"五站双渠道全部提交后，由供应链核对需求并送审。"}</div>
