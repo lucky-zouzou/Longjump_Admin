@@ -74,7 +74,7 @@ test('only independently reviewed experience is shared across countries without 
  const f=await setup(),id=await f.create();await f.accept(id);const r=await completedRound(f,id);await f.finance(id,r);
  await assert.rejects(()=>f.act(f.users.bd,'caseCreate',casePayload(f,r,{shareConfirmed:false})),/公司五站/);
  const b=(await f.act(f.users.bd,'caseCreate',casePayload(f,r))).id;assert.equal((await readCreators(f.db,f.users.bd2)).playbooks.length,0);
- await assert.rejects(()=>f.act(f.users.bd,'caseReview',{playbookId:b,version:1,decision:'approve',note:'自行审核'}),/仅管理员/);
+ await assert.rejects(()=>f.act(f.users.bd,'caseReview',{playbookId:b,version:1,decision:'approve',note:'自行审核'}),/组长|管理员/);
  const self=(await f.act(f.users.admin,'caseCreate',casePayload(f,r,{title:'管理员撰写'}))).id;
  await assert.rejects(()=>f.act(f.users.admin,'caseReview',{playbookId:self,version:1,decision:'approve',note:'自行审核'}),/不能自行审核/);
  await f.act(f.users.admin,'caseReview',{playbookId:b,version:1,decision:'approve',note:'核对条件，允许公司五站参考'});

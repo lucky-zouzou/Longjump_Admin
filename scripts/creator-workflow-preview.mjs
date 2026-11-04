@@ -28,9 +28,10 @@ for(const [i,site] of ['印尼','马来西亚','泰国','越南','菲律宾'].en
    await change(f.users.finance,id,'finance',{roundId:r,date:now.slice(0,10),sourceRef:'TEST-ONLY-SETTLEMENT',currency:'CNY',rate:1,rateBasis:'人民币示例',netRevenue:1200,orders:18,ordersFrom:old,ordersAsOf:now,costs:Object.fromEntries(Object.keys(creatorFees).map(k=>[k,{mode:'separate',amount:k==='product'?300:20,evidence:'TEST-ONLY凭证'}])),confirmed:true,evidence:proof,note:'合成示例财务，不是真实经营结果'});
   }
  }
- await act(f.users.indonesia,'intakeSubmit',{rows:[{scopeId:scope,submittedOn:now.slice(0,10),platformId:`demo-${i}-0`,profileUrl:'https://example.test/creator/'+i+'-0',name:site+'潜力达人（演示）',kind:'video',method:'commission',category:'active',grade:i===0?'A':'B',styles:['会自己根据产品创作','真人出镜+口播+产品展示'],orders:i===2?'':18-i*2,gmv:i===2?'':1200-i*100,currency:'CNY',followers:6000+i*2500,views:3200+i*100,requestKind:i===0?'sku':i===1?'sample':'maintenance',sku:'BAG-A',reason:'演示：内容匹配，需复核表现后安排合作资源',evidence:proof}]});
+ await act(f.users.indonesia,'intakeSubmit',{rows:[{scopeId:scope,qualified:true,contact:'TEST-ONLY@example.test',performance:'合成数据：已有视频合作并出单，详见演示记录',submittedOn:now.slice(0,10),platformId:`demo-${i}-0`,profileUrl:'https://example.test/creator/'+i+'-0',name:site+'潜力达人（演示）',kind:'video',method:'commission',category:'active',grade:i===0?'A':'B',styles:['会自己根据产品创作','真人出镜+口播+产品展示'],orders:i===2?'':18-i*2,gmv:i===2?'':1200-i*100,currency:'CNY',followers:6000+i*2500,views:3200+i*100,requestKind:i===0?'sku':i===1?'sample':'maintenance',sku:'BAG-A',reason:'演示：内容匹配，需复核表现后安排合作资源',evidence:proof}]});
  const request=f.sqlite.prepare('SELECT * FROM creator_submissions WHERE scope_id=?').get(scope);
  if(i===1||i===3)await act(bd,'intakeReview',{submissionId:request.id,version:1,decision:i===1?'returned':'queued',nextAt:future,nextAction:i===1?'补齐近期播放与订单截图':'核对新款排期后安排深度交接',note:i===1?'请补充30天数据来源':'计划下周核对达人排期'});
 }
+await act(admin,'leadAssignment',{userId:bd.id,active:true,note:'TEST-ONLY合成组长授权'});
 f.sqlite.exec('CREATE TABLE local_migrations(name TEXT PRIMARY KEY,sha256 TEXT NOT NULL,applied_at TEXT NOT NULL)');for(const m of releaseMigrations)f.sqlite.prepare('INSERT INTO local_migrations VALUES(?,?,?)').run(m.name,m.sha256,now);
 f.sqlite.exec("VACUUM INTO '"+target.replaceAll("'","''")+"'");f.sqlite.close();console.log('Synthetic BD workflow preview ready');
