@@ -7,6 +7,7 @@ const paths:Record<string,string>={
   "cost-profit":"M4 4h16v16H4z M8 8h8 M8 12h3 M8 16h8",
   "sales-targets":"M12 3a9 9 0 1 0 9 9 M12 7a5 5 0 1 0 5 5 M12 12l8-8 M16 4h4v4",
   reviews:"M4 3h16v18H4z M8 8h8 M8 12h8 M8 16h5",
+  clearance:"M4 4h16v16H4z M8 8h8 M8 12h5 M10 16l2 2 4-4",
   promotions:"M20 4H10L3 11l10 10 7-7z M14 8h.01 M9 14l6-3",
   "after-sales":"M9 4 4 9l5 5 M4 9h10a6 6 0 0 1 0 12h-3",
   "quality-incidents":"M12 3 2 21h20z M12 9v5 M12 17h.01",
