@@ -24,7 +24,13 @@ async function setup(base=fixture()){
  f.r=id=>f.sqlite.prepare('SELECT * FROM creator_rounds WHERE id=?').get(id);
  f.change=(who,creatorId,action,params={})=>f.act(who,action,{creatorId,version:params.roundId?f.r(params.roundId).version:f.p(creatorId).version,...params});
  f.accept=async(id)=>{await f.change(f.users.indonesia,id,'contact',{at:ago(3),note:'首次联系',evidence:proof,...f.follow()});await f.change(f.users.indonesia,id,'reply',{at:ago(2),note:'明确愿意合作',evidence:proof,...f.follow()});await f.change(f.users.indonesia,id,'handoff',{sku:'BAG-A',fit:'受众符合',intent:'愿意拍视频',proposal:'视频一条',quote:'佣金按协议',openIssues:'无',evidence:proof,at:ago(1),...f.follow()});await f.change(f.users.bd,id,'accept',{note:'接受商务跟进',...f.follow(f.users.bd.id)});};
- f.round=async(id,overrides={})=>{await f.change(f.users.bd,id,'round',{items:[{sku:'BAG-A',sampleQty:1},{sku:'BAG-B',sampleQty:1}],videos:1,lives:0,currency:'CNY',budget:'50',commission:'销售额10%',requirements:'视频准确展示商品',rights:'无二次投流授权',stockCheck:'库存已向运营核实',zone:'Asia/Jakarta',dueAt:future(),evidence:proof,...overrides});return f.sqlite.prepare('SELECT id FROM creator_rounds WHERE creator_id=? ORDER BY created_at DESC').get(id).id;};
+ f.round=async(id,overrides={})=>{
+  const before=new Set(f.sqlite.prepare('SELECT id FROM creator_rounds WHERE creator_id=?').all(id).map(r=>r.id));
+  await f.change(f.users.bd,id,'round',{items:[{sku:'BAG-A',sampleQty:1},{sku:'BAG-B',sampleQty:1}],videos:1,lives:0,currency:'CNY',budget:'50',commission:'销售额10%',requirements:'视频准确展示商品',rights:'无二次投流授权',stockCheck:'库存已向运营核实',zone:'Asia/Jakarta',dueAt:future(),evidence:proof,...overrides});
+  // Multiple rounds may share a millisecond; identify the inserted row by ID.
+  const created=f.sqlite.prepare('SELECT id FROM creator_rounds WHERE creator_id=?').all(id).filter(r=>!before.has(r.id));
+  assert.equal(created.length,1);return created[0].id;
+ };
  f.approve=(id,r)=>f.change(f.users.admin,id,'approve',{roundId:r,note:'核对后批准本轮条件'});
  f.finance=(id,r,overrides={})=>f.change(f.users.finance,id,'finance',{roundId:r,date:now().slice(0,10),sourceRef:'SETTLEMENT-'+r,currency:'CNY',rate:1,rateBasis:'人民币无需折算',netRevenue:'100',orders:3,ordersFrom:ago(20),ordersAsOf:now(),costs:Object.fromEntries(Object.keys(creatorFees).map(k=>[k,{mode:'separate',amount:'1',evidence:'核对账单第1行'}])),confirmed:true,evidence:proof,note:'首次核验累计数据',...overrides});
  return f;
@@ -284,10 +290,12 @@ test('round retries are idempotently rejected and tracking parameters do not dup
  await assert.rejects(()=>f.change(f.users.bd,id,'follow',{roundId:r,note:'使用轮次版本覆盖档案',...f.follow()}),/轮次不匹配/);
 });
 
-test('parallel cooperation stays active when another round ends and paused profiles cannot be approved',async()=>{
+test('parallel cooperation stays active when another round ends and paused profiles cannot be approved',async(t)=>{
+ t.mock.timers.enable({apis:['Date'],now:new Date()});
  const f=await setup(),id=await f.create();await f.accept(id);
  const first=await f.round(id,{items:[{sku:'BAG-A',sampleQty:0}]});await f.approve(id,first);
- const second=await f.round(id);await f.approve(id,second);
+ const second=await f.round(id);assert.notEqual(second,first);await f.approve(id,second);
+ assert.equal(f.r(first).created_at,f.r(second).created_at);
  await f.change(f.users.indonesia,id,'content',{roundId:first,sku:'BAG-A',kind:'video',url:'https://video.example.test/parallel',at:now(),linkValid:true,skuCorrect:true,accurate:true,agreed:true,note:'验收合格',evidence:proof});
  await f.change(f.users.indonesia,id,'complete',{roundId:first,note:'第一轮完成，第二轮仍在履约',evidence:proof,...f.follow()});
  assert.equal(f.p(id).state,'fulfilling');
