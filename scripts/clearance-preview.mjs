@@ -26,6 +26,8 @@ for(const [i,[site,currency,rate,channel]] of sites.entries()){
   if(i===1&&j===28)continue;
   f.sqlite.prepare('INSERT INTO sales_imports(id,import_key,business_date,site,channel,row_count,total_qty,actor_id,created_at,report_kind) VALUES(?,?,?,?,?,1,?,?,?,?)').run(imp,imp,date,site,channel,qty,ownerId,date,'complete');
   f.sqlite.prepare("INSERT INTO sales_records(id,import_id,business_date,site,channel,sku,qty,currency,reported_amount,actor_id,created_at) VALUES(?,?,?,?,?,'BAG-A',?,?,?,?,?)").run(imp,imp,date,site,channel,qty,currency,amount,ownerId,date);
+  f.sqlite.prepare("UPDATE inventory_balances SET qty=qty-?,updated_at=? WHERE site=? AND channel=? AND sku='BAG-A'").run(qty,date,site,channel);
+  f.sqlite.prepare("INSERT INTO inventory_movements(id,site,channel,sku,movement_type,qty_delta,balance_after,reference_type,reference_id,actor_id,created_at) SELECT ?,site,channel,sku,'销售出库',-?,qty,'销售导入',?,?,? FROM inventory_balances WHERE site=? AND channel=? AND sku='BAG-A'").run('move-'+imp,qty,imp,ownerId,date,site,channel);
   const d=await actionFinanceDay(f.db,{site,channel,sku:'BAG-A'},date);await call(f.users.finance,'financeDay',{date,basisHash:d.basisHash,revision:d.revision,costs:{landed:Math.round(qty*22/rate*100)/100,ads:0,platform:Math.round(amount*.12*100)/100,fulfillment:Math.round(qty*2/rate*100)/100,returns:0,other:Math.round(2/rate*100)/100},source:'TEST-ONLY 演示结算单 '+date,confirmed:true},end);
  }
  await call(operator,'log',{kind:'creative',source:'TEST-ONLY 素材优化记录',note:'更新首图、使用场景与短视频，安排直播组合展示。'},new Date('2026-10-27T05:00:00Z'));
