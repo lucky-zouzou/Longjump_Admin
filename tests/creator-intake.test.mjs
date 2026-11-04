@@ -9,6 +9,9 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createBackup,restoreBackup} from '../server/backup.mjs';
 import {openDatabase,fileBucket} from '../server/storage.mjs';
+import * as X from 'xlsx';
+import {readIntakeWorkbook} from '../lib/creator-intake-workbook.mjs';
+import {intakeHeaders} from '../lib/creator-intake-model.mjs';
 
 const proof='https://evidence.example.test/source',now=()=>new Date().toISOString(),future=()=>new Date(Date.now()+86400000).toISOString(),ago=()=>new Date(Date.now()-3600000).toISOString();
 async function setup(){
@@ -48,6 +51,41 @@ test('preview is read-only; exact renamed imports and repeated rows never duplic
  assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM creator_profiles').get().n,1);assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM creator_dossiers').get().n,1);
  for(const table of ['creator_finance','sales_records','inventory_movements'])assert.equal(f.sqlite.prepare(`SELECT COUNT(*) n FROM ${table}`).get().n,0,table);
  assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM creator_submission_history').get().n,1);
+});
+
+test('16-column handover goes from Excel through preview, submission, dossier and revision without posting samples twice',async()=>{
+ const f=await setup(),date=now().slice(0,10),book=X.utils.book_new();
+ const sheet=X.utils.aoa_to_sheet([intakeHeaders,[new Date(date+'T00:00:00Z'),date.slice(0,7),'印尼','@test.handover',proof,'test@example.test','TEST-BAG × 2','视频','纯佣',1000,8,200000,900,'出单且勤快','A-优质','会自己根据产品创作']]);sheet.A2.z='m/d/yy';
+ X.utils.book_append_sheet(book,sheet,'运营达人协同提交模板');
+ const raw=readIntakeWorkbook(X,X.write(book,{type:'buffer',bookType:'xlsx'})).rows;
+ const input={rows:raw.map(r=>mapIntakeRow(r,{scopeId:f.scope,qualified:true,currency:'IDR'}))};
+ const preview=await f.act(f.users.indonesia,'intakePreview',input);assert.equal(preview.rows[0].status,'ready');assert.equal(preview.rows[0].data.submittedOn,date);assert.equal(preview.rows[0].data.sampledProducts,'TEST-BAG × 2');
+ assert.equal((await f.act(f.users.indonesia,'intakeSubmit',input)).created,1);
+ const retry=await f.act(f.users.indonesia,'intakeSubmit',input);assert.equal(retry.created,0);assert.equal(retry.duplicates,1);
+ const data=await readCreators(f.db,f.users.indonesia),row=data.submissions[0];
+ assert.equal(row.data.sampledProducts,'TEST-BAG × 2');assert.equal(row.creator_id,data.profiles[0].id);assert.ok(data.profiles[0].dossier_id);
+ await f.act(f.users.indonesia,'intakeRevise',{submissionId:row.id,version:row.version,data:{...input.rows[0],sampledProducts:'TEST-BAG × 3'},note:'补正历史寄样记录'});
+ const updated=await readCreators(f.db,f.users.indonesia);assert.equal(updated.submissions[0].data.sampledProducts,'TEST-BAG × 3');
+ assert.equal(updated.submissionHistory.find(r=>r.revision===1).snapshot.data.sampledProducts,'TEST-BAG × 2');
+ for(const table of ['creator_finance','sales_records','inventory_movements'])assert.equal(f.sqlite.prepare(`SELECT COUNT(*) n FROM ${table}`).get().n,0,table);
+});
+
+test('missing shop has an actionable error and refreshing assignment enables only that operator scope',async()=>{
+ const f=await setup();assert.equal((await readCreators(f.db,f.users.malaysia)).scopes.length,0);
+ const missing=await f.act(f.users.malaysia,'intakePreview',{rows:[f.row({scopeId:''})]});assert.match(missing.rows[0].message,/配置店铺与负责人/);
+ await assert.rejects(()=>f.act(f.users.malaysia,'intakeSubmit',{rows:[f.row()]}),/权限/);
+ await f.act(f.users.admin,'scope',{id:f.scope,version:1,site:'印尼',platform:'TikTok',shop:'TEST',operatorId:f.users.indonesia.id,backupId:f.users.malaysia.id,bdId:f.users.bd.id});
+ assert.equal((await readCreators(f.db,f.users.malaysia)).scopes.length,1);
+ assert.equal((await f.act(f.users.malaysia,'intakeSubmit',{rows:[f.row()]})).created,1);
+ const row=f.sqlite.prepare('SELECT * FROM creator_submissions').get();assert.equal(row.submitter_id,f.users.malaysia.id);
+});
+
+test('template placeholder cannot create a fake creator and a mixed invalid batch stays unsubmitted',async()=>{
+ const f=await setup(),example=f.row({platformId:'@creator.id',contact:'WhatsApp: +62...',profileUrl:'https://www.tiktok.com/@creator.id'});
+ const preview=await f.act(f.users.indonesia,'intakePreview',{rows:[f.row(),example]});
+ assert.equal(preview.rows[0].status,'ready');assert.equal(preview.rows[1].status,'error');assert.match(preview.rows[1].message,/模板示例/);
+ await assert.rejects(()=>f.act(f.users.indonesia,'intakeSubmit',{rows:[f.row(),example]}),/模板示例/);
+ assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM creator_submissions').get().n,0);assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM creator_profiles').get().n,0);
 });
 
 test('bulk submission is atomic and scopes cannot be forged through a country column or an account label',async()=>{
