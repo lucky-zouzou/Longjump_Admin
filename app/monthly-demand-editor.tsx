@@ -1,15 +1,19 @@
 "use client";
 
 import {useDirtyGuard} from './workspace-hooks';
-import {useRef,useState} from 'react';
+import {useEffect,useRef,useState} from 'react';
 import TableImport,{type ImportRow} from './table-import';
 import {applyMonthlyImport,initialMonthlyDemand,monthlyDemandItems} from '../lib/monthly-demand.mjs';
+
+import {costSummary} from '../lib/replenishment-costs.mjs';
 
 type Draft={sku:string;name:string;qty:string;reason:string};
 type DraftState={drafts:Draft[];zeroDemand:boolean;zeroReason:string};
 type Props={actor:ImportRow;month:string;submissions:ImportRow[];suggestions:ImportRow[];skuSettings:ImportRow[];busy:boolean;act:(action:string,payload:ImportRow,success:string)=>Promise<ImportRow|null>};
 
 export default function MonthlyDemandEditor({actor,month,submissions,suggestions,skuSettings,busy,act}:Props) {
+  const [costs,setCosts]=useState<ImportRow[]>([]),[costError,setCostError]=useState(''),[costLoading,setCostLoading]=useState(true);
+  useEffect(()=>{let active=true;setCosts([]);setCostLoading(true);setCostError('');fetch(`/api/factory-documents?mode=costs&site=${encodeURIComponent(actor.site||'')}`,{cache:'no-store'}).then(async r=>{const data=await r.json();if(!r.ok)throw Error(data.error);if(active)setCosts(data.costs);}).catch(e=>{if(active)setCostError(e.message||'成本暂时无法读取');}).finally(()=>{if(active)setCostLoading(false);});return()=>{active=false;};},[actor.site]);
   const [initial]=useState(()=>initialMonthlyDemand({actor,month,submissions,suggestions}));
   const [state,setState]=useState<DraftState>(initial);
   const [saved,setSaved]=useState(()=>JSON.stringify(initial));
@@ -21,6 +25,8 @@ export default function MonthlyDemandEditor({actor,month,submissions,suggestions
   const [undo,setUndo]=useState<DraftState|null>(null);
   const submitting=useRef(false);
   const {drafts,zeroDemand,zeroReason}=state;
+  const summary=costSummary(drafts.map(i=>({...i,cost:costs.find(c=>c.sku===i.sku)})));
+  const money=(v:number)=>v.toLocaleString('zh-CN',{maximumFractionDigits:4});
   const knownSkus=[...suggestions.filter(row=>row.site===actor.site&&row.channel===actor.channel),...skuSettings];
   const scopeReady=Boolean(actor.site&&['TikTok','Shopee'].includes(actor.channel));
   let validation='';
@@ -52,8 +58,8 @@ export default function MonthlyDemandEditor({actor,month,submissions,suggestions
     <div className="monthly-demand-tools"><label htmlFor="monthly-add-sku">增加备货SKU<select id="monthly-add-sku" value={newSku} disabled={busy||zeroDemand} onChange={event=>setNewSku(event.target.value)}><option value="">请选择SKU</option>{skuSettings.filter(row=>!drafts.some(item=>item.sku===row.sku)).map(row=><option key={row.sku} value={row.sku}>{row.sku} · {row.name}</option>)}</select></label><button className="btn" type="button" disabled={busy||zeroDemand||!newSku||drafts.length>=1000} onClick={()=>{const row=skuSettings.find(item=>item.sku===newSku);if(row){change({...state,drafts:[...drafts,{sku:row.sku,name:row.name||row.sku,qty:'1',reason:'运营补充需求'}]});setNewSku('');}}}>增加SKU</button><label className="monthly-zero-check"><input type="checkbox" checked={zeroDemand} disabled={busy} onChange={event=>change({...state,zeroDemand:event.target.checked})}/>确认本月无需备货</label></div>
     {notice&&<div className="monthly-demand-notice"><span role="status">{notice}</span>{undo&&<button className="btn" disabled={busy} onClick={()=>{setState(undo);setUndo(null);setError('');setNotice('已撤销上一步，提交后保存。');}}>撤销上一步</button>}</div>}
     {zeroDemand?<label className="monthly-zero-reason">无需备货确认说明<input value={zeroReason} maxLength={500} disabled={busy} onChange={event=>change({...state,zeroReason:event.target.value})} placeholder="请说明本月无需备货的原因"/></label>:<>
-      <div className="monthly-demand-summary"><strong>{drafts.length} 个SKU</strong><span>合计 {drafts.reduce((sum,row)=>sum+(Number(row.qty)||0),0).toLocaleString('zh-CN')} 件</span></div>
-      <div className="table-wrap"><table className="monthly-demand-table"><thead><tr><th>SKU</th><th>商品</th><th className="num">提交数量</th><th>调整原因</th><th>操作</th></tr></thead><tbody>{drafts.length?drafts.map(row=><tr key={row.sku}><td>{row.sku}</td><td>{row.name}</td><td className="num"><input className="qty-input" type="number" inputMode="numeric" min="1" max="1000000000" step="1" aria-label={`${row.sku}提交数量`} disabled={busy} value={row.qty} onChange={event=>change({...state,drafts:drafts.map(item=>item.sku===row.sku?{...item,qty:event.target.value}:item)})}/></td><td><input className="monthly-reason-input" aria-label={`${row.sku}调整原因`} maxLength={240} disabled={busy} value={row.reason} onChange={event=>change({...state,drafts:drafts.map(item=>item.sku===row.sku?{...item,reason:event.target.value}:item)})}/></td><td><button className="btn danger" type="button" disabled={busy} aria-label={`删除备货SKU ${row.sku}`} onClick={()=>remove(row.sku)}>删除</button></td></tr>):<tr><td colSpan={5}><div className="empty">备货清单为空。可导入文件、增加SKU，或勾选“确认本月无需备货”。</div></td></tr>}</tbody></table></div>
+      <p className="notice info">按本站 SKU 自动匹配当前生效的人民币成本，提交时保存成本版本。缺失金额待核实；供应链另行核对采购价，审批后采购单自动下发工厂。</p>{costError&&<p className="notice warn" role="alert">{costError}，提交时由系统重新匹配。</p>}<div className="monthly-demand-summary"><strong>{drafts.length} 个SKU</strong><span>合计 {drafts.reduce((sum,row)=>sum+(Number(row.qty)||0),0).toLocaleString('zh-CN')} 件</span><span>{costLoading?'成本匹配中…':`已知成本 ¥${money(summary.knownAmount)} · ${summary.missing} 项缺成本 · ${summary.unconfirmed} 项范围待核实`}</span></div>
+      <div className="table-wrap"><table className="monthly-demand-table"><thead><tr><th>SKU</th><th>商品</th><th className="num">提交数量</th><th>本站单位成本 · CNY</th><th>成本合计 · CNY</th><th>调整原因</th><th>操作</th></tr></thead><tbody>{drafts.length?drafts.map(row=><tr key={row.sku}><td>{row.sku}</td><td>{row.name}</td><td className="num"><input className="qty-input" type="number" inputMode="numeric" min="1" max="1000000000" step="1" aria-label={`${row.sku}提交数量`} disabled={busy} value={row.qty} onChange={event=>change({...state,drafts:drafts.map(item=>item.sku===row.sku?{...item,qty:event.target.value}:item)})}/></td><td>{(()=>{const c=costs.find(c=>c.sku===row.sku);return c?.total!=null?<>{money(c.total)}<small>{c.complete?'完整到仓成本':'费用范围待核实'} · V{c.version}</small></>:costLoading?'匹配中…':'待补成本';})()}</td><td>{costs.find(c=>c.sku===row.sku)?.total!=null?money(costs.find(c=>c.sku===row.sku)!.total*Number(row.qty||0)):'—'}</td><td><input className="monthly-reason-input" aria-label={`${row.sku}调整原因`} maxLength={240} disabled={busy} value={row.reason} onChange={event=>change({...state,drafts:drafts.map(item=>item.sku===row.sku?{...item,reason:event.target.value}:item)})}/></td><td><button className="btn danger" type="button" disabled={busy} aria-label={`删除备货SKU ${row.sku}`} onClick={()=>remove(row.sku)}>删除</button></td></tr>):<tr><td colSpan={7}><div className="empty">备货清单为空。可导入文件、增加SKU，或勾选“确认本月无需备货”。</div></td></tr>}</tbody></table></div>
     </>}
     {error&&<p className="notice warn" role="alert">{error}</p>}
     {!zeroDemand&&drafts.length>0&&validation&&<p className="notice warn" role="alert">{validation}</p>}

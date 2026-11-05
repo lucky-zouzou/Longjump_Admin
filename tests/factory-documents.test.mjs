@@ -11,6 +11,15 @@ import {REQUIRED_MONTHLY_SCOPES} from '../lib/rules.mjs';
 import {ticketRows,orderPayload,importRows,review} from './cost-fixture.mjs';
 import {mutateCost,readCostProfit} from '../lib/cost-profit.mjs';
 import {localDay} from '../lib/promotion-model.mjs';
+import {deliveryStep} from '../lib/dispatch-demand.mjs';
+test('发货下一步指引区分未安排、待审核与已进入运输',()=>{
+ const order={qc_status:'passed',productionStatus:'completed',promised_completion_date:'2026-11-04'};
+ assert.match(deliveryStep(order,[],[],'2026-11-04').label,/等待供应链/);
+ assert.match(deliveryStep(order,[],[{status:'issued',approval_status:'pending'}],'2026-11-04').label,/管理员审核/);
+ assert.match(deliveryStep(order,[],[{status:'linked',approval_status:'approved'}],'2026-11-04').label,/已进入运输/);
+ assert.match(deliveryStep(order,[{available:4}],[{status:'linked',approval_status:'approved'}],'2026-11-04').label,/提交发货通知/);
+ assert.equal(deliveryStep({...order,productionStatus:'awaiting_factory'},[],[],'2026-11-04').dueLabel,'采购要求交期');
+});
 async function setup({modern=true,complete=true}={}){
  const f=systemFixture();seedMonthly(f);f.factory={id:'factory-1',name:'工厂甲',role:'工厂'};
  if(modern){f.sqlite.prepare('DELETE FROM approval_requests').run();for(const scope of REQUIRED_MONTHLY_SCOPES)await svc.monthlySubmit({...f.users.indonesia,...scope},{month:'2026-09',...scope,...(scope.site==='印尼'&&scope.channel==='TikTok'?{items:[{sku:'BAG-A',qty:10,name:'测试包'}]}:{zeroDemand:true,zeroReason:'本月无需备货'})});await preparePurchase(f);await svc.submitPlan(f.users.supply,{month:'2026-09'});}
@@ -21,10 +30,11 @@ async function setup({modern=true,complete=true}={}){
  const stamp=new Date().toISOString();f.sqlite.prepare('INSERT INTO warehouses(id,site,channel,code,name,created_at,updated_at) VALUES(?,?,?,?,?,?,?)').run('WH','印尼','TikTok','WH','印尼仓',stamp,stamp);
  f.sqlite.prepare('INSERT INTO users(id,email,name,role,created_at,updated_at) VALUES(?,?,?,?,?,?)').run('sea','sea@example.test','海运','海运',stamp,stamp);
  f.sqlite.prepare('INSERT INTO business_partners(id,type,code,name,assigned_user_id,created_at,updated_at) VALUES(?,?,?,?,?,?,?)').run('carrier','carrier','SEA','承运商','sea',stamp,stamp);
- f.issue=(qty=10,number='NOTICE-1')=>issueDispatchNotice(f.db,f.users.supply,{productionOrderId:f.order().id,noticeNo:number,warehouseId:'WH',shippingDate:today(),receiver:'收货人',phone:'123456',address:'测试集运仓',items:[{itemId:f.item().id,qty}]});
+ f.issue=(qty=10,number='NOTICE-1')=>issueDispatchNotice(f.db,f.users.supply,{productionOrderId:f.order().id,noticeNo:number,warehouseId:'WH',shippingDate:today(),receiver:'收货人',phone:'123456',address:'测试集运仓',demandBasis:'已核对实际订单和库存，按批准计划发货',items:[{itemId:f.item().id,qty}]});
  f.notice=id=>f.sqlite.prepare('SELECT * FROM factory_dispatch_notices WHERE id=?').get(id);
  f.bucket={objects:new Map(),async put(k,b){this.objects.set(k,b)},async delete(k){this.objects.delete(k)},async get(k){const b=this.objects.get(k);return b?{body:new ReadableStream({start(c){c.enqueue(new Uint8Array(b));c.close()}})}:null;}};
- f.pack=async(id,qty=10)=>{const proof=await uploadFactoryFile(f.db,f.bucket,f.factory,{noticeId:id,file:new File(['%PDF-1.7\nsigned'], 'signed.pdf',{type:'application/pdf'})});return {noticeId:id,version:f.notice(id).version,action:'submitPacking',number:'PACK-'+id,shippedDate:today(),shipper:'发货员',inspector:'质检员',trackingNo:'TRACK-001',shippedConfirmed:true,reason:qty<10?'部分尾货稍后补发':'',proofIds:[proof.id],rows:[{itemId:f.item().id,pcsPerCarton:qty,cartons:1,cartonStart:1,length:58,width:39,height:38}]};};
+ f.approve=async id=>changeDispatch(f.db,f.users.admin,{noticeId:id,version:f.notice(id).version,action:'reviewNotice',decision:'approve',reason:'已核对需求和实际库存'});
+ f.pack=async(id,qty=10)=>{if(f.notice(id).approval_status==='pending')await f.approve(id);const proof=await uploadFactoryFile(f.db,f.bucket,f.factory,{noticeId:id,file:new File(['%PDF-1.7\nsigned'], 'signed.pdf',{type:'application/pdf'})});return {noticeId:id,version:f.notice(id).version,action:'submitPacking',number:'PACK-'+id,shippedDate:today(),shipper:'发货员',inspector:'质检员',trackingNo:'TRACK-001',shippedConfirmed:true,reason:qty<10?'部分尾货稍后补发':'',proofIds:[proof.id],rows:[{itemId:f.item().id,pcsPerCarton:qty,cartons:1,cartonStart:1,length:58,width:39,height:38}]};};
  return f;
 }
 test('采购准备→管理员批准锁定并下发→工厂导出可见采购价，销售价始终隔离',async()=>{
@@ -39,10 +49,10 @@ test('采购准备→管理员批准锁定并下发→工厂导出可见采购�
 test('三单闭环：装箱复核后按实发转海运，不改海外库存、不允许重复转单',async()=>{
  const f=await setup();try{const before=f.sqlite.prepare('SELECT * FROM inventory_balances').all(),n=await f.issue();let a=await dispatchAvailability(f.db,f.order().id);assert.equal(a[0].available,0);
  await changeDispatch(f.db,f.factory,await f.pack(n.id,8));assert.equal(f.notice(n.id).status,'packing_submitted');
- await changeDispatch(f.db,f.users.supply,{action:'reviewPacking',noticeId:n.id,version:2,decision:'confirm',reason:'核对签字箱数实发八件'});
- svc.setActor(f.users.supply);const response=await svc.POST(new Request('http://localhost/api/system',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'createTransportBatch',noticeId:n.id,noticeVersion:3,batchNo:'TR-PACK-1',carrierName:'承运商'})}));assert.equal(response.status,200,JSON.stringify(await response.clone().json()));
+ await changeDispatch(f.db,f.users.supply,{action:'reviewPacking',noticeId:n.id,version:3,decision:'confirm',reason:'核对签字箱数实发八件'});
+ svc.setActor(f.users.supply);const response=await svc.POST(new Request('http://localhost/api/system',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'createTransportBatch',noticeId:n.id,noticeVersion:4,batchNo:'TR-PACK-1',carrierName:'承运商'})}));assert.equal(response.status,200,JSON.stringify(await response.clone().json()));
  assert.equal(f.notice(n.id).status,'linked');assert.equal(f.sqlite.prepare('SELECT total_shipped_qty FROM transport_batches').get().total_shipped_qty,8);assert.equal((await dispatchAvailability(f.db,f.order().id))[0].available,2);
- await assert.rejects(packingTransportContext(f.db,f.users.supply,{noticeId:n.id,noticeVersion:3}),/已转海运/);
+ await assert.rejects(packingTransportContext(f.db,f.users.supply,{noticeId:n.id,noticeVersion:4}),/已转海运/);
  assert.deepEqual(f.sqlite.prepare('SELECT * FROM inventory_balances').all(),before);assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM inventory_movements').get().n,0);
  const view=await readFactoryDocuments(f.db,f.users.admin),wb=packingWorkbook(X,view.notices[0]);assert.equal(wb.Sheets['商品装箱清单'].F6.v,8);assert.equal(wb.Sheets['商品装箱清单'].H6.v,1);for(const col of [5,7,12])assert.ok(!wb.Sheets['商品装箱清单']['!merges'].some(m=>m.s.r<=6&&m.e.r>=6&&m.s.c<=col&&m.e.c>=col),'装箱合计不能被合并覆盖');assert.equal(wb.Sheets['商品装箱清单'].L6.v,.085956);assert.equal(noticeWorkbook(X,view.notices[0]).Sheets['发货通知单'].G7.v,10);
  svc.setActor(f.users.sales);const tracked=await(await svc.GET(new Request('http://localhost/api/system?module=production-tracking'))).json();assert.ok(tracked.productionTracking[0].events.some(e=>e.label==='已按装箱清单建立海运批次'));assert.ok(!JSON.stringify(tracked).includes('purchasePrice'));
@@ -53,8 +63,8 @@ test('同一真实业务链：月度需求采购→工厂质检装箱→运输�
   const post=async(actor,action,payload)=>{svc.setActor(actor);const response=await svc.POST(new Request('http://localhost/api/system',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,...payload})}));return {status:response.status,body:await response.json()};};
   const stock=()=>f.sqlite.prepare("SELECT qty FROM inventory_balances WHERE site='印尼' AND channel='TikTok' AND sku='BAG-A'").get().qty;
   const initial=stock(),n=await f.issue();await changeDispatch(f.db,f.factory,await f.pack(n.id));
-  await changeDispatch(f.db,f.users.supply,{action:'reviewPacking',noticeId:n.id,version:2,decision:'confirm',reason:'TEST-ONLY 实发十件核对'});
-  const created=await post(f.users.supply,'createTransportBatch',{noticeId:n.id,noticeVersion:3,batchNo:'TEST-E2E',carrierName:'承运商'});assert.equal(created.status,200,JSON.stringify(created.body));
+  await changeDispatch(f.db,f.users.supply,{action:'reviewPacking',noticeId:n.id,version:3,decision:'confirm',reason:'TEST-ONLY 实发十件核对'});
+  const created=await post(f.users.supply,'createTransportBatch',{noticeId:n.id,noticeVersion:4,batchNo:'TEST-E2E',carrierName:'承运商'});assert.equal(created.status,200,JSON.stringify(created.body));
   const leg=()=>f.sqlite.prepare('SELECT * FROM transport_legs').get();
   for(let i=0;i<5;i++){
    const r=await post(i===0?f.users.supply:{id:'sea',role:'海运',name:'海运'},'advanceTransportLeg',{legId:leg().id,version:leg().version,evidenceRef:`TEST-E2E-${i}`,note:'隔离环境运输凭证',etd:today(),eta:today(),ata:today(),portName:'TEST-PORT'});assert.equal(r.status,200,JSON.stringify(r.body));
@@ -90,16 +100,16 @@ test('并发通知不会重复占用；取消未发通知释放数量并保留�
 test('工厂装箱超量、箱号冲突、缺签字、未来日期、其他工厂越权全部阻止',async()=>{
  const f=await setup();try{const n=await f.issue(),p=await f.pack(n.id);for(const [patch,pattern] of [[{rows:[{...p.rows[0],pcsPerCarton:11}]},/超过通知/],[{rows:[{...p.rows[0],pcsPerCarton:5},{...p.rows[0],pcsPerCarton:5}]},/箱号范围重复/],[{proofIds:[]},/签字/],[{shippedDate:'2099-01-01'},/发货日期/]])await assert.rejects(changeDispatch(f.db,f.factory,{...p,...patch}),pattern);
  await assert.rejects(changeDispatch(f.db,{...f.factory,id:'other'},p),e=>e.status===403);await assert.rejects(changeDispatch(f.db,f.users.supply,p),e=>e.status===403);
- await changeDispatch(f.db,f.factory,p);await assert.rejects(changeDispatch(f.db,f.factory,p),/已更新/);await assert.rejects(changeDispatch(f.db,f.users.supply,{action:'cancelNotice',noticeId:n.id,version:2,reason:'不能删除已发货记录'}),/不可直接取消/);
- await changeDispatch(f.db,f.users.supply,{action:'reviewPacking',noticeId:n.id,version:2,decision:'return',reason:'请补正检验签字资料'});await assert.rejects(changeDispatch(f.db,f.users.supply,{action:'cancelNotice',noticeId:n.id,version:3,reason:'不能删除退回单据'}),/不可直接取消/);
- await changeDispatch(f.db,f.factory,{...p,version:3});assert.equal(f.notice(n.id).status,'packing_submitted');
+ await changeDispatch(f.db,f.factory,p);await assert.rejects(changeDispatch(f.db,f.factory,p),/已更新/);await assert.rejects(changeDispatch(f.db,f.users.supply,{action:'cancelNotice',noticeId:n.id,version:3,reason:'不能删除已发货记录'}),/不可直接取消/);
+ await changeDispatch(f.db,f.users.supply,{action:'reviewPacking',noticeId:n.id,version:3,decision:'return',reason:'请补正检验签字资料'});await assert.rejects(changeDispatch(f.db,f.users.supply,{action:'cancelNotice',noticeId:n.id,version:4,reason:'不能删除退回单据'}),/不可直接取消/);
+ await changeDispatch(f.db,f.factory,{...p,version:4});assert.equal(f.notice(n.id).status,'packing_submitted');
  }finally{f.sqlite.close();}
 });
 test('新版订单不可绕开发货通知直接创建新旧海运接口',async()=>{
  const f=await setup();try{await assert.rejects(packingTransportContext(f.db,f.users.supply,{items:[{productionOrderItemId:f.item().id}]}),/先下发发货通知/);await assert.rejects(svc.createShipmentBatch(f.users.supply,{productionOrderId:f.order().id,batchNo:'BYPASS',items:[{id:f.item().id,shippedQty:10}]}),/新版采购单/);}finally{f.sqlite.close();}
 });
 test('附件严格绑定工厂及通知、验证文件格式，备份维护期间禁止新单据写入',async()=>{
- const f=await setup();try{const n=await f.issue();await assert.rejects(uploadFactoryFile(f.db,f.bucket,f.users.supply,{noticeId:n.id,file:new File(['%PDF-1'], 'f.pdf',{type:'application/pdf'})}),e=>e.status===403);await assert.rejects(uploadFactoryFile(f.db,f.bucket,f.factory,{noticeId:n.id,file:new File(['<script>'], 'f.pdf',{type:'application/pdf'})}),/内容与格式/);const p=await f.pack(n.id);await assert.rejects(readFactoryFile(f.db,{...f.factory,id:'other'},p.proofIds[0]),e=>e.status===403);assert.ok(await readFactoryFile(f.db,f.users.admin,p.proofIds[0]));
+ const f=await setup();try{const n=await f.issue();await f.approve(n.id);await assert.rejects(uploadFactoryFile(f.db,f.bucket,f.users.supply,{noticeId:n.id,file:new File(['%PDF-1'], 'f.pdf',{type:'application/pdf'})}),e=>e.status===403);await assert.rejects(uploadFactoryFile(f.db,f.bucket,f.factory,{noticeId:n.id,file:new File(['<script>'], 'f.pdf',{type:'application/pdf'})}),/内容与格式/);const p=await f.pack(n.id);await assert.rejects(readFactoryFile(f.db,{...f.factory,id:'other'},p.proofIds[0]),e=>e.status===403);assert.ok(await readFactoryFile(f.db,f.users.admin,p.proofIds[0]));
  f.sqlite.prepare("INSERT INTO system_maintenance(id,mode,token_hash,actor_id,expires_at,updated_at) VALUES('global','backup','','admin','2099-01-01','2026-01-01') ON CONFLICT(id) DO UPDATE SET mode='backup',expires_at='2099-01-01'").run();await assert.rejects(changeDispatch(f.db,f.factory,p),/备份/);
  }finally{f.sqlite.close();}
 });
@@ -135,5 +145,88 @@ test('旧订单也可以使用通知流程；两个渠道分别占用，直建�
  f.sqlite.prepare('UPDATE series_purchase_order_items SET allocations_json=?').run(JSON.stringify([{site:'印尼',channel:'TikTok',qty:5},{site:'印尼',channel:'Shopee',qty:5}]));await f.issue(5);
  svc.setActor(f.users.supply);const response=await svc.POST(new Request('http://localhost/api/system',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'createTransportBatch',batchNo:'SCOPE-CONFLICT',carrierName:'承运商',items:[{productionOrderItemId:f.item().id,shippedQty:5,allocations:[{site:'印尼',channel:'TikTok',warehouseId:'WH',qty:5}]}]})}));assert.equal(response.status,409);assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM transport_batches').get().n,0);
  const n=f.sqlite.prepare('SELECT * FROM factory_dispatch_notices').get(),p=await f.pack(n.id,5);await changeDispatch(f.db,f.factory,p);assert.equal(f.notice(n.id).status,'packing_submitted');
+ }finally{f.sqlite.close();}
+});
+
+test('发货通知先提交再独立审核：待审不可见、不可上传、驳回释放预占，批准只下发一次',async()=>{
+ const f=await setup();try{
+  const n=await f.issue(6);assert.equal(f.notice(n.id).approval_status,'pending');
+  assert.equal((await readFactoryDocuments(f.db,f.factory)).notices.length,0);
+  assert.equal((await dispatchAvailability(f.db,f.order().id))[0].available,4);
+  await assert.rejects(uploadFactoryFile(f.db,f.bucket,f.factory,{noticeId:n.id,file:new File(['%PDF-1.7\n'], 'proof.pdf',{type:'application/pdf'})}),/提交装箱/);
+  await assert.rejects(changeDispatch(f.db,f.factory,{action:'submitPacking',noticeId:n.id,version:1}),e=>e.status===403);
+  await assert.rejects(changeDispatch(f.db,f.users.supply,{action:'reviewNotice',noticeId:n.id,version:1,decision:'approve',reason:'尝试自己审核'}),e=>e.status===403);
+  await changeDispatch(f.db,f.users.admin,{action:'reviewNotice',noticeId:n.id,version:1,decision:'reject',reason:'站点发货需求有变化'});
+  assert.equal((await dispatchAvailability(f.db,f.order().id))[0].available,10);
+  await assert.rejects(f.approve(n.id),/已审批/);
+  const next=await f.issue(10,'NOTICE-REVISED');await f.approve(next.id);
+  assert.equal((await readFactoryDocuments(f.db,f.factory)).notices.length,1);
+  assert.equal(f.notice(next.id).approval_by,f.users.admin.id);
+  await assert.rejects(f.approve(next.id),/已审批/);
+  const demand=JSON.parse(f.notice(next.id).demand_json);assert.equal(demand.rows[0].forecastReady,false);assert.equal(demand.rows[0].dailyDemand,null);
+  const {workspaceTasks}=await import('../lib/workspace-tasks.mjs');
+  assert.ok((await workspaceTasks(f.db,f.factory)).some(t=>t.entity===next.id&&t.title.includes('装箱')));
+ }finally{f.sqlite.close();}
+});
+
+test('审批与取消并发只有一个生效；管理员代提也不能自批',async()=>{
+ const f=await setup();try{
+  const n=await f.issue(6);
+  const tasks=await (await import('../lib/workspace-tasks.mjs')).workspaceTasks(f.db,f.users.admin);
+  assert.ok(tasks.some(t=>t.entity===n.id&&t.title==='审核发货通知'));
+  const result=await race(f,()=>f.approve(n.id),()=>changeDispatch(f.db,f.users.supply,{noticeId:n.id,version:1,action:'cancelNotice',reason:'发货安排重新调整'}));
+  assert.equal(result.filter(r=>r.ok).length,1);
+  const m=await issueDispatchNotice(f.db,f.users.admin,{productionOrderId:f.order().id,noticeNo:'ADMIN-DRAFT',warehouseId:'WH',shippingDate:today(),receiver:'收货人',phone:'123456',address:'测试集运仓',demandBasis:'管理员代提待另一管理员审核',items:[{itemId:f.item().id,qty:4}]});
+  await assert.rejects(f.approve(m.id),e=>e.status===403);
+  assert.equal((await readFactoryDocuments(f.db,f.factory)).notices.length,0);
+ }finally{f.sqlite.close();}
+});
+
+test('成本自动关联备货及采购审核快照，工厂仅接收批准采购价，综合成本不冒充采购价',async()=>{
+ const f=systemFixture();try{
+  seedMonthly(f);f.sqlite.prepare('DELETE FROM approval_requests').run();
+  const put=(id,site,version,purchase,total)=>f.sqlite.prepare("INSERT INTO product_cost_versions(id,sku,site,version,purchase,total,currency,basis,effective_date,source_json,import_id,reason,actor_id,actor_name,created_at) VALUES(?,?,?,?,?,?,'CNY','landed','2026-01-01','{}','TEST-ONLY','测试成本','admin-1','管理员','2026-01-01')").run(id,'BAG-A',site,version,purchase,total);
+  put('test-cost-id','印尼',1,200000,371234);
+  for(const scope of REQUIRED_MONTHLY_SCOPES)await svc.monthlySubmit({...f.users.indonesia,...scope},{month:'2026-09',...scope,...(scope.site==='印尼'&&scope.channel==='TikTok'?{items:[{sku:'BAG-A',qty:10,cost:{total:1,purchase:1}}]}:{zeroDemand:true,zeroReason:'本月无需备货'})});
+  const saved=JSON.parse(f.sqlite.prepare("SELECT items_json FROM monthly_submissions WHERE site='印尼' AND channel='TikTok'").get().items_json);
+  assert.equal(saved[0].cost.total,37.1234);assert.equal(saved[0].cost.costId,'test-cost-id');
+  let prep=await purchasePreparation(f.db,'2026-09');assert.equal(prep.groups[0].items[0].costReference.purchaseReference,20);
+  await preparePurchase(f);put('test-cost-id2','印尼',2,null,380000);
+  await assert.rejects(svc.submitPlan(f.users.supply,{month:'2026-09'}),/重新核对/);
+  prep=await purchasePreparation(f.db,'2026-09');assert.equal(prep.groups[0].items[0].costReference.purchaseReference,null);
+  await preparePurchase(f);await svc.submitPlan(f.users.supply,{month:'2026-09'});
+  const approval=f.sqlite.prepare('SELECT * FROM approval_requests').get();
+  assert.equal(JSON.parse(approval.payload_json).purchaseDocuments[0].items[0].costReference.references[0].version,2);
+  await svc.decideApproval(f.users.admin,{approvalId:approval.id,version:1,decision:'approve',comment:'核对采购明细与成本'});
+  const factory={id:'factory-1',name:'工厂甲',role:'工厂'},view=await readFactoryDocuments(f.db,factory);
+  assert.equal(view.orders[0].document.items[0].purchasePrice,25.5);
+  assert.ok(!JSON.stringify(view).includes('costReference'));
+  svc.setActor(factory);const system=await(await svc.GET(new Request('http://localhost/api/system?module=fulfillment'))).json();assert.ok(!JSON.stringify(system).includes('costReference'));
+  await assert.rejects(svc.decideApproval(f.users.admin,{approvalId:approval.id,version:1,decision:'approve',comment:'重复批准不能再生成'}),/已处理/);
+  assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM series_purchase_orders').get().n,1);
+ }finally{f.sqlite.close();}
+});
+
+test('按实际需求跨站分配：待审预占调出份额，审批保留原采购分配，装箱运输及预测沿用新份额',async()=>{
+ const f=await setup();try{
+  const stamp=new Date().toISOString();f.sqlite.prepare('INSERT INTO warehouses(id,site,channel,code,name,created_at,updated_at) VALUES(?,?,?,?,?,?,?)').run('WH-MY','马来西亚','Shopee','WH-MY','马来仓',stamp,stamp);
+  const payload={productionOrderId:f.order().id,noticeNo:'MOVE-MY',warehouseId:'WH-MY',shippingDate:today(),receiver:'收货人',phone:'123456',address:'测试马来仓',demandBasis:'马来站实际订单增加，由印尼未发份额调整六件',items:[{itemId:f.item().id,qty:6,reallocation:[{site:'印尼',channel:'TikTok',qty:6}]}]};
+  const n=await issueDispatchNotice(f.db,f.users.supply,payload);
+  assert.equal((await dispatchAvailability(f.db,f.order().id))[0].allocations.find(a=>a.site==='印尼').qty,4);
+  await assert.rejects(f.issue(5,'STEAL'),/超过可发/);
+  await assert.rejects(f.approve(n.id),/确认本单站点调整/);
+  await changeDispatch(f.db,f.users.admin,{noticeId:n.id,version:1,action:'reviewNotice',decision:'approve',reason:'确认按当前实际需求调整',reallocationConfirmed:true});
+  assert.deepEqual(JSON.parse(f.sqlite.prepare('SELECT allocations_json FROM series_purchase_order_items').get().allocations_json),[{site:'印尼',channel:'TikTok',qty:10}]);
+  const distribution=JSON.parse(f.item().dispatch_allocations_json);assert.equal(distribution.reduce((s,a)=>s+a.qty,0),10);assert.equal(distribution.find(a=>a.site==='马来西亚').qty,6);
+  const {loadForecast}=await import('../lib/forecast.ts');let forecast=await loadForecast(f.db,f.users.admin);
+  assert.equal(forecast.suggestions.find(r=>r.site==='马来西亚'&&r.channel==='Shopee'&&r.sku==='BAG-A').productionInProgress,6);
+  await changeDispatch(f.db,f.factory,await f.pack(n.id,6));
+  await changeDispatch(f.db,f.users.supply,{noticeId:n.id,version:3,action:'reviewPacking',decision:'confirm',reason:'核对新目的地及实际装箱'});
+  svc.setActor(f.users.supply);const response=await svc.POST(new Request('http://localhost/api/system',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'createTransportBatch',noticeId:n.id,noticeVersion:4,batchNo:'TR-REALLOCATE',carrierName:'承运商'})}));
+  assert.equal(response.status,200,JSON.stringify(await response.clone().json()));assert.equal(f.sqlite.prepare('SELECT site FROM transport_legs').get().site,'马来西亚');
+  const free=(await dispatchAvailability(f.db,f.order().id))[0];assert.equal(free.available,4);assert.equal(free.allocations.find(a=>a.site==='印尼').qty,4);
+  forecast=await loadForecast(f.db,f.users.admin);assert.equal(forecast.suggestions.find(r=>r.site==='印尼'&&r.channel==='TikTok'&&r.sku==='BAG-A').productionInProgress,4,'实发马来六件后不应再次按比例稀释印尼剩余四件');
+  await assert.rejects(issueDispatchNotice(f.db,f.users.supply,{...payload,noticeNo:'MOVE-AGAIN',items:[{itemId:f.item().id,qty:1,reallocation:[{site:'马来西亚',channel:'Shopee',qty:1}]}]}),/已被其他|不足|无效/);
+  assert.equal(f.sqlite.prepare('PRAGMA foreign_key_check').all().length,0);
  }finally{f.sqlite.close();}
 });

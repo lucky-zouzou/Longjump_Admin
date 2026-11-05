@@ -53,12 +53,16 @@ test('导出凭证绑定本人、订单版本和工厂；过期或越权不能�
  assert.equal(f.sqlite.prepare("SELECT COUNT(*) n FROM audit_logs WHERE action='工厂确认生产接单'").get().n,1);
  }finally{f.sqlite.close();}
 });
-test('所有已知岗位共享生产动态，独立工厂业务范围与敏感字段仍隔离',async()=>{
+test('生产协作岗位共享脱敏动态，专用拍摄账号与工厂业务隔离',async()=>{
  const f=await setup();try{
  await f.export();
  f.sqlite.prepare("UPDATE series_production_orders SET evidence_json=?").run(JSON.stringify([{stage:'factory_accepted',at:new Date().toISOString(),by:'工厂甲',reference:'PRIVATE-REPORT',note:'PRIVATE-NOTE'}]));
  for(const role of Object.keys(ROLE_PERMISSIONS)){
   const actor=role==='工厂'?{...f.factory,id:'other-factory'}:role==='运营'?f.users.indonesia:{...f.users.sales,role};
+  if(role==='拍摄剪辑'){
+    assert.equal(canReadDomain(role,'production_tracking'),false);assert.equal(navigationForRole(role).includes('production-tracking'),false);
+    assert.ok((await read(actor,'production-tracking')).error);continue;
+  }
   const data=await read(actor,'production-tracking');assert.equal(data.productionTracking.length,1,role);
   assert.ok(navigationForRole(role).includes('production-tracking'));assert.equal(canReadDomain(role,'production_tracking'),true);
   const text=JSON.stringify(data.productionTracking);for(const privateValue of ['PRIVATE-REPORT','PRIVATE-NOTE','assigned_user_id','creator_id','evidence_json'])assert.equal(text.includes(privateValue),false,role+privateValue);

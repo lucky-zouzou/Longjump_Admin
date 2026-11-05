@@ -1,0 +1,21 @@
+// Fixed, disposable synthetic fixture. No production reads or credentials.
+import {systemFixture,svc,seedMonthly} from '../tests/system-fixture.mjs';
+import {preparePurchase} from '../tests/factory-document-fixture.mjs';
+import {issueDispatchNotice} from '../lib/factory-documents.mjs';
+import {today} from '../lib/purchase-documents.mjs';
+import {REQUIRED_MONTHLY_SCOPES} from '../lib/rules.mjs';
+import {releaseMigrations} from '../lib/backup-version.mjs';
+import {existsSync,mkdirSync} from 'node:fs';
+import {resolve} from 'node:path';
+const root=resolve('work/procurement-preview'),target=root+'/business.sqlite';if(existsSync(target))throw Error('Existing preview retained; no overwrite');mkdirSync(root,{recursive:true});
+const f=systemFixture(),month=today().slice(0,7),stamp=new Date().toISOString(),factory={id:'factory-1',role:'工厂',name:'演示工厂'};
+seedMonthly(f);f.sqlite.prepare('DELETE FROM approval_requests').run();
+f.sqlite.prepare("INSERT INTO product_cost_versions(id,sku,site,version,purchase,freight,total,currency,basis,effective_date,source_json,import_id,reason,actor_id,actor_name,created_at) VALUES('TEST-ONLY-COST','BAG-A','印尼',1,200000,30000,260000,'CNY','landed','2026-01-01','{}','TEST-ONLY','合成测试成本','admin-1','演示管理员',?)").run(stamp);
+for(const scope of REQUIRED_MONTHLY_SCOPES)await svc.monthlySubmit({...f.users.indonesia,...scope},{month,...scope,...(scope.site==='印尼'&&scope.channel==='TikTok'?{items:[{sku:'BAG-A',qty:10}]}:{zeroDemand:true,zeroReason:'测试月份无需备货'})});
+await preparePurchase(f,month);await svc.submitPlan(f.users.supply,{month});const approval=f.sqlite.prepare('SELECT * FROM approval_requests').get();await svc.decideApproval(f.users.admin,{approvalId:approval.id,version:1,decision:'approve',comment:'TEST-ONLY 核对采购'});
+const o=f.sqlite.prepare('SELECT * FROM series_production_orders').get(),i=f.sqlite.prepare('SELECT * FROM series_production_order_items').get();const exported=await(await svc.exportProductionOrder(factory,{productionOrderId:o.id})).json();
+await svc.acceptProductionOrder(factory,{productionOrderId:o.id,promisedCompletionDate:today(),evidenceRef:'TEST-ONLY-ACCEPT',orderReviewed:true,exportReceiptId:exported.exportReceiptId});await svc.completeProductionOrder(factory,{productionOrderId:o.id,items:[{id:i.id,producedQty:10}],evidenceRef:'TEST-ONLY-FINISH',note:'合成测试完工'});await svc.confirmProductionQc(f.users.supply,{productionOrderId:o.id,decision:'pass',evidenceRef:'TEST-ONLY-QC',note:'合成测试抽检通过'});
+for(const [id,site,channel,name] of [['WH-ID','印尼','TikTok','TEST-ONLY 印尼仓'],['WH-MY','马来西亚','Shopee','TEST-ONLY 马来仓']])f.sqlite.prepare('INSERT INTO warehouses(id,site,channel,code,name,created_at,updated_at) VALUES(?,?,?,?,?,?,?)').run(id,site,channel,id,name,stamp,stamp);
+await issueDispatchNotice(f.db,f.users.supply,{productionOrderId:o.id,noticeNo:'TEST-ONLY-DISPATCH',warehouseId:'WH-MY',shippingDate:today(),receiver:'演示收货人',phone:'TEST-ONLY',address:'合成测试地址',demandBasis:'仅供演示：马来站需求增加，调入印尼未发份额六件',items:[{itemId:i.id,qty:6,reallocation:[{site:'印尼',channel:'TikTok',qty:6}]}]});
+f.sqlite.exec('CREATE TABLE local_migrations(name TEXT PRIMARY KEY,sha256 TEXT NOT NULL,applied_at TEXT NOT NULL)');for(const m of releaseMigrations)f.sqlite.prepare('INSERT INTO local_migrations VALUES(?,?,?)').run(m.name,m.sha256,stamp);
+f.sqlite.exec("VACUUM INTO '"+target.replaceAll("'","''")+"'");f.sqlite.close();console.log('Synthetic procurement preview ready');

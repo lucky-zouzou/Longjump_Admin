@@ -88,7 +88,7 @@ test('平台结算净额校验、重叠账期拦截，到账核销不再产生�
 test('核定月汇率与关账销售固定；原始销售变化不会改写封存快照，反关账可重算',async()=>{
  const f=costFixture();seedSale(f,{businessDate:d,amount:2000000});f.sqlite.prepare("UPDATE sales_records SET currency='IDR' WHERE id='s1'").run();await fin(f,{action:'rate',month:'2026-09',currency:'IDR',rate:0.0005,revision:0,evidence:'TEST-ONLY 财务九月汇率'});
  const q={from:d,to:d,site:'印尼',channel:'TikTok'},load=async()=>financialSalesSummary(f.db,f.users.admin,await readSalesDashboard(f.db,f.users.admin,q));assert.equal((await load()).total.revenueCny,1000);
- await mutateFinanceLedger(f.db,f.users.admin,{action:'close',month:'2026-09',revision:0,evidence:'TEST-ONLY 核对已知部分并封存'});
+ await closeWithReviewedExceptions(f,{action:'close',month:'2026-09',revision:0,evidence:'TEST-ONLY 核对已知部分并封存'});
  assert.throws(()=>f.sqlite.prepare("UPDATE sales_records SET reported_amount=3000000 WHERE id='s1'").run(),/closed finance/);assert.equal((await load()).total.revenueCny,1000);
  await assert.rejects(fin(f,{action:'rate',month:'2026-09',currency:'IDR',rate:0.00045,revision:1,evidence:'TEST'}),/关账/);
  await mutateFinanceLedger(f.db,f.users.admin,{action:'reopen',month:'2026-09',revision:1,evidence:'TEST-ONLY 复核修订'});f.sqlite.prepare("UPDATE sales_records SET reported_amount=3000000 WHERE id='s1'").run();assert.equal((await load()).total.revenueCny,1500);assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM finance_period_events').get().n,2);
@@ -126,13 +126,13 @@ test('财务核销并发争用同一余额只能一个成功，失败写入及�
 test('核定财务汇率缺失保持未知，运营只能看到自己的冻结行，工厂不得读取',async()=>{
  const f=costFixture();seedSale(f,{businessDate:d,amount:2000000});f.sqlite.prepare("UPDATE sales_records SET currency='IDR' WHERE id='s1'").run();seedSale(f,{id:'my-sale',businessDate:d,site:'马来西亚',amount:5000});
  const report=await readSalesDashboard(f.db,f.users.admin,{from:d,to:d});const c=await financialSalesSummary(f.db,f.users.admin,report);assert.equal(c.total.revenueComplete,false);assert.equal(c.scopes.find(s=>s.site==='印尼').revenueCny,null);
- await fin(f,{action:'rate',month:'2026-09',currency:'IDR',rate:0.0005,revision:0,evidence:'TEST 核定凭据'});await mutateFinanceLedger(f.db,f.users.admin,{action:'close',month:'2026-09',revision:0,evidence:'TEST 本月关账'});
+ await fin(f,{action:'rate',month:'2026-09',currency:'IDR',rate:0.0005,revision:0,evidence:'TEST 核定凭据'});await closeWithReviewedExceptions(f,{action:'close',month:'2026-09',revision:0,evidence:'TEST 本月关账'});
  const op=await financialSalesSummary(f.db,f.users.indonesia,report);assert.ok(op.scopes.every(r=>r.site==='印尼'&&r.channel==='TikTok'));assert.equal(op.total.revenueCny,1000);await assert.rejects(financialSalesSummary(f.db,{role:'工厂'},report),e=>e.status===403);
 });
 
 test('新财务台账、固定汇率、关账快照可完整备份恢复且保持不可改写',async()=>{
  const {mkdtempSync,rmSync}=await import('node:fs'),{tmpdir}=await import('node:os'),{join}=await import('node:path'),{createBackup,restoreBackup}=await import('../server/backup.mjs'),{fileBucket,openDatabase}=await import('../server/storage.mjs');const root=mkdtempSync(join(tmpdir(),'finance-chain-backup-'));
- try{const f=costFixture();await fin(f,doc());await fin(f,{action:'rate',month:'2026-09',currency:'IDR',rate:0.0005,revision:0,evidence:'TEST-ONLY 月度汇率'});await mutateFinanceLedger(f.db,f.users.admin,{action:'close',month:'2026-09',revision:0,evidence:'TEST-ONLY 保存关账快照'});
+ try{const f=costFixture();await fin(f,doc());await fin(f,{action:'rate',month:'2026-09',currency:'IDR',rate:0.0005,revision:0,evidence:'TEST-ONLY 月度汇率'});await closeWithReviewedExceptions(f,{action:'close',month:'2026-09',revision:0,evidence:'TEST-ONLY 保存关账快照'});
  const archive=join(root,'backup.tar');await createBackup({DB:f.db,WHOLESALE_FILES:fileBucket(join(root,'files'))},archive);await restoreBackup(archive,join(root,'restored'));const db=openDatabase(join(root,'restored/business.sqlite'));
  const r=await readFinanceLedger(db,f.users.admin,{month:'2026-09'});assert.equal(r.balances[0].amount_minor,10000);assert.equal(r.rates.find(r=>r.currency==='IDR').rate,0.0005);assert.ok(r.snapshot);assert.throws(()=>db.sqlite.prepare("UPDATE finance_documents SET amount_minor=0").run(),/immutable/);db.sqlite.close();
  }finally{rmSync(root,{recursive:true,force:true});}
@@ -142,7 +142,7 @@ test('新财务台账、固定汇率、关账快照可完整备份恢复且保�
 test('关账后存货以新日期续记，不改变旧月库存快照且可加载旧月版本',async()=>{
  const f=costFixture(),{ids}=await importRows(f,ticketRows({businessDate:d,effectiveAt:d}));await review(f,ids[0]);
  const p=doc({kind:'inventory_valuation',businessKey:'VAL-CARRY',businessDate:d,counterparty:'自有存货',site:'印尼',channel:'TikTok',sku:'BAG-A',lots:[{ticketKey:'SHIP-TEST',lineKey:'A',qty:10}],amount:0});await fin(f,p);
- await mutateFinanceLedger(f.db,f.users.admin,{action:'close',month:'2026-09',revision:0,evidence:'TEST-ONLY 封存九月'});
+ await closeWithReviewedExceptions(f,{action:'close',month:'2026-09',revision:0,evidence:'TEST-ONLY 封存九月'});
  const original=(await readFinanceLedger(f.db,f.users.admin,{month:'2026-09'})).snapshot.inventory;
  const next=await readFinanceLedger(f.db,f.users.finance,{month:'2026-10'});assert.equal(next.valuations.find(v=>v.business_key==='VAL-CARRY').revision,1);
  f.stock('BAG-A',9,10);await fin(f,{...p,businessDate:'2026-10-20',revision:1,lots:[{ticketKey:'SHIP-TEST',lineKey:'A',qty:9}]});
@@ -153,7 +153,7 @@ test('关账后存货以新日期续记，不改变旧月库存快照且可加�
 test('本月广告费用池不能通过分摊改写已关账月份的成本',async()=>{
  const f=costFixture(),{ids}=await importRows(f,ticketRows({businessDate:d,effectiveAt:d}));await review(f,ids[0]);seedSale(f,{businessDate:d});
  await mutateCost(f.db,f.users.finance,orderPayload({businessDate:d,adMode:'allocated',advertising:{amount:0,state:'not_applicable',source:'TEST共享广告'}}));
- await mutateFinanceLedger(f.db,f.users.admin,{action:'close',month:'2026-09',revision:0,evidence:'TEST-ONLY 九月封存'});
+ await closeWithReviewedExceptions(f,{action:'close',month:'2026-09',revision:0,evidence:'TEST-ONLY 九月封存'});
  await assert.rejects(mutateCost(f.db,f.users.finance,{action:'advertising',businessKey:'CROSS-MONTH',revision:0,site:'印尼',channel:'TikTok',businessDate:'2026-10-20',reason:'TEST',amount:10,state:'actual',source:'TEST',currency:'CNY',fx:1,fxVersion:'CNY1',orderKeys:['ORDER-TEST']}),/关账/);
 });
 
@@ -173,5 +173,13 @@ test('线下与寄售实销可直接消耗原渠道成本批次，跨业务累�
 test('SKU分摊依据不足时保留整单待分配金额，缺报日期不遗漏整天无记录的日期',async()=>{
  const f=costFixture(),input=ticketRows();input[1].sku='BAG-B';const {ids}=await importRows(f,input);await review(f,ids[0]);seedSale(f,{qty:10,amount:null});seedSale(f,{id:'s2',sku:'BAG-B',qty:5,amount:null});await mutateCost(f.db,f.users.admin,orderPayload({lines:[{ticketKey:'SHIP-TEST',lineKey:'A',salesRecordId:'s1',qty:10},{ticketKey:'SHIP-TEST',lineKey:'B',salesRecordId:'s2',qty:5}]}));
  const result=await readCostProfit(f.db,f.users.admin);assert.ok(result.skuRows.every(r=>r.contribution===null));assert.equal(result.unallocated[0].contribution,result.orders[0].contribution);
- await mutateFinanceLedger(f.db,f.users.admin,{action:'close',month:'2026-09',revision:0,evidence:'TEST-ONLY 明确缺报不视为零'});const raw=f.sqlite.prepare('SELECT snapshot_json FROM finance_period_events').get();assert.equal(JSON.parse(raw.snapshot_json).quality.missingSalesDays.length,30);
+ await closeWithReviewedExceptions(f,{action:'close',month:'2026-09',revision:0,evidence:'TEST-ONLY 明确缺报不视为零'});const raw=f.sqlite.prepare('SELECT snapshot_json FROM finance_period_events').get();assert.equal(JSON.parse(raw.snapshot_json).quality.missingSalesDays.length,30);
 });
+
+// Lock/reopen tests deliberately exercise the explicit authorized exception route.
+// Other regression cases exercise the default refusal and non-locking preclose.
+async function closeWithReviewedExceptions(f,p){
+ const r=await readFinanceLedger(f.db,f.users.admin,{month:p.month,view:'period'});
+ const keys=r.preview.quality.checks.filter(c=>c.blocking&&c.count>0).map(c=>c.key);
+ return mutateFinanceLedger(f.db,f.users.admin,{...p,reviewVersion:r.version,exceptionKeys:keys,exceptionReason:'TEST-ONLY：已复核合成数据缺口；用于验证冻结和反关账'});
+}

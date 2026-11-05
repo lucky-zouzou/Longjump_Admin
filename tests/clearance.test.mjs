@@ -51,3 +51,57 @@ test('existing active promotion prevents clearance approval; no duplicate activi
 test('legacy daily ledger with unspecified additional expenses stays pending in clearance',async()=>{const f=setup(),id=await f.start();f.sale('2026-10-01');const r=f.row(id),d=await actionFinanceDay(f.db,r,'2026-10-01');f.sqlite.prepare('INSERT INTO business_action_finance_days(id,site,channel,sku,business_date,revision,currency,basis_hash,basis_json,data_json,source,note,actor_id,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run('old','印尼','TikTok','BAG-A','2026-10-01',1,'IDR',d.basisHash,JSON.stringify(d.basis),JSON.stringify({landed:40,ads:0,platform:0,fulfillment:0,returns:0}),'TEST历史核算','其他费用范围未核实','finance-1','2026-10-02');const result=(await f.read('2026-10-02')).items[0];assert.equal(result.summary.profit,null);assert.equal(result.days[0].status,'additional_pending');});
 
 test('financial closure requires matching sales stock ledger even with reviewed complete costs',async()=>{const f=setup(),id=await f.start();f.sale('2026-10-01');await f.finance(id,'2026-10-01');await f.do(f.users.indonesia,id,'log',{kind:'stop',source:'TEST停止凭据'},'2026-10-01');const r=(await f.read('2026-10-02')).items[0],w=r.windows[0];await f.do(f.users.indonesia,id,'review',{periodEnd:w.to,evidenceHash:w.evidenceHash,outcome:'stop'},'2026-10-02');f.sqlite.prepare("INSERT INTO inventory_movements(id,site,channel,sku,movement_type,qty_delta,balance_after,reference_type,reference_id,actor_id,created_at) VALUES('TEST-incorrect','印尼','TikTok','BAG-A','销售出库',-1,8,'销售导入','imp2026-10-01','id-ops','2026-10-02')").run();await assert.rejects(f.do(f.users.finance,id,'close',{},'2026-10-02'),/扣减流水不一致/);assert.equal(f.row(id).status,'active');});
+
+test('three-role follow-up routes missing reports to operations and only new costs to finance',async()=>{
+ const f=setup(),id=await f.start();f.sale('2026-10-01');await f.finance(id,'2026-10-01');f.sale('2026-10-02');f.sale('2026-10-03',{kind:'partial'});
+ const before=f.sqlite.prepare('SELECT * FROM inventory_balances').all(),r=(await f.read('2026-10-04')).items[0];
+ assert.deepEqual(r.oversight.salesGaps,['2026-10-03']);assert.deepEqual(r.oversight.financeGaps,['2026-10-02']);
+ assert.equal(r.oversight.tasks.find(t=>t.code==='sales').role,'运营');assert.equal(r.oversight.tasks.find(t=>t.code==='cost').role,'财务');
+ assert(!r.oversight.tasks.some(t=>t.detail.includes('2026-10-04')));assert.equal(r.oversight.outcome,'sales_observed');
+ const ops=(await clearanceTasks(f.db,f.users.indonesia,at('2026-10-04'))).filter(t=>t.entity===id),finance=(await clearanceTasks(f.db,f.users.finance,at('2026-10-04'))).filter(t=>t.entity===id);
+ assert.equal(ops.length,1);assert.match(ops[0].title,/销售依据/);assert.equal(finance.length,1);assert.match(finance[0].title,/费用/);
+ assert.deepEqual(f.sqlite.prepare('SELECT * FROM inventory_balances').all(),before);
+});
+test('complete zero-sales week prompts diagnosis once; review clears it, partial week never claims zero',async()=>{
+ const f=setup(),id=await f.start();for(let n=1;n<=7;n++)f.sale('2026-10-0'+n,{qty:0,amount:0});
+ let r=(await f.read('2026-10-08')).items[0];assert.match(r.oversight.tasks.find(t=>t.code==='review').title,/7天仍无销量/);
+ const w=r.windows[0];await f.do(f.users.indonesia,id,'review',{periodEnd:w.to,evidenceHash:w.evidenceHash,outcome:'adjust'},'2026-10-08');
+ r=(await f.read('2026-10-08')).items[0];assert(!r.oversight.tasks.some(t=>t.code==='review'));assert(!(await clearanceTasks(f.db,f.users.indonesia,at('2026-10-08'))).some(t=>t.entity===id));
+ const g=setup();await g.start();for(let n=1;n<=7;n++)g.sale('2026-10-0'+n,{qty:0,amount:0,kind:n===3?'partial':'complete'});
+ const pending=(await g.read('2026-10-08')).items[0];assert.equal(pending.oversight.outcome,'pending');assert(!pending.oversight.tasks.some(t=>t.title.includes('仍无销量')));
+});
+test('cost revision reopens the same weekly follow-up without re-entering six confirmed days',async()=>{
+ const f=setup(),id=await f.start();for(let n=1;n<=7;n++){f.sale('2026-10-0'+n);await f.finance(id,'2026-10-0'+n);}
+ let r=(await f.read('2026-10-08')).items[0],w=r.windows[0];await f.do(f.users.indonesia,id,'review',{periodEnd:w.to,evidenceHash:w.evidenceHash,outcome:'continue'},'2026-10-08');
+ await f.finance(id,'2026-10-02',{other:8});r=(await f.read('2026-10-08')).items[0];
+ assert.deepEqual(r.oversight.financeGaps,[]);assert.equal(r.oversight.tasks.filter(t=>t.code==='review').length,1);assert.equal(r.oversight.tasks.find(t=>t.code==='review').id,id+':review');
+ assert.match((await clearanceTasks(f.db,f.users.indonesia,at('2026-10-08'))).find(t=>t.entity===id).title,/复盘/);
+ assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM business_action_finance_days').get().n,8);
+});
+test('loss boundaries lead to stop and finance follow-up, stop alone does not close the plan',async()=>{
+ const f=setup(),id=await f.start();f.sale('2026-10-01');await f.finance(id,'2026-10-01',{landed:140,other:40});
+ let r=(await f.read('2026-10-02')).items[0];assert(r.oversight.budgetExceeded);assert(r.oversight.lossExceeded);assert.equal(r.oversight.tasks[0].priority,0);
+ assert(r.oversight.tasks.some(t=>t.code==='stop-risk'&&t.role==='运营'));assert(r.oversight.tasks.some(t=>t.code==='risk'&&t.role==='财务'));
+ await f.do(f.users.indonesia,id,'log',{kind:'stop',source:'TEST停止平台活动'},'2026-10-02');r=(await f.read('2026-10-03')).items[0];
+ assert(!r.oversight.tasks.some(t=>t.code==='stop-risk'));assert(r.oversight.tasks.some(t=>t.code==='risk'));assert.equal(r.status,'active');
+});
+test('future assignment retains today operator task, monthly export uses effective owner',async()=>{
+ const f=setup(),id=await f.ready();f.sqlite.prepare("INSERT INTO users(id,email,name,role,site,channel,created_at,updated_at) VALUES('ops2','ops2@test.local','乙运营','运营','印尼','TikTok','2026-01-01','2026-01-01')").run();
+ await f.do(f.users.indonesia,id,'start',{actualPrice:100,source:'TEST平台活动',confirmed:true});await f.do(f.users.admin,id,'assign',{ownerId:'ops2'},'2026-10-02');
+ let d=await f.read('2026-10-02');assert.equal(d.items[0].oversight.ownerId,'id-ops');
+ assert.equal(clearanceExport(d)[0].rows[1][4],f.users.indonesia.name);assert.equal((await f.read('2026-10-03')).items[0].oversight.ownerId,'ops2');
+ assert(!(await clearanceTasks(f.db,f.users.indonesia,at('2026-10-03'))).some(t=>t.entity===id));
+});
+test('live stock delta reflects independent replenishment, never inferred purely from sales',async()=>{
+ const f=setup(),id=await f.start();f.sale('2026-10-01',{qty:3});f.sqlite.prepare("UPDATE inventory_balances SET qty=qty+20 WHERE site='印尼' AND channel='TikTok' AND sku='BAG-A'").run();
+ const r=(await f.read('2026-10-02')).items[0];assert.equal(r.progress.qty,3);assert.equal(r.progress.netDeductedQty,3);assert.equal(r.stock.available,27);assert.equal(r.oversight.openingAvailable,10);assert.equal(r.oversight.inventoryChange,17);assert.equal(r.summary.profit,null);
+});
+test('expired unexecuted plan is escalated to management, not a dead-end start button',async()=>{
+ const f=setup(),id=await f.ready(),r=(await f.read('2026-11-02')).items[0];
+ assert(r.oversight.tasks.some(t=>t.code==='expired'&&t.role==='管理员'));assert(!r.oversight.tasks.some(t=>t.code==='start'));
+ assert((await clearanceTasks(f.db,f.users.admin,at('2026-11-02'))).some(t=>t.entity===id&&t.month==='2026-10'));assert(!(await clearanceTasks(f.db,f.users.indonesia,at('2026-11-02'))).some(t=>t.entity===id));
+});
+
+test('execution day without completed reports is observation, not a zero-sales conclusion',async()=>{
+ const f=setup();await f.start();const r=(await f.read('2026-10-01')).items[0];assert.equal(r.oversight.outcome,'pending');assert.deepEqual(r.oversight.salesGaps,[]);assert(!r.oversight.tasks.some(t=>t.code==='sales'||t.code==='review'));
+});
