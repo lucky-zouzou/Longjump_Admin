@@ -1,3 +1,5 @@
+import {salesWindow} from "../../../lib/sales-window.mjs";
+import {loadReplenishmentCosts,factoryPurchaseDocument} from "../../../lib/replenishment-costs.mjs";
 import {localDay} from "../../../lib/promotion-model.mjs";
 import {overlapMessage} from "../../../lib/sales-completeness.mjs";
 import {workspaceTasks} from "../../../lib/workspace-tasks.mjs";
@@ -131,7 +133,7 @@ export async function GET(request:Request) {
       const result=await readHistory(database(),actor,Object.fromEntries(requestUrl.searchParams));
       return requestUrl.searchParams.get("export")==="1"?new Response(historyCsv(result),{headers:{"content-type":"text/csv; charset=utf-8","content-disposition":`attachment; filename="${result.kind}-history.csv"`,"cache-control":"no-store"}}):Response.json(result);
     }
-    const requestedModule=requestUrl.searchParams.get("module")||(actor.role==="达人BD"?"creators":"");
+    const requestedModule=requestUrl.searchParams.get("module")||(actor.role==="达人BD"?"creators":actor.role==="拍摄剪辑"?"content-center":"");
     const module=requestedModule==="home"?(mobileModules(actor.role)[0]||"overview"):requestedModule;
     if(module&&!navigationForRole(actor.role).includes(module))throw new HttpError(403,"当前账号无权打开此工作区");
     const forecastTrend=requestUrl.searchParams.get("forecastTrend");
@@ -142,7 +144,7 @@ export async function GET(request:Request) {
       return Response.json({dailySeries:row.dailySeries,generatedAt:nowIso()});
     }
     // Independent workspaces fetch their own ledgers; avoid constructing the global forecast.
-    if(["creators","cost-profit","sales-targets","wholesale","reviews","after-sales","quality-incidents","promotions","business-actions","audit","users","permissions","production-tracking"].includes(module)){
+    if(["content-center","creators","cost-profit","sales-targets","wholesale","reviews","after-sales","quality-incidents","promotions","business-actions","audit","users","permissions","production-tracking"].includes(module)){
       const empty=Object.fromEntries([...new Set(Object.values(MODULE_FIELDS).flat())].filter(key=>!["currentMonth","metrics"].includes(key)).map(key=>[key,[]]));
       const users=["users","permissions"].includes(module)?await all("SELECT id,email,name,role,site,channel,responsibility_unit,active,created_at,updated_at FROM users ORDER BY created_at"):[];
       const tracking=module==="production-tracking"?productionTracking(...await Promise.all([all("SELECT * FROM series_production_orders"),all("SELECT * FROM series_production_order_items"),all("SELECT * FROM series_purchase_orders"),all("SELECT entity_id,created_at,actor_name FROM audit_logs WHERE entity_type='series_production_order' AND action='生成工厂订单导出' ORDER BY created_at")]) as [AnyRow[],AnyRow[],AnyRow[],AnyRow[]]):[];
@@ -158,14 +160,18 @@ export async function GET(request:Request) {
       return Response.json({source,rows:await all("SELECT r.*,COALESCE(s.name,'') name FROM sales_records r LEFT JOIN sku_settings s ON s.sku=r.sku WHERE r.import_id=? ORDER BY r.created_at,r.id",[source.id])});
     }
     const scope = scoped(actor);
-    const today=chinaDate(),expectedDate=chinaDate(-1),cutoff7=chinaDate(-6);
+    const measuredAt=new Date(),visibleSites=actor.role==="运营"?[actor.site!]:SITES;
+    const windows=visibleSites.map(site=>({site,...salesWindow(site,measuredAt)}));
+    const dateCte='WITH dates(site,today,start,end) AS (VALUES '+windows.map(()=>'(?,?,?,?)').join(',')+') ';
+    const dateArgs=windows.flatMap(w=>[w.site,w.today,w.start,w.end]);
+    const ownChannel=actor.role==='运营'?' AND channel=?':'',boundsArgs=[...dateArgs,...(actor.role==='运营'?[actor.channel]:[])];
     const results: AnyRow[][] = await Promise.all([
       all(`SELECT * FROM inventory_balances${scope.clause} ORDER BY site,channel,sku`, scope.args),
       module?Promise.resolve([]):all(`SELECT * FROM inventory_movements${scope.clause} ORDER BY created_at DESC LIMIT 500`, scope.args),
       module?Promise.resolve([]):all(`SELECT * FROM sales_records${scope.clause}${scope.clause?" AND":" WHERE"} reversed_at IS NULL ORDER BY business_date DESC,created_at DESC LIMIT 1000`, scope.args),
       module?Promise.resolve([]):all(`SELECT * FROM sales_imports${scope.clause} ORDER BY created_at DESC LIMIT 100`, scope.args),
-      all("SELECT site,channel,MAX(CASE WHEN report_kind IN ('complete','zero') THEN business_date END) last_sale_date,MAX(business_date) last_import_date,MAX(CASE WHEN business_date=? AND report_kind IN ('complete','zero') THEN 1 ELSE 0 END) expected_complete,MAX(CASE WHEN business_date=? AND total_qty>0 THEN 1 ELSE 0 END) expected_imported,SUM(CASE WHEN business_date=? THEN total_qty ELSE 0 END) sales_expected,SUM(CASE WHEN business_date=? THEN total_qty ELSE 0 END) sales_today,SUM(CASE WHEN business_date>=? THEN total_qty ELSE 0 END) sales_7_qty,COUNT(DISTINCT CASE WHEN business_date>=? AND report_kind IN ('complete','zero') THEN business_date END) import_days_7 FROM sales_imports WHERE reversed_at IS NULL GROUP BY site,channel",[expectedDate,expectedDate,expectedDate,today,cutoff7,cutoff7]),
-      all(`SELECT site,channel,sku,SUM(qty) qty FROM sales_records WHERE reversed_at IS NULL AND business_date>=?${actor.role==="运营"?" AND site=? AND channel=?":""} GROUP BY site,channel,sku ORDER BY qty DESC LIMIT 100`,actor.role==="运营"?[cutoff7,actor.site,actor.channel]:[cutoff7]),
+      all(dateCte+`SELECT i.site,channel,MAX(CASE WHEN report_kind IN ('complete','zero') THEN business_date END) last_sale_date,MAX(business_date) last_import_date,MAX(CASE WHEN business_date=d.end AND report_kind IN ('complete','zero') THEN 1 ELSE 0 END) expected_complete,MAX(CASE WHEN business_date=d.end AND total_qty>0 THEN 1 ELSE 0 END) expected_imported,COUNT(DISTINCT CASE WHEN business_date BETWEEN d.start AND d.end AND report_kind IN ('complete','zero') THEN business_date END) import_days_7 FROM sales_imports i JOIN dates d ON d.site=i.site WHERE reversed_at IS NULL`+ownChannel+' GROUP BY i.site,channel',boundsArgs),
+      all(dateCte+`SELECT r.site,channel,sku,SUM(CASE WHEN business_date<=d.end THEN qty ELSE 0 END) qty,SUM(CASE WHEN business_date=d.today THEN qty ELSE 0 END) qtyToday,SUM(CASE WHEN business_date=d.end THEN qty ELSE 0 END) qtyYesterday FROM sales_records r JOIN dates d ON d.site=r.site WHERE reversed_at IS NULL AND business_date BETWEEN d.start AND d.today`+ownChannel+' GROUP BY r.site,channel,sku',boundsArgs),
       actor.role === "运营"
         ? all("SELECT r.*, GROUP_CONCAT(a.site||'|'||a.channel||'|'||a.qty, ';;') allocations FROM inbound_receipts r JOIN inbound_allocations a ON a.receipt_id=r.id AND a.site=? AND a.channel=? GROUP BY r.id ORDER BY r.received_at DESC LIMIT 200",[actor.site,actor.channel])
         : all("SELECT r.*, GROUP_CONCAT(a.site||'|'||a.channel||'|'||a.qty, ';;') allocations FROM inbound_receipts r LEFT JOIN inbound_allocations a ON a.receipt_id=r.id GROUP BY r.id ORDER BY r.received_at DESC LIMIT 200"),
@@ -203,14 +209,18 @@ export async function GET(request:Request) {
       canReadDomain(actor.role,"transport") ? all("SELECT * FROM transport_receipt_items ORDER BY created_at DESC LIMIT 3000") : all("SELECT * FROM transport_receipt_items WHERE 1=0"),
       canReadDomain(actor.role,"transport") ? all("SELECT * FROM transport_shelf_confirmations ORDER BY confirmed_at DESC") : all("SELECT * FROM transport_shelf_confirmations WHERE 1=0"),
     ]);
-    const [inventory, movements, sales, imports, salesScopeRows, salesTopSkus, receipts, submissions, submissionScopeRows, approvals, batches, newProductRows, newProductStageRows, skuSettings, auditRows, purchaseOrderRows, purchaseItemRows, productionOrderRows, productionItemRows, shipmentRows, shipmentItemRows, shipmentReceiptRows, shipmentReceiptItemRows, shelfConfirmationRows, users,businessPartners,warehouses,countRequests,transportRows,transportItemRows,transportLegRows,transportLegItemRows,transportReceiptRows,transportReceiptItemRows,transportShelfRows] = results;
+    const [inventory, movements, sales, imports, salesScopeRows, salesSkuRows, receipts, submissions, submissionScopeRows, approvals, batches, newProductRows, newProductStageRows, skuSettings, auditRows, purchaseOrderRows, purchaseItemRows, productionOrderRows, productionItemRows, shipmentRows, shipmentItemRows, shipmentReceiptRows, shipmentReceiptItemRows, shelfConfirmationRows, users,businessPartners,warehouses,countRequests,transportRows,transportItemRows,transportLegRows,transportLegItemRows,transportReceiptRows,transportReceiptItemRows,transportShelfRows] = results;
 
+    const salesTopSkus=salesSkuRows.filter(r=>r.qty>0).map(({sku,site,channel,qty})=>({sku,site,channel,qty}));
+    const salesCounts=new Map<string,{today:number;week:number;yesterday:number}>();
+    for(const r of salesSkuRows){const key=r.site+'|'+r.channel,c=salesCounts.get(key)||{today:0,week:0,yesterday:0};c.today+=r.qtyToday;c.week+=r.qty;c.yesterday+=r.qtyYesterday;salesCounts.set(key,c);}
     const salesScopeMap=new Map<string,AnyRow>(salesScopeRows.map((row)=>[`${row.site}|${row.channel}`,row]));
     const salesScopeStatus=REQUIRED_MONTHLY_SCOPES
       .filter((row)=>actor.role!=="运营"||(row.site===actor.site&&row.channel===actor.channel))
       .map((row)=>{
         const status=salesScopeMap.get(`${row.site}|${row.channel}`)??{};
-        return {...row,lastImportDate:status.last_import_date||"",lastSaleDate:status.last_sale_date||"",salesToday:Number(status.sales_today||0),sales7Qty:Number(status.sales_7_qty||0),importDays7:Number(status.import_days_7||0),updatedToday:status.last_sale_date===today,expectedDate,updatedExpected:Boolean(status.expected_complete),importedExpected:Boolean(status.expected_imported),salesExpected:Number(status.sales_expected||0)};
+        const {today,end:expectedDate}=salesWindow(row.site,measuredAt),c=salesCounts.get(row.site+'|'+row.channel);
+        return {...row,lastImportDate:status.last_import_date||"",lastSaleDate:status.last_sale_date||"",salesToday:c?.today||0,sales7Qty:c?.week||0,importDays7:Number(status.import_days_7||0),updatedToday:status.last_sale_date===today,expectedDate,updatedExpected:Boolean(status.expected_complete),importedExpected:Boolean(status.expected_imported),salesExpected:c?.yesterday||0};
       });
 
     const batchViews:AnyRow[]=batches.map((batch):AnyRow=>{
@@ -242,7 +252,7 @@ export async function GET(request:Request) {
     }
     const purchaseOrders:AnyRow[]=purchaseOrderRows.map((order):AnyRow=>{
       const items=purchaseItemsByOrder.get(order.id)??[];
-      return {...order,items,visibleQty:items.reduce((sum,row)=>sum+Number(row.visibleQty||0),0),visibleSkuCount:items.length};
+      return {...order,...(actor.role==="工厂"?{document_json:JSON.stringify(factoryPurchaseDocument(parseJson(order.document_json,{})))}:{}),items,visibleQty:items.reduce((sum,row)=>sum+Number(row.visibleQty||0),0),visibleSkuCount:items.length};
     }).filter((order)=>actor.role!=="运营"||order.items.length>0);
 
     const purchaseItemById=new Map<string,AnyRow>(purchaseItemRows.map((row)=>[row.id,row]));
@@ -253,7 +263,7 @@ export async function GET(request:Request) {
     const productionItemsByOrder=new Map<string,AnyRow[]>();
     for(const item of productionItemRows){
       const purchaseItem=purchaseItemById.get(item.purchase_order_item_id)??{};
-      const allAllocations=parseJson<Array<{site:string;channel:string;qty:number}>>(purchaseItem.allocations_json,[]);
+      const allAllocations=parseJson<Array<{site:string;channel:string;qty:number}>>(item.dispatch_allocations_json||purchaseItem.allocations_json,[]);
       const allocations=actor.role==="运营"?allAllocations.filter((row)=>row.site===actor.site&&row.channel===actor.channel):allAllocations;
       if(actor.role==="运营"&&!allocations.length) continue;
       const producedAllocations=prorateAllocations(allAllocations,Number(item.produced_qty||0));
@@ -407,7 +417,7 @@ export async function GET(request:Request) {
     const activeShipments=shipmentBatches.filter((row)=>row.stage!=="on_shelf");
     const activeTransportBatches=transportBatches.filter((row)=>row.status!=="completed");
     const activeLegacyBatches=visibleBatches.filter((row)=>!["arrived","completed","on_shelf"].includes(row.stage));
-    const offlineSales=await wholesaleSalesSummary(database(),actor,cutoff7,today);
+    const iw=salesWindow("印尼",measuredAt),offlineSales=await wholesaleSalesSummary(database(),actor,iw.start,iw.end,iw.today);
     salesTopSkus.push(...offlineSales.topSkus);salesTopSkus.sort((a,b)=>Number(b.qty)-Number(a.qty));
     const metrics = {
       inventoryQty:inventory.reduce((sum,r) => sum + Number(r.qty)-Number(r.reserved_qty||0), 0),
@@ -416,8 +426,8 @@ export async function GET(request:Request) {
       quarantineQty:inventory.reduce((sum,r)=>sum+Number(r.quarantine_qty||0),0),
       negativeSkuCount:negativeInventory.length,
       salesToday:salesScopeStatus.reduce((sum,r) => sum + Number(r.salesToday), 0)+offlineSales.todayQty,
-      sales7Qty:salesDaily.filter(r=>r.business_date>=cutoff7&&r.business_date<=today).reduce((sum,r)=>sum+Number(r.qty),0)+offlineSales.periodQty,
-      salesWindowFrom:cutoff7,salesWindowTo:today,
+      sales7Qty:salesSkuRows.reduce((sum,r)=>sum+Number(r.qty),0)+offlineSales.periodQty,
+      salesWindowFrom:windows[0].start,salesWindowTo:windows[0].end,salesWindows:windows,
       offlineSales7Qty:offlineSales.periodQty,
       seaTransitQty:suggestions.reduce((sum,row)=>sum+Number(row.seaInTransit),0),
       productionInProgressQty:suggestions.reduce((sum,row)=>sum+Number(row.productionInProgress),0),
@@ -837,6 +847,8 @@ async function monthlySubmit(actor:Actor, payload:AnyRow) {
   const locked = await db.prepare("SELECT status FROM approval_requests WHERE type='monthly_plan' AND month=? AND status IN ('pending','approved')").bind(month).first();
   if (locked) throw new HttpError(409,"该月计划已锁定：待审批计划请原申请人先撤回，已批准计划请走变更审批");
   const idValue = `monthly_${month}_${site}_${channel}`, timestamp=nowIso(), totalQty=items.reduce((s,r)=>s+r.qty,0);
+  const costMatches=await loadReplenishmentCosts(db,site,chinaDate());
+  for(const item of items)(item as AnyRow).cost=costMatches.find(c=>c.sku===item.sku)||{site,sku:item.sku,currency:"CNY",total:null,purchase:null,matched:false,complete:false};
   const forecasts=await loadForecast(db,{...actor,role:"运营",site,channel});
   for(const item of items)if(!forecasts.suggestions.some(r=>r.sku===item.sku))forecasts.suggestions.push({sku:item.sku,site,channel,name:item.name,suggestedProduction:null,forecastDaily:null,forecastReady:false,confidence:"无销量历史",forecastVersion:"complete-days-7-21-56-v2",note:"运营人工追加SKU，无历史数据可生成系统建议"});
   const snapshots=forecasts.suggestions.filter((r:AnyRow)=>r.site===site&&r.channel===channel).map((r:AnyRow)=>db.prepare("INSERT INTO forecast_snapshots (id,month,sku,site,channel,system_qty,forecast_sales,operator_qty,model_json,created_at) VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(month,sku,site,channel) DO UPDATE SET system_qty=excluded.system_qty,forecast_sales=excluded.forecast_sales,operator_qty=excluded.operator_qty,model_json=excluded.model_json,created_at=excluded.created_at").bind(makeId("forecast"),month,r.sku,site,channel,r.suggestedProduction??0,(r.forecastDaily??0)*new Date(Number(month.slice(0,4)),Number(month.slice(5,7)),0).getDate(),items.find(i=>i.sku===r.sku)?.qty||0,JSON.stringify(r),timestamp));
@@ -1016,7 +1028,7 @@ async function exportProductionOrder(actor:Actor,payload:AnyRow){
   const document=productionDocument(order,items,purchase||{}),fingerprint=await productionFingerprint(order,items,purchase||{}),receiptId=makeId("export"),timestamp=nowIso();
   await atomicBatch(db,[guardStatement(db,actor,"导出工厂订单","EXISTS(SELECT 1 FROM series_production_orders WHERE id=? AND updated_at=? AND status=?)",[order.id,order.updated_at,order.status]),
     db.prepare("INSERT INTO audit_logs(id,action,entity_type,entity_id,detail_json,actor_id,actor_name,created_at) VALUES(?,'生成工厂订单导出','series_production_order',?,?,?,?,?)").bind(receiptId,order.id,JSON.stringify({fingerprint,skuCount:items.length,plannedQty:document.plannedQty}),actor.id,actor.name,timestamp)]);
-  return Response.json({ok:true,document,purchaseDocument:purchase?.workflow_version===1?parseJson(purchase.document_json,{}):null,exportReceiptId:receiptId});
+  return Response.json({ok:true,document,purchaseDocument:purchase?.workflow_version===1?factoryPurchaseDocument(parseJson(purchase.document_json,{})):null,exportReceiptId:receiptId});
 }
 
 async function acceptProductionOrder(actor:Actor,payload:AnyRow){
@@ -1123,7 +1135,7 @@ async function createTransportBatch(actor:Actor,payload:AnyRow){
     itemInputs.set(idValue,{shippedQty,allocations:normalized});
   }
   const placeholders=[...itemInputs.keys()].map(()=>"?").join(",");
-  const sourceItems=await all(`SELECT i.*,o.series_name,o.id production_order_id,o.qc_status,p.allocations_json FROM series_production_order_items i JOIN series_production_orders o ON o.id=i.production_order_id JOIN series_purchase_order_items p ON p.id=i.purchase_order_item_id WHERE i.id IN (${placeholders})`,[...itemInputs.keys()]);
+  const sourceItems=await all(`SELECT i.*,o.series_name,o.id production_order_id,o.qc_status,COALESCE(i.dispatch_allocations_json,p.allocations_json) allocations_json FROM series_production_order_items i JOIN series_production_orders o ON o.id=i.production_order_id JOIN series_purchase_order_items p ON p.id=i.purchase_order_item_id WHERE i.id IN (${placeholders})`,[...itemInputs.keys()]);
   if(sourceItems.length!==itemInputs.size) throw new HttpError(404,"部分生产SKU不存在");
   const legacyShipped=await all(`SELECT production_order_item_id,SUM(shipped_qty) qty FROM shipment_batch_items WHERE production_order_item_id IN (${placeholders}) GROUP BY production_order_item_id`,[...itemInputs.keys()]);
   const v2Shipped=await all(`SELECT production_order_item_id,SUM(shipped_qty) qty FROM transport_batch_items WHERE production_order_item_id IN (${placeholders}) GROUP BY production_order_item_id`,[...itemInputs.keys()]);
@@ -1151,7 +1163,7 @@ async function createTransportBatch(actor:Actor,payload:AnyRow){
       const scopeKey=`${allocation.site}|${allocation.channel}`;
       inputScope.set(scopeKey,(inputScope.get(scopeKey)??0)+allocation.qty);
     }
-    for(const [scopeKey,qty] of inputScope){const already=usedScopeMap.get(`${source.id}|${scopeKey}`)??0;if(qty+already>Number(planned.get(scopeKey)||0)) throw new HttpError(409,`${source.sku}累计分配到${scopeKey}的数量超过原始需求`);}
+    for(const [scopeKey,qty] of inputScope){const already=usedScopeMap.get(`${source.id}|${scopeKey}`)??0;if(qty+already>Number(planned.get(scopeKey)||0)) throw new HttpError(409,`${source.sku}累计分配到${scopeKey}的数量超过已批准发货份额`);}
   }
   for(const [warehouseId,incoming] of incomingByWarehouse){
     const warehouse=warehouseMap.get(warehouseId)!;if(Number(warehouse.capacity_qty||0)<=0)continue;
@@ -1284,7 +1296,7 @@ async function createShipmentBatch(actor:Actor,payload:AnyRow){
   if(order.qc_status!=="passed") throw new HttpError(409,"生产单尚未质检通过，不能创建海运批次");
   if((await db.prepare("SELECT workflow_version FROM series_purchase_orders WHERE id=?").bind(order.purchase_order_id).first<AnyRow>())?.workflow_version===1)throw new HttpError(409,"新版采购单需先下发发货通知并复核工厂装箱清单，再创建海运批次");
   if(await db.prepare("SELECT id FROM shipment_batches WHERE batch_no=?").bind(batchNo).first()) throw new HttpError(409,"该海运批次号已经存在");
-  const sourceItems=await all("SELECT m.*,p.allocations_json FROM series_production_order_items m JOIN series_purchase_order_items p ON p.id=m.purchase_order_item_id WHERE m.production_order_id=?",[productionOrderId]);
+  const sourceItems=await all("SELECT m.*,COALESCE(m.dispatch_allocations_json,p.allocations_json) allocations_json FROM series_production_order_items m JOIN series_purchase_order_items p ON p.id=m.purchase_order_item_id WHERE m.production_order_id=?",[productionOrderId]);
   const legacyShippedRows=await all("SELECT production_order_item_id,SUM(shipped_qty) shipped_qty FROM shipment_batch_items WHERE production_order_item_id IN (SELECT id FROM series_production_order_items WHERE production_order_id=?) GROUP BY production_order_item_id",[productionOrderId]);
   const transportShippedRows=await all("SELECT production_order_item_id,SUM(shipped_qty) shipped_qty FROM transport_batch_items WHERE production_order_item_id IN (SELECT id FROM series_production_order_items WHERE production_order_id=?) GROUP BY production_order_item_id",[productionOrderId]);
   const shippedMap=new Map<string,number>();

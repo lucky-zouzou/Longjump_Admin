@@ -66,6 +66,12 @@ test('独立服务器：公司登录、禁止伪造身份、岗位隔离、出�
     assert.equal((await fetch(origin+path,{method:'POST',headers:{cookie,origin,'Content-Type':'application/json'},body:'{}'})).status,405);
    }
   }
+  if(role==='拍摄剪辑'){
+   const center=await fetch(origin+'/api/content-center',{headers:{cookie}});assert.equal(center.status,200);
+   assert.deepEqual((await center.json()).writeSites,[]);
+   for(const path of ['/api/creators','/api/system?history=imports','/api/finance-ledger'])assert.equal((await fetch(origin+path,{headers:{cookie}})).status,403,path);
+   assert.equal((await fetch(origin+'/api/content-center',{method:'POST',headers:{cookie,origin:'https://wrong.example'},body:'{}'})).status,403);
+  }
   if(role==='达人BD'){
    const ledger=await fetch(origin+'/api/creators',{headers:{cookie}});assert.equal(ledger.status,200);assert.deepEqual((await ledger.json()).profiles,[]);
    for(const path of ['/api/business-actions','/api/finance-ledger','/api/sales-dashboard','/api/after-sales','/api/cost-profit','/api/system?history=imports'])assert.equal((await fetch(origin+path,{headers:{cookie}})).status,403,path);

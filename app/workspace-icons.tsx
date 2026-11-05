@@ -14,6 +14,7 @@ const paths:Record<string,string>={
   wholesale:"M3 9h18 M5 9v12h14V9 M2 9l3-6h14l3 6 M9 21v-7h6v7",
   sales:"M4 3v18h17 M8 16l4-5 4 2 5-7 M17 6h4v4",
   suggestions:"M12 3a9 9 0 1 0 9 9 M12 7a5 5 0 1 0 5 5 M12 12l8-8 M16 4h4v4",
+  "content-center":"M3 6h18v13H3z M9 9l6 3-6 3z",
   inventory:"m3 7 9-4 9 4-9 4z M3 7v10l9 4 9-4V7 M12 11v10 M7 5l10 4",
   receipt:"M4 13v7h16v-7 M12 3v12 M8 11l4 4 4-4",
   monthly:"M4 5h16v16H4z M8 3v4 M16 3v4 M4 10h16 M8 14h2 M14 14h2 M8 17h2",

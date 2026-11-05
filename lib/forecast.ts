@@ -1,3 +1,4 @@
+import {transitLots} from './transit-stock.mjs';
 import {localDay} from './promotion-model.mjs';
 import {forecastPlan} from './forecast-model.mjs';
 import {prorateAllocations} from './rules.mjs';
@@ -15,8 +16,8 @@ export async function loadForecast(db:any,actor:any,asOf?:string):Promise<{sugge
  const chinaDate=(offset=0)=>new Date(Date.parse(asOf)+offset*86400000).toISOString().slice(0,10);
  const daysFromToday=(v:unknown)=>/^\d{4}-\d{2}-\d{2}$/.test(String(v))?Math.ceil((Date.parse(String(v))-Date.parse(asOf))/86400000):null;
  const scope=actor.role==='运营'?{clause:' WHERE site=? AND channel=?',args:[actor.site,actor.channel]}:{clause:'',args:[]};
- const [inventory,skuSettings,batches,productionOrderRows,productionItemRows,purchaseItems,shipmentRows,shipmentItemRows,transportLegRows,transportItemRows,transportLegItemRows,policies,corrections]=await Promise.all([
- all(`SELECT * FROM inventory_balances${scope.clause}`,scope.args),all('SELECT * FROM sku_settings'),all('SELECT * FROM production_batches'),all('SELECT * FROM series_production_orders'),all('SELECT * FROM series_production_order_items'),all('SELECT * FROM series_purchase_order_items'),all('SELECT * FROM shipment_batches'),all('SELECT * FROM shipment_batch_items'),all('SELECT * FROM transport_legs'),all('SELECT * FROM transport_batch_items'),all('SELECT * FROM transport_leg_items'),all(`SELECT * FROM supply_policies${scope.clause}`,scope.args),all(`SELECT * FROM sales_demand_corrections${scope.clause}`,scope.args)]);
+ const [inventory,skuSettings,batches,productionOrderRows,productionItemRows,purchaseItems,shipmentRows,shipmentItemRows,transportLegRows,transportItemRows,transportLegItemRows,receipts,policies,corrections]=await Promise.all([
+ all(`SELECT * FROM inventory_balances${scope.clause}`,scope.args),all('SELECT * FROM sku_settings'),all('SELECT * FROM production_batches'),all('SELECT * FROM series_production_orders'),all('SELECT * FROM series_production_order_items'),all('SELECT * FROM series_purchase_order_items'),all('SELECT * FROM shipment_batches'),all('SELECT * FROM shipment_batch_items'),all('SELECT * FROM transport_legs'),all('SELECT * FROM transport_batch_items'),all('SELECT * FROM transport_leg_items'),all('SELECT * FROM shipment_receipt_items'),all(`SELECT * FROM supply_policies${scope.clause}`,scope.args),all(`SELECT * FROM sales_demand_corrections${scope.clause}`,scope.args)]);
  const purchaseItemById=new Map<string,AnyRow>(purchaseItems.map((r:AnyRow)=>[r.id,r]));
  const shippedByProductionItem=new Map<string,number>();for(const r of shipmentItemRows)shippedByProductionItem.set(r.production_order_item_id,(shippedByProductionItem.get(r.production_order_item_id)||0)+Number(r.shipped_qty));for(const r of transportItemRows)shippedByProductionItem.set(r.production_order_item_id,(shippedByProductionItem.get(r.production_order_item_id)||0)+Number(r.shipped_qty));
     const cutoff28 = chinaDate(-56);
@@ -49,12 +50,7 @@ export async function loadForecast(db:any,actor:any,asOf?:string):Promise<{sugge
       for (const allocation of parseJson<Array<{site:string;channel:string;qty:number}>>(batch.allocations_json, [])) {
         const key = `${allocation.site}|${allocation.channel}|${batch.sku}`;
         const qty = Number(allocation.qty || 0);
-        if (["sea_freight","port_arrived","last_mile_delivery","awaiting_receipt"].includes(batch.stage)) {
-          seaTransit.set(key,(seaTransit.get(key)??0)+qty);
-          const lots=seaArrivals.get(key)??[];
-          lots.push({qty,etaDate:cleanText(batch.estimated_arrival_date,10),days:daysFromToday(batch.estimated_arrival_date)});
-          seaArrivals.set(key,lots);
-        } else if (["supply_confirm","factory_production","channel_allocation"].includes(batch.stage)) {
+        if (["supply_confirm","factory_production","channel_allocation"].includes(batch.stage)) {
           productionPipeline.set(key,(productionPipeline.get(key)??0)+qty);
         }
       }
@@ -66,7 +62,11 @@ export async function loadForecast(db:any,actor:any,asOf?:string):Promise<{sugge
       if(!purchaseItem) continue;
       const baseQty=["completed","completed_with_variance"].includes(order.status)?Number(item.produced_qty||0):Number(item.planned_qty||0);
       const remaining=Math.max(0,baseQty-(shippedByProductionItem.get(item.id)??0));
-      for(const allocation of prorateAllocations(parseJson(purchaseItem.allocations_json,[]),remaining)){
+      const allocations=parseJson<AnyRow[]>(item.dispatch_allocations_json||purchaseItem.allocations_json,[]).map(a=>({...a}));
+      const debit=(site:string,channel:string,qty:number)=>{const a=allocations.find(a=>a.site===site&&a.channel===channel);if(a)a.qty=Math.max(0,a.qty-qty);};
+      for(const shipped of shipmentItemRows.filter((r:AnyRow)=>r.production_order_item_id===item.id))for(const a of parseJson<AnyRow[]>(shipped.allocations_json,[]))debit(a.site,a.channel,Number(a.qty));
+      for(const shipped of transportItemRows.filter((r:AnyRow)=>r.production_order_item_id===item.id))for(const li of transportLegItemRows.filter((r:AnyRow)=>r.batch_item_id===shipped.id)){const leg=transportLegRows.find((r:AnyRow)=>r.id===li.leg_id);if(leg)debit(leg.site,leg.channel,Number(li.qty));}
+      for(const allocation of prorateAllocations(allocations,Math.min(remaining,allocations.reduce((s,a)=>s+a.qty,0)))){
         const key=`${allocation.site}|${allocation.channel}|${item.sku}`;
         productionPipeline.set(key,(productionPipeline.get(key)??0)+allocation.qty);
       }
@@ -79,12 +79,7 @@ export async function loadForecast(db:any,actor:any,asOf?:string):Promise<{sugge
       for(const allocation of prorateAllocations(parseJson(item.allocations_json,[]),remaining)){
         const key=`${allocation.site}|${allocation.channel}|${item.sku}`;
         if(shipment.stage==="channel_allocation") productionPipeline.set(key,(productionPipeline.get(key)??0)+allocation.qty);
-        else if(["sea_freight","port_arrived","last_mile_delivery","awaiting_receipt"].includes(shipment.stage)){
-          seaTransit.set(key,(seaTransit.get(key)??0)+allocation.qty);
-          const lots=seaArrivals.get(key)??[];
-          lots.push({qty:allocation.qty,etaDate:cleanText(shipment.estimated_arrival_date,10),days:daysFromToday(shipment.estimated_arrival_date)});
-          seaArrivals.set(key,lots);
-        }
+
       }
     }
     const transportLegById=new Map<string,AnyRow>(transportLegRows.map((row)=>[row.id,row]));
@@ -95,14 +90,13 @@ export async function loadForecast(db:any,actor:any,asOf?:string):Promise<{sugge
       const key=`${leg.site}|${leg.channel}|${item.sku}`;
       const remainingTransit=Math.max(0,Number(item.qty||0)-Number(item.received_qty||0));
       if(leg.stage==="booking") productionPipeline.set(key,(productionPipeline.get(key)??0)+remainingTransit);
-      else if(["sea_freight","port_arrived","customs_clearance","last_mile_delivery","awaiting_receipt"].includes(leg.stage)){
-        seaTransit.set(key,(seaTransit.get(key)??0)+remainingTransit);
-        const lots=seaArrivals.get(key)??[];
-        lots.push({qty:remainingTransit,etaDate:cleanText(leg.eta,10),days:daysFromToday(leg.eta)});
-        seaArrivals.set(key,lots);
-      }
       const pending=Number(item.pending_shelf_qty||0);
       if(pending>0) warehousePending.set(key,(warehousePending.get(key)??0)+pending);
+    }
+    for(const lot of transitLots({batches,shipmentRows,shipmentItemRows,receipts,transportLegRows,transportLegItemRows})){
+      const key=`${lot.site}|${lot.channel}|${lot.sku}`,lots=seaArrivals.get(key)||[];
+      seaTransit.set(key,(seaTransit.get(key)||0)+lot.qty);
+      lots.push({qty:lot.qty,etaDate:cleanText(lot.eta,10),days:daysFromToday(lot.eta)});seaArrivals.set(key,lots);
     }
     const visibleKey=(key:string)=>{
       if(actor.role!=="运营") return true;
