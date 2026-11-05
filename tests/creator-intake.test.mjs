@@ -4,14 +4,13 @@ import {fixture} from './fixtures.mjs';
 import {mutateCreator,readCreators,creatorWorkspaceTasks} from '../lib/creators.mjs';
 import {mapIntakeRow,normalizeIntake,collaborationStage} from '../lib/creator-intake-model.mjs';
 import {creatorMetrics} from '../lib/creator-model.mjs';
-import {mkdtempSync,rmSync} from 'node:fs';
+import {mkdtempSync,readFileSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createBackup,restoreBackup} from '../server/backup.mjs';
 import {openDatabase,fileBucket} from '../server/storage.mjs';
 import * as X from 'xlsx';
 import {readIntakeWorkbook} from '../lib/creator-intake-workbook.mjs';
-import {intakeHeaders} from '../lib/creator-intake-model.mjs';
 
 const proof='https://evidence.example.test/source',now=()=>new Date().toISOString(),future=()=>new Date(Date.now()+86400000).toISOString(),ago=()=>new Date(Date.now()-3600000).toISOString();
 async function setup(){
@@ -54,9 +53,10 @@ test('preview is read-only; exact renamed imports and repeated rows never duplic
 });
 
 test('16-column handover goes from Excel through preview, submission, dossier and revision without posting samples twice',async()=>{
- const f=await setup(),date=now().slice(0,10),book=X.utils.book_new();
- const sheet=X.utils.aoa_to_sheet([intakeHeaders,[new Date(date+'T00:00:00Z'),date.slice(0,7),'印尼','@test.handover',proof,'test@example.test','TEST-BAG × 2','视频','纯佣',1000,8,200000,900,'出单且勤快','A-优质','会自己根据产品创作']]);sheet.A2.z='m/d/yy';
- X.utils.book_append_sheet(book,sheet,'运营达人协同提交模板');
+ const f=await setup(),date=now().slice(0,10);
+ const book=X.read(readFileSync(new URL('../public/templates/creator-operations-handover.xlsx',import.meta.url)));
+ const sheet=book.Sheets[book.SheetNames[0]];
+ X.utils.sheet_add_aoa(sheet,[[new Date(date+'T00:00:00Z'),date.slice(0,7),'印尼','@test.handover',proof,'test@example.test','TEST-BAG × 2','视频','纯佣',1000,8,200000,900,'出单且勤快','A-优质','会自己根据产品创作']],{origin:'A2',UTC:true});
  const raw=readIntakeWorkbook(X,X.write(book,{type:'buffer',bookType:'xlsx'})).rows;
  const input={rows:raw.map(r=>mapIntakeRow(r,{scopeId:f.scope,qualified:true,currency:'IDR'}))};
  const preview=await f.act(f.users.indonesia,'intakePreview',input);assert.equal(preview.rows[0].status,'ready');assert.equal(preview.rows[0].data.submittedOn,date);assert.equal(preview.rows[0].data.sampledProducts,'TEST-BAG × 2');
