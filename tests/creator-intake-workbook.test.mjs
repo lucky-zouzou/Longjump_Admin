@@ -21,6 +21,18 @@ test('company 16-column workbook reads typed dates and exact amounts instead of 
  assert.throws(()=>normalizeIntake(mapIntakeRow(rows[0],{scopeId:'test',qualified:true}),'2026-11-04'),/原币种/);
 });
 
+test('company GMV unit suffix preserves the selected currency and normalizes to the same record as a numeric cell',()=>{
+ const fromCell=(value,currency)=>normalizeIntake(mapIntakeRow({'创建日期':'2026-11-05','达人id':'demo','TK主页链接':'https://example.test/demo','近30天GMV（元）':value},{currency}),'2026-11-05');
+ for (const currency of ['CNY','IDR']) {
+  assert.deepEqual(fromCell('14000元',currency),fromCell(14000,currency));
+  assert.equal(fromCell('18000.05 元',currency).gmvMinor,1800005);
+ }
+ assert.equal(fromCell('','').gmvMinor,null);
+ assert.equal(fromCell('0元','CNY').gmvMinor,0);
+ assert.throws(()=>fromCell('14000元',''),/原币种/);
+ for(const invalid of ['1万元','1-2元','12.345元','约100元','14000美元','未知','-2元'])assert.throws(()=>fromCell(invalid,'IDR'),/GMV格式无效/);
+});
+
 test('1904-date workbooks and unambiguous CSV dates keep the same calendar day',()=>{
  assert.equal(readIntakeWorkbook(X,workbook({date:46330-1462,date1904:true})).rows[0]['创建日期'],'2026-11-04');
  const csv='\uFEFF创建日期,达人id,近30天有效订单,粉丝数\r\n2026/11/4,test,0,\r\n';
