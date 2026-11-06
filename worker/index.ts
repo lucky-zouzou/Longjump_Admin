@@ -46,7 +46,7 @@ const worker = {
     const hardened = new Response(response.body, response);
     hardened.headers.set("X-Content-Type-Options", "nosniff");
     hardened.headers.set("X-Frame-Options", "DENY");
-    hardened.headers.set("Referrer-Policy", "same-origin");
+    if(!hardened.headers.has("Referrer-Policy")) hardened.headers.set("Referrer-Policy", "same-origin");
     hardened.headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=(self)");
     return hardened;
   },

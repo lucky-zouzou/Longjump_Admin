@@ -694,3 +694,10 @@ tr:hover td { background:#fbfcff; }
 @media(max-width:540px){.sales-dashboard .cny-metrics{grid-template-columns:1fr}.sales-dashboard .cny-metrics .value{font-size:1.7rem}.cny-summary .panel-head{align-items:flex-start;flex-direction:column}}
 
 .wh-finance-upload-entry{padding:18px;margin:16px 0;border:2px solid #9ab7fa;background:#fff;border-radius:12px}.wh-finance-upload-entry>h5{margin:0 0 10px}.wh-finance-upload-entry .wh-upload{margin:10px 0}.wh-finance-upload-entry .wh-upload button{background:#2f60ed;color:white;border-color:#2f60ed}
+
+.best-tracking { margin-bottom:16px; }
+.best-shipment { padding:14px 0; border-bottom:1px solid var(--line); }
+.best-shipment > header { display:flex; align-items:baseline; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+.best-shipment h5 { margin:12px 0 4px; font-size:13px; }
+.best-tracking .production-timeline { margin:8px 0; }
+.best-tracking form { align-items:flex-end; }

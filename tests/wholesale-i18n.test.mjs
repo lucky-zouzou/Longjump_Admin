@@ -36,7 +36,7 @@ function compileComponent(file,extra="",overrides={}){
   const url=new URL(file,import.meta.url),require=createRequire(url),module={exports:{}};
   const source=readFileSync(url,"utf8")+extra;
   const compiled=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX,esModuleInterop:true}}).outputText;
-  new Function("require","module","exports",compiled)(name=>name.endsWith(".css")?{}:overrides[name]??(name==="./website-leads"?compileComponent("../app/website-leads.tsx","",overrides):name==="./wholesale-catalog"?compileComponent("../app/wholesale-catalog.tsx","",overrides):name==="./workspace-hooks"?compileComponent("../app/workspace-hooks.tsx","",overrides):name==="./wholesale-receipts"?compileComponent("../app/wholesale-receipts.tsx","",overrides):name==="./field-sales"?compileComponent("../app/field-sales.tsx","",overrides):name==="./wholesale-management-ui"?compileComponent("../app/wholesale-management-ui.tsx","",overrides):name==="./table-import"?compileComponent("../app/table-import.tsx","",overrides):require(name)),module,module.exports);
+  new Function("require","module","exports",compiled)(name=>name.endsWith(".css")?{}:overrides[name]??(name==="./wholesale-customer-profiles"?compileComponent("../app/wholesale-customer-profiles.tsx","",overrides):name==="./distributor-link"?compileComponent("../app/distributor-link.tsx","",overrides):name==="./website-leads"?compileComponent("../app/website-leads.tsx","",overrides):name==="./wholesale-catalog"?compileComponent("../app/wholesale-catalog.tsx","",overrides):name==="./workspace-hooks"?compileComponent("../app/workspace-hooks.tsx","",overrides):name==="./wholesale-receipts"?compileComponent("../app/wholesale-receipts.tsx","",overrides):name==="./field-sales"?compileComponent("../app/field-sales.tsx","",overrides):name==="./wholesale-management-ui"?compileComponent("../app/wholesale-management-ui.tsx","",overrides):name==="./table-import"?compileComponent("../app/table-import.tsx","",overrides):require(name)),module,module.exports);
   return module.exports;
 }
 test("所有线下表单和对账组件使用印尼语渲染，选项值保持业务编码",()=>{
@@ -53,7 +53,7 @@ test("所有线下表单和对账组件使用印尼语渲染，选项值保持�
 });
 
 test("所有显式界面翻译键都有印尼语文案",()=>{
-  for(const file of ["../app/wholesale-catalog.tsx","../app/wholesale-receipts.tsx","../app/wholesale.tsx","../app/control-tower.tsx","../app/wholesale-management-ui.tsx"]){const source=ts.createSourceFile(file,readFileSync(new URL(file,import.meta.url),"utf8"),ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
+  for(const file of ["../app/distributor-link.tsx","../app/wholesale-catalog.tsx","../app/wholesale-receipts.tsx","../app/wholesale.tsx","../app/control-tower.tsx","../app/wholesale-management-ui.tsx"]){const source=ts.createSourceFile(file,readFileSync(new URL(file,import.meta.url),"utf8"),ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
     const walk=node=>{if(ts.isCallExpression(node)&&["t","shellT"].includes(node.expression.getText(source))&&node.arguments[0]&&ts.isStringLiteral(node.arguments[0]))assert.ok(Object.hasOwn(WHOLESALE_ID,node.arguments[0].text),node.arguments[0].text);ts.forEachChild(node,walk);};walk(source);
   }
 });

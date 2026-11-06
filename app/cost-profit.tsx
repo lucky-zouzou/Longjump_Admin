@@ -7,6 +7,7 @@ import {COST_LABELS,STATE_LABELS} from '../lib/cost-profit-model.mjs';
 import './cost-profit.css';
 import FinanceLedger from './finance-ledger';
 import ProductCosts from './product-costs';
+import ProductInformation from './product-information';
 import {useDirtyGuard} from './workspace-hooks';
 // Persisted evidence documents have different shapes by kind.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -22,7 +23,7 @@ function Input({label,value,onChange,type='text'}:{label:string;value:unknown;on
 function Fee({title,value,onChange}:{title:string;value:Row;onChange:(v:Row)=>void}){return <fieldset className="cp-fee"><legend>{title}</legend><Field label="状态"><select value={value.state} onChange={e=>onChange({...value,state:e.target.value,amount:['zero','not_applicable'].includes(e.target.value)?'0':['pending','missing'].includes(e.target.value)?'':value.amount})}>{Object.entries(STATE_LABELS).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select></Field><Input label="原币金额" value={value.amount} onChange={amount=>onChange({...value,amount})}/><Input label="凭据编号或缺失原因" value={value.source} onChange={source=>onChange({...value,source})}/></fieldset>;}
 export default function CostWorkspace({role='管理员'}:{role?:string}){
  const [view,setView]=useState(role==='供应链'?'evidence':'products');const leave=useDirtyGuard(false);
- return <><nav className="pc-workspace-switch" aria-label="成本工作区">{role!=='供应链'&&<button className={'btn '+(view==='products'?'primary':'')} onClick={()=>{if(leave())setView('products');}}>商品成本与动销</button>}<button className={'btn '+(view==='evidence'?'primary':'')} onClick={()=>{if(leave())setView('evidence');}}>批次成本与结算证据</button>{['管理员','财务'].includes(role)&&<button className={'btn '+(view==='finance'?'primary':'')} onClick={()=>{if(leave())setView('finance');}}>资金与库存价值</button>}</nav>{view==='products'?<ProductCosts/>:view==='finance'?<FinanceLedger role={role}/>:<CostProfit/>}</>;
+ return <><nav className="pc-workspace-switch" aria-label="成本工作区">{['管理员','财务','供应链'].includes(role)&&<button className={'btn '+(view==='information'?'primary':'')} onClick={()=>{if(leave())setView('information');}}>商品资料</button>}{role!=='供应链'&&<button className={'btn '+(view==='products'?'primary':'')} onClick={()=>{if(leave())setView('products');}}>商品成本与动销</button>}<button className={'btn '+(view==='evidence'?'primary':'')} onClick={()=>{if(leave())setView('evidence');}}>批次成本与结算证据</button>{['管理员','财务'].includes(role)&&<button className={'btn '+(view==='finance'?'primary':'')} onClick={()=>{if(leave())setView('finance');}}>资金与库存价值</button>}</nav>{view==='information'?<ProductInformation/>:view==='products'?<ProductCosts/>:view==='finance'?<FinanceLedger role={role}/>:<CostProfit/>}</>;
 }
 function CostProfit(){
  const [data,setData]=useState<Row|null>(null),[error,setError]=useState(''),[message,setMessage]=useState(''),[busy,setBusy]=useState(false),[tab,setTab]=useState('dashboard'),[filters,setFilters]=useState({site:'',channel:'',sku:'',ticket:'',from:'',to:''}),[detail,setDetail]=useState<Row|null>(null),[history,setHistory]=useState<Row[]>([]),[pending,setPending]=useState<Row|null>(null),[order,setOrder]=useState<Row>(newOrder),[line,setLine]=useState({lot:'',salesRecordId:'',qty:''}),[review,setReview]=useState<Record<string,Row>>({});

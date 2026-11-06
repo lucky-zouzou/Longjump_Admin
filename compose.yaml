@@ -11,6 +11,8 @@ services:
       LOONGJUMP_ADMIN_NAME: ${LOONGJUMP_ADMIN_NAME:-公司管理员}
       LOONGJUMP_ADMIN_PASSWORD_FILE: /run/secrets/admin_password
       LOONGJUMP_BACKUP_RETENTION_DAYS: 7
+      BEST_PARTNER_ID: ${BEST_PARTNER_ID:-}
+      BEST_API_SECRET: ${BEST_API_SECRET:-}
     secrets:
       - admin_password
     volumes:

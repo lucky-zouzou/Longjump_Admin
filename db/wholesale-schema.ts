@@ -5,7 +5,7 @@ export const wholesaleCustomers = sqliteTable("wholesale_customers", {
   version:integer("version").notNull().default(1),
   id:text("id").primaryKey(), code:text("code").notNull(), name:text("name").notNull(),
   contact:text("contact").notNull(), phone:text("phone").notNull(), city:text("city").notNull(),
-  address:text("address").notNull(), note:text("note").notNull().default(""), salesUserId:text("sales_user_id").notNull(),
+  region:text("region").notNull().default(""), address:text("address").notNull(), note:text("note").notNull().default(""), salesUserId:text("sales_user_id").notNull(),
   active:integer("active").notNull().default(1), createdAt:text("created_at").notNull(), updatedAt:text("updated_at").notNull(),
 },t=>[uniqueIndex("idx_wh_customer_code").on(t.code),index("idx_wh_customer_owner").on(t.salesUserId)]);
 
@@ -88,3 +88,15 @@ export const wholesaleCustomerReceipts = sqliteTable("wholesale_customer_receipt
 },t=>[uniqueIndex("idx_wh_receipt_active").on(t.shipmentId).where(sql`${t.revokedAt} IS NULL`),index("idx_wh_receipt_order").on(t.orderId,t.createdAt),
  check("wh_receipt_evidence",sql`length(${t.receiver})>0 AND length(${t.proofRef})>=4`),
  check("wh_receipt_revocation",sql`(${t.revokedAt} IS NULL AND ${t.revokedBy} IS NULL AND ${t.revokedByName} IS NULL AND ${t.revokeReason} IS NULL) OR (${t.revokedAt} IS NOT NULL AND ${t.revokedBy} IS NOT NULL AND ${t.revokedByName} IS NOT NULL AND ${t.revokeReason} IS NOT NULL AND length(${t.revokeReason})>=4)`)]);
+
+export const distributorLinks = sqliteTable("distributor_links", {
+  customerId: text("customer_id").primaryKey().references(()=>wholesaleCustomers.id),
+  tokenHash: text("token_hash").unique(), version: integer("version").notNull(),
+  updatedBy: text("updated_by").notNull(), updatedAt: text("updated_at").notNull(),
+}, t=>[check("distributor_link_version",sql`${t.version}>0`)]);
+
+export const distributorOrders = sqliteTable("distributor_orders", {
+  orderId: text("order_id").primaryKey().references(()=>wholesaleOrders.id),
+  customerId: text("customer_id").notNull().references(()=>wholesaleCustomers.id),
+  requestId: text("request_id").notNull(), fingerprint: text("fingerprint").notNull(),
+}, t=>[uniqueIndex("idx_distributor_request").on(t.customerId,t.requestId)]);
