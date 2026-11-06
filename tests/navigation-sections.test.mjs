@@ -2,21 +2,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {runInNewContext} from 'node:vm';
-import {NAV_GROUPS,PARTNER_LINKS,workspaceShortcuts} from '../lib/workspace-model.mjs';
+import {NAV_GROUPS} from '../lib/workspace-model.mjs';
 import {navigationForRole} from '../lib/permissions.mjs';
 
-test('四个分区覆盖管理员的菜单；分销查询只使用公开页面及客户自己的凭证',()=>{
-  assert.deepEqual(NAV_GROUPS.map(group=>group.label),['运营工作','外部查询与分销','财务管理','内部管理']);
+test('原版三组菜单覆盖管理员入口且保留销售与达人协作',()=>{
+  assert.deepEqual(NAV_GROUPS.map(group=>group.label),['日常工作','供应与履约','产品与系统']);
   const keys=NAV_GROUPS.flatMap(group=>group.keys);
   assert.equal(new Set(keys).size,keys.length);
-  for(const key of navigationForRole('管理员').filter(key=>key!=='after-sales'))assert.ok(keys.includes(key),key);
-  assert.deepEqual(NAV_GROUPS[1].keys,PARTNER_LINKS.map(link=>link.key));
-  assert.deepEqual(PARTNER_LINKS.map(link=>link.href),['/distributor','/distributor/apply']);
+  for(const key of navigationForRole('管理员'))assert.ok(keys.includes(key),key);
   assert.equal(NAV_GROUPS[0].keys.indexOf('creators'),NAV_GROUPS[0].keys.indexOf('sales')+1);
-  assert.deepEqual(workspaceShortcuts('运营','印尼'),PARTNER_LINKS);
-  assert.deepEqual(workspaceShortcuts('运营','泰国'),[]);
-  assert.deepEqual(workspaceShortcuts('工厂'),[]);
-  assert.deepEqual(workspaceShortcuts('财务').map(x=>[x.page,x.view]),[['wholesale','finance']]);
 });
 
 test('公共分销入口只接受同域专属链接；粘贴链接时无需向服务器传递令牌',()=>{

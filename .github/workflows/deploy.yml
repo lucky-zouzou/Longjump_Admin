@@ -87,6 +87,13 @@ jobs:
           ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes root@47.238.71.113 \
             'cd /root/loong-jump-v17 && docker compose exec -T app node server/cli.mjs backup --output /backups/pre-${{ github.sha }}-${{ github.run_attempt }}.tar'
 
+      - name: Configure private BEST tracking credentials
+        env:
+          BEST_TRACKING_CREDENTIALS: ${{ secrets.BEST_TRACKING_CREDENTIALS }}
+        run: |
+          test -n "$BEST_TRACKING_CREDENTIALS" || { echo 'Missing BEST tracking configuration'; exit 1; }
+          printf '%s' "$BEST_TRACKING_CREDENTIALS" | ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes root@47.238.71.113 'cd /root/loong-jump-v17 && python3 scripts/configure-best-tracking.py'
+
       - name: Activate verified image without compiling on production
         timeout-minutes: 5
         run: |

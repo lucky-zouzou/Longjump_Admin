@@ -1,0 +1,9 @@
+services:
+  app:
+    environment:
+      LOONGJUMP_BEST_CREDENTIALS_FILE: /run/secrets/best_tracking
+    secrets:
+      - best_tracking
+secrets:
+  best_tracking:
+    file: ./secrets/best-tracking/credentials.json

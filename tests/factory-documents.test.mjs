@@ -230,3 +230,21 @@ test('按实际需求跨站分配：待审预占调出份额，审批保留原�
   assert.equal(f.sqlite.prepare('PRAGMA foreign_key_check').all().length,0);
  }finally{f.sqlite.close();}
 });
+
+test('通知按SKU保留签发时的标准箱规，兼容旧通知，实际装箱以工厂填报为准',async t=>{
+ const f=await setup();t.after(()=>f.sqlite.close());
+ const sku=f.item().sku,spec={cartonQty:12,cartonLengthCm:58,cartonWidthCm:35,cartonHeightCm:39,dimensions:'28×13×8',netWeightKg:.4,grossWeightKg:.5};
+ f.sqlite.prepare('INSERT INTO product_profiles VALUES (?,?,?,?,?,?,?,?)').run(sku,1,JSON.stringify({...spec,notes:'private-test'}),'{}','[]','staff','staff',today());
+ const {id}=await f.issue();await f.approve(id);
+ const view=async()=> (await readFactoryDocuments(f.db,f.factory)).notices[0];
+ assert.deepEqual((await view()).items[0].packingReference,spec);
+ f.sqlite.prepare('UPDATE product_profiles SET data_json=? WHERE sku=?').run(JSON.stringify({...spec,cartonQty:8,notes:'private-test'}),sku);
+ assert.deepEqual((await view()).items[0].packingReference,spec);
+ const legacy=JSON.parse(f.notice(id).items_json);delete legacy[0].packingReference;
+ f.sqlite.prepare('UPDATE factory_dispatch_notices SET items_json=? WHERE id=?').run(JSON.stringify(legacy),id);
+ assert.deepEqual((await view()).items[0].packingReference,{...spec,cartonQty:8});
+ await changeDispatch(f.db,f.factory,await f.pack(id,6));
+ assert.equal((await view()).packing.rows[0].pcsPerCarton,6);
+ assert.equal((await view()).packing.rows[0].width,39);
+ assert.ok(!JSON.stringify(await view()).includes('private-test'));
+});
