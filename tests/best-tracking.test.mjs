@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {queryBestTracking, trackingSnapshot, TrackingError} from '../lib/best-tracking-client.mjs';
-import {manageBestTracking, readBestTracking, pollBestTracking} from '../lib/best-tracking.mjs';
+import {manageBestTracking, readBestTracking, pollBestTracking, previewBestTracking} from '../lib/best-tracking.mjs';
 import {transportFixture} from './transport-fixture.mjs';
 
 const config = {BEST_PARTNER_ID:'TEST-ID', BEST_API_SECRET:'test-signature'};
@@ -80,4 +80,17 @@ test('同步超时保留最后有效快照，恢复后清除错误，解除后�
   resume();await pending;
   const latest=(await readBestTracking(f.db,admin,f.leg.id)).rows[0];
   assert.notEqual(latest.id,id);assert.equal(latest.id,relink.rows[0].id);assert.equal(latest.snapshot.status,snapshot.status);
+});
+
+test('管理员和供应链可凭单号只读核验，其他岗位不能调用独立查询', async () => {
+  for (const role of ['管理员','供应链']) {
+    const result=await previewBestTracking(config,{role},no.toLowerCase(),async (received,waybill) => {
+      assert.equal(received,config); assert.equal(waybill,no); return snapshot;
+    });
+    assert.deepEqual(result,{waybill:no,snapshot});
+  }
+  for (const role of ['运营','海运','工厂']) {
+    await assert.rejects(previewBestTracking(config,{role},no,()=>assert.fail('未授权查询')),{status:403});
+  }
+  await assert.rejects(previewBestTracking(config,{role:'管理员'},'?',()=>assert.fail('未验证编号')),{status:400});
 });

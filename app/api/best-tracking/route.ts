@@ -1,7 +1,7 @@
 import {env} from 'cloudflare:workers';
 import {requireActor} from '../../../lib/auth';
 import {database} from '../../../lib/database';
-import {readBestTracking, manageBestTracking} from '../../../lib/best-tracking.mjs';
+import {readBestTracking, manageBestTracking, previewBestTracking} from '../../../lib/best-tracking.mjs';
 
 const headers = {'Cache-Control':'private, no-store'};
 function failure(error:any) {
@@ -25,6 +25,7 @@ export async function POST(request:Request) {
     if (body.length > 2048) return Response.json({error:'内容过长'},{status:413,headers});
     let input;
     try { input = JSON.parse(body); } catch { return Response.json({error:'格式无效'},{status:400,headers}); }
+    if (input?.action === 'lookup') return Response.json(await previewBestTracking(env,actor,input.waybill),{headers});
     if (!input || !['link','unlink','refresh'].includes(input.action)) return Response.json({error:'无效操作'},{status:400,headers});
     return Response.json(await manageBestTracking(database(),env,actor,input),{headers});
   } catch (error) { return failure(error); }

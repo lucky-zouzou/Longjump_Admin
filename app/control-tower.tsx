@@ -1,10 +1,11 @@
 "use client";
+import {BestWaybillLookup} from "./best-tracking";
 import ProductInformation from './product-information';
 import HistoryBrowser from "./history-browser";
 import Overview from "./overview";
 import WorkspaceIcon from "./workspace-icons";
 import {WorkspaceGuard,useWorkspaceRoute,useVisibleRefresh} from "./workspace-hooks";
-import {NAV_GROUPS,mobileModules,workspaceShortcuts} from "../lib/workspace-model.mjs";
+import {NAV_GROUPS,mobileModules} from "../lib/workspace-model.mjs";
 import {parseWorkspaceResponse} from "../lib/workspace-response.mjs";
 const InboundReceipts=lazy(()=>import("./inbound-receipts"));
 const BusinessReviews=lazy(()=>import("./business-reviews"));
@@ -106,12 +107,11 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
   const [more,setMore]=useState(false);
   const [navQuery,setNavQuery]=useState("");
   const [collapsedGroups,setCollapsedGroups]=useState<Record<string,boolean>>({});
+  useEffect(()=>{const group=NAV_GROUPS.find(g=>g.keys.includes(selectedTab));if(group)setCollapsedGroups(old=>({...old,[group.label]:false}));},[selectedTab]);
   useEffect(()=>{if(!more)return;const close=(event:KeyboardEvent)=>{if(event.key==="Escape")setMore(false);};window.addEventListener("keydown",close);return()=>window.removeEventListener("keydown",close);},[more]);
   const setTab=(page:string,task:Row={})=>{if(navigate({page,entity:task.entity||"",view:task.view||"",month:task.month||"",search:"",status:"all"})){setMore(false);setNavQuery("");}};
   const requestGeneration=useRef(0);
   const [data,setData] = useState<Snapshot|null>(null);
-  const navKey=selectedTab==="wholesale"&&route.view==="finance"&&["管理员","财务"].includes(data?.actor.role)?"wholesale-reconciliation":selectedTab==="after-sales"?"quality-incidents":selectedTab;
-  useEffect(()=>{const group=NAV_GROUPS.find(g=>g.keys.includes(navKey));if(group)setCollapsedGroups(old=>({...old,[group.label]:false}));},[navKey]);
   const [loading,setLoading] = useState(true);
   const [busy,setBusy] = useState(false);
   const [toast,setToast] = useState("");
@@ -200,33 +200,17 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
   const shellT=(key:string)=>translateWholesale(tab==="wholesale"?wholesaleLocale.language:"zh",key);
 
   const navLabel=(key:string,label:string)=>shellT(key==="sales"?(actor.role==="运营"?"每日销售导入":"销售看板"):label);
-  type MenuItem={key:string;label:string;page?:string;view?:string;href?:string};
-  const menu:MenuItem[]=[
-    ...visibleNav.map(([key,label])=>({key,label})),
-    ...workspaceShortcuts(actor.role,actor.site),
-  ];
-  const activeKey=navKey==="home"?tab:navKey;
-  const activeItem=menu.find(item=>item.key===activeKey);
-  const activeGroup=NAV_GROUPS.find(group=>group.keys.includes(activeKey));
-  const query=navQuery.trim().toLowerCase();
-  const groups=NAV_GROUPS.map(group=>({
-    ...group,
-    items:group.keys.map(key=>menu.find(item=>item.key===key)).filter((item):item is MenuItem=>Boolean(item)).filter(item=>
-      [group.label,shellT(group.label),item.key,item.label,navLabel(item.key,item.label)].join(" ").toLowerCase().includes(query)),
-  })).filter(group=>group.items.length);
+  const activeItem=visibleNav.find(([key])=>key===tab);
+  const activeGroup=NAV_GROUPS.find(group=>group.keys.includes(tab));
+  const filteredNav=visibleNav.filter(([key,label])=>`${navLabel(key,label)} ${label} ${key}`.toLowerCase().includes(navQuery.trim().toLowerCase()));
   const navigation=(surface:string)=><>
     <div className="nav-search"><WorkspaceIcon name="search"/><input aria-label={shellT("搜索工作区")} placeholder={shellT("搜索工作区")} value={navQuery} onChange={event=>setNavQuery(event.target.value)}/>{navQuery&&<button aria-label={shellT("清除搜索")} onClick={()=>setNavQuery("")}><WorkspaceIcon name="close"/></button>}</div>
-    <div className="nav-sections">{groups.map((group,index)=>{
-      const expanded=Boolean(query)||!(collapsedGroups[group.label]??(group.label!==activeGroup?.label));
+    <div className="nav-sections">{NAV_GROUPS.filter(group=>filteredNav.some(([key])=>group.keys.includes(key))).map((group,index)=>{
+      const expanded=Boolean(navQuery.trim())||!collapsedGroups[group.label];
       const groupId=`nav-${surface}-${index}`;
-      return <div className="nav-group" key={group.label}><button className="nav-group-toggle" aria-expanded={expanded} aria-controls={groupId} onClick={()=>setCollapsedGroups(old=>({...old,[group.label]:expanded}))} disabled={Boolean(navQuery.trim())}><span>{shellT(group.label)}</span><WorkspaceIcon name="chevron"/></button>
-        <div id={groupId} hidden={!expanded}>{group.items.map(item=>{
-          const label=navLabel(item.key,item.label);
-          const content=<><span className="nav-icon"><WorkspaceIcon name={item.key}/></span><span className="nav-label">{label}</span></>;
-          if(item.href)return <a className="nav-button nav-external" key={item.key} href={item.href} target="_blank" rel="noopener noreferrer" aria-label={label+" · "+shellT("在新标签页打开")}>{content}<span aria-hidden="true">↗</span></a>;
-          return <button key={item.key} className={classNames("nav-button",activeKey===item.key&&"active")} aria-current={activeKey===item.key?"page":undefined} onClick={()=>setTab(item.page||item.key,{view:item.view})}>{content}{!item.view&&taskBadge(item.key)}</button>;
-        })}</div></div>;
-    })}{!groups.length&&<div className="nav-no-results">{shellT("没有匹配的工作区")}<button onClick={()=>setNavQuery("")}>{shellT("清除搜索")}</button></div>}</div>
+      return <div className="nav-group" key={group.label}><button className="nav-group-toggle" aria-expanded={expanded} aria-controls={groupId} onClick={()=>setCollapsedGroups(old=>({...old,[group.label]:!old[group.label]}))} disabled={Boolean(navQuery.trim())}><span>{shellT(group.label)}</span><WorkspaceIcon name="chevron"/></button>
+        <div id={groupId} hidden={!expanded}>{filteredNav.filter(([key])=>group.keys.includes(key)).map(([key,label])=><button key={key} className={classNames("nav-button",tab===key&&"active")} aria-current={tab===key?"page":undefined} onClick={()=>setTab(key)}><span className="nav-icon"><WorkspaceIcon name={key}/></span><span className="nav-label">{navLabel(key,label)}</span>{taskBadge(key)}</button>)}</div></div>;
+    })}{!filteredNav.length&&<div className="nav-no-results">{shellT("没有匹配的工作区")}<button onClick={()=>setNavQuery("")}>{shellT("清除搜索")}</button></div>}</div>
   </>;
 
   return <div className="app-shell" lang={tab==="wholesale"&&wholesaleLocale.language==="id"?"id":"zh-CN"}>
@@ -239,7 +223,7 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
     </aside>
     <main className="main">
       <header className="topbar">
-        <div className="workspace-breadcrumb"><span className="breadcrumb-section">{shellT(activeGroup?.label||"工作台")}</span><WorkspaceIcon name="chevron"/><h2>{activeItem?navLabel(activeItem.key,activeItem.label):shellT("全链路可视化协同")}</h2></div>
+        <div className="workspace-breadcrumb"><span className="breadcrumb-section">{shellT(activeGroup?.label||"工作台")}</span><WorkspaceIcon name="chevron"/><h2>{activeItem?navLabel(activeItem[0],activeItem[1]):shellT("全链路可视化协同")}</h2></div>
         <div className="workspace-top-actions">
           {hasPermission(actor.role,"backup.export")&&<button className="btn" onClick={exportBackup}>{shellT("导出备份")}</button>}
           <span className={`status-pill ${connectionError?"connection-failed":""}`} role="status">{connectionError?shellT("更新失败 · 数据可能已过时"):`${shellT(["wholesale","reviews","after-sales","quality-incidents"].includes(selectedTab)?"导航已更新":"工作区已更新")} ${lastSync||"—"}`}</span>{connectionError&&<button className="btn danger" onClick={()=>void refresh().catch(()=>{})}>{shellT("重新连接")}</button>}
@@ -278,7 +262,7 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
     {more&&<div className="mobile-more" role="dialog" aria-label={shellT("更多工作区")}><div className="panel-head"><h3>{shellT("全部工作区")}</h3><button className="btn" aria-label={shellT("关闭导航")} onClick={()=>setMore(false)}><WorkspaceIcon name="close"/>{shellT("关闭")}</button></div>{navigation("mobile")}</div>}
     <nav className="mobile-nav workspace-mobile-nav" aria-label={shellT("移动端导航")}>
       {mobileModules(actor.role).map((key:string)=>{const [,label]=navItems.find(row=>row[0]===key)!;return <button key={key} className={classNames("nav-button",tab===key&&"active")} aria-current={tab===key?"page":undefined} onClick={()=>setTab(key)}><WorkspaceIcon name={key}/><span>{shellT(key==="sales"?(actor.role==="运营"?"销售导入":"销售看板"):label)}</span>{taskBadge(key)}</button>})}
-      {menu.some(item=>!mobileModules(actor.role).includes(item.key))&&<button className={classNames("nav-button",more&&"active")} aria-expanded={more} onClick={()=>setMore(!more)}><WorkspaceIcon name="more"/><span>{shellT("更多")}</span></button>}
+      {visibleNav.length>mobileModules(actor.role).length&&<button className={classNames("nav-button",more&&"active")} aria-expanded={more} onClick={()=>setMore(!more)}><WorkspaceIcon name="more"/><span>{shellT("更多")}</span></button>}
     </nav>
     {toast && <div className="toast">{shellT(toast)}</div>}
   </div>;
@@ -834,6 +818,7 @@ function Batches({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
       <div className="metric"><div className="label">海运至派送</div><div className="value">{fmt(["sea_freight","port_arrived","last_mile_delivery"].reduce((sum,key)=>sum+Number(data.metrics.batchStageCounts?.[key]||0),0))}</div><div className="foot">运输状态实时更新</div></div>
       <div className="metric"><div className="label">待上架</div><div className="value">{fmt(data.metrics.pendingShelfCount)}</div><div className="foot">由各站点运营确认</div></div>
     </div>
+    {["管理员","供应链"].includes(data.actor.role)&&<BestWaybillLookup/>}
     <TransportControl data={data} act={act} busy={busy}/>
 
     <Panel collapsible title="历史单系列海运批次" desc="旧版本记录继续保留并可完成原流程；新发货请使用上方跨系列运输主批次">

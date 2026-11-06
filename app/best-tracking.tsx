@@ -17,6 +17,30 @@ function Events({events}:{events:Event[]}) {
   })}</>;
 }
 
+export function BestWaybillLookup(){
+  const [waybill,setWaybill]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState('');
+  const [result,setResult]=useState<{waybill:string;snapshot:Row['snapshot']}|null>(null);
+  async function lookup(){
+    setBusy(true);setError('');setResult(null);
+    try{
+      const response=await fetch('/api/best-tracking',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action:'lookup',waybill})});
+      const data=await response.json();
+      if(!response.ok)throw Error(data.error||'查询失败，请重试');
+      setResult(data);
+    }catch(e){setError(e instanceof Error?e.message:'查询失败，请重试');}
+    finally{setBusy(false);}
+  }
+  return <section className="panel"><h3>百世运单查询</h3><form className="transport-actions" onSubmit={e=>{e.preventDefault();void lookup();}}>
+    <label>百世运单号<input value={waybill} required maxLength={50} disabled={busy} onChange={e=>{setWaybill(e.target.value);setResult(null);setError('');}}/></label>
+    <button type="submit" className="btn primary" disabled={busy||!waybill.trim()}>{busy?'查询中…':'查询运输轨迹'}</button></form>
+    <small>只读取百世实时轨迹。关联业务分批请在对应分批内操作。时间按北京时间显示。</small>
+    {error&&<p role="alert" className="notice warn">{error}</p>}
+    {result&&<div><p role="status"><strong>{result.waybill}</strong> · {result.snapshot.country} · {result.snapshot.status||'状态待核实'}</p>
+      {result.snapshot.groups.map((g,i)=><Events key={i} events={g.events}/>)}
+      {!result.snapshot.groups.some(g=>g.events.length)&&<p>百世暂未返回轨迹节点。</p>}</div>}
+  </section>;
+}
+
 export default function BestTracking({legId,references}:{legId:string;references:string[]}) {
   const [open,setOpen] = useState(false), [view,setView] = useState<View|null>(null);
   const [busy,setBusy] = useState(false), [error,setError] = useState(''), [waybill,setWaybill] = useState('');

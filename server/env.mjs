@@ -7,5 +7,5 @@ env.COMPANY_ACCOUNTS={create:(actor,input)=>createCompanyAccount(env.DB.sqlite,a
 
 const bestConfigFile = process.env.LOONGJUMP_BEST_CREDENTIALS_FILE;
 const bestConfig = bestConfigFile ? JSON.parse(readFileSync(bestConfigFile,'utf8')) : {};
-env.BEST_PARTNER_ID = process.env.BEST_PARTNER_ID || bestConfig.partnerId;
-env.BEST_API_SECRET = process.env.BEST_API_SECRET || bestConfig.secret;
+env.BEST_PARTNER_ID = bestConfigFile ? bestConfig.partnerId : process.env.BEST_PARTNER_ID;
+env.BEST_API_SECRET = bestConfigFile ? bestConfig.secret : process.env.BEST_API_SECRET;

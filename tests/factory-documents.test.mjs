@@ -230,3 +230,27 @@ test('按实际需求跨站分配：待审预占调出份额，审批保留原�
   assert.equal(f.sqlite.prepare('PRAGMA foreign_key_check').all().length,0);
  }finally{f.sqlite.close();}
 });
+
+test('通知按SKU保留签发时的标准箱规，兼容旧通知，实际装箱以工厂填报为准',async t=>{
+ const f=await setup();t.after(()=>f.sqlite.close());
+ const sku=f.item().sku,spec={cartonQty:12,cartonLengthCm:58,cartonWidthCm:35,cartonHeightCm:39,dimensions:'28×13×8',netWeightKg:.4,grossWeightKg:.5};
+ f.sqlite.prepare('INSERT INTO product_profiles VALUES (?,?,?,?,?,?,?,?)').run(sku,1,JSON.stringify({...spec,notes:'private-test'}),'{}','[]','staff','staff',today());
+ const {id}=await f.issue(5);await f.approve(id);
+ const view=async(noticeId=id)=> (await readFactoryDocuments(f.db,f.factory)).notices.find(n=>n.id===noticeId);
+ assert.deepEqual((await view()).items[0].packingReference,spec);
+ f.sqlite.prepare('UPDATE product_profiles SET data_json=? WHERE sku=?').run(JSON.stringify({...spec,cartonQty:8,notes:'private-test'}),sku);
+ assert.deepEqual((await view()).items[0].packingReference,spec);
+ await changeDispatch(f.db,f.factory,await f.pack(id,3));
+ assert.equal((await view()).packing.rows[0].pcsPerCarton,3);
+ assert.equal((await view()).packing.rows[0].width,39);
+ assert.ok(!JSON.stringify(await view()).includes('private-test'));
+ // Seed a separate historical notice. The original issued document is immutable.
+ const {items_json,...record}=f.notice(id);
+ const legacyItems=JSON.parse(items_json);delete legacyItems[0].packingReference;
+ const legacy={...record,id:'legacy-notice',notice_no:'LEGACY-NOTICE',packing_no:null,items_json:JSON.stringify(legacyItems)};
+ const columns=Object.keys(legacy);
+ f.sqlite.prepare('INSERT INTO factory_dispatch_notices('+columns.join(',')+') VALUES('+columns.map(()=>'?').join(',')+')').run(...Object.values(legacy));
+ const historical=await view(legacy.id);
+ assert.deepEqual(historical.items[0].packingReference,{...spec,cartonQty:8});
+ assert.equal(historical.packing.rows[0].pcsPerCarton,3);
+});
