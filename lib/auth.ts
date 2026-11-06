@@ -30,7 +30,7 @@ export async function requireActor(request: Request): Promise<Actor> {
   }
   if (!row || Number(row.active) !== 1) throw new HttpError(403, "账号已停用，请联系管理员");
   if(row.role==='拍摄剪辑' && url.pathname.startsWith('/api/') &&
-    !(url.pathname==='/api/content-center'||url.pathname==='/api/system' && request.method==='GET' &&
+    !(['/api/content-center','/api/content-center/materials'].includes(url.pathname)||url.pathname==='/api/system' && request.method==='GET' &&
       [...url.searchParams.keys()].every(key=>key==='module') && ['home','content-center',null].includes(url.searchParams.get('module'))))
     throw new HttpError(403,'拍摄剪辑账号仅可进入 TikTok 内容中心');
   if(row.role==='达人BD'&&url.pathname.startsWith('/api/')&&!(url.pathname==='/api/creators'||url.pathname==='/api/system'&&request.method==='GET'))throw new HttpError(403,'达人BD账号仅可访问已分配的达人协作及脱敏生产动态');

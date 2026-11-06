@@ -19,9 +19,9 @@ const server=http.createServer(async(req,res)=>{
     const role=url.pathname.split('/').at(-1);if(!Object.hasOwn(roles,role)){res.writeHead(404).end();return;}
     res.writeHead(303,{'Set-Cookie':'cc-preview='+role+'; Path=/; HttpOnly; SameSite=Strict',Location:'/?page=content-center'}).end();return;
   }
-  if(!['GET','HEAD','POST'].includes(req.method)||req.method==='POST'&&(req.headers.origin!==origin||url.pathname!=='/api/content-center')){res.writeHead(403).end();return;}
+  if(!['GET','HEAD','POST'].includes(req.method)||req.method==='POST'&&(req.headers.origin!==origin||!['/api/content-center','/api/content-center/materials'].includes(url.pathname))){res.writeHead(403).end();return;}
   if(req.method!=='POST'&&await tryServeStatic(req,res,resolve('dist-node/client'),url.pathname,true))return;
-  if(!['/','/api/system','/api/content-center'].includes(url.pathname)){res.writeHead(404).end();return;}
+  if(!['/','/api/system','/api/content-center','/api/content-center/materials'].includes(url.pathname)){res.writeHead(404).end();return;}
   const role=String(req.headers.cookie||'').match(/(?:^|;\s*)cc-preview=(admin|studio|id|my)(?:;|$)/)?.[1]||'admin';
   const person=env.DB.sqlite.prepare('SELECT id,name,email FROM users WHERE id=?').get(roles[role]);
   const headers=new Headers();for(const [k,v] of Object.entries(req.headers))if(!k.startsWith('oai-')&&!k.startsWith('x-local-')&&!['host','connection','transfer-encoding','x-forwarded-host','x-forwarded-proto'].includes(k)&&v!=null)headers.set(k,Array.isArray(v)?v.join(','):v);
