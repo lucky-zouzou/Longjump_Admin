@@ -1,9 +1,10 @@
 "use client";
+import ProductInformation from './product-information';
 import HistoryBrowser from "./history-browser";
 import Overview from "./overview";
 import WorkspaceIcon from "./workspace-icons";
 import {WorkspaceGuard,useWorkspaceRoute,useVisibleRefresh} from "./workspace-hooks";
-import {NAV_GROUPS,mobileModules} from "../lib/workspace-model.mjs";
+import {NAV_GROUPS,mobileModules,workspaceShortcuts} from "../lib/workspace-model.mjs";
 import {parseWorkspaceResponse} from "../lib/workspace-response.mjs";
 const InboundReceipts=lazy(()=>import("./inbound-receipts"));
 const BusinessReviews=lazy(()=>import("./business-reviews"));
@@ -105,11 +106,12 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
   const [more,setMore]=useState(false);
   const [navQuery,setNavQuery]=useState("");
   const [collapsedGroups,setCollapsedGroups]=useState<Record<string,boolean>>({});
-  useEffect(()=>{const group=NAV_GROUPS.find(g=>g.keys.includes(selectedTab));if(group)setCollapsedGroups(old=>({...old,[group.label]:false}));},[selectedTab]);
   useEffect(()=>{if(!more)return;const close=(event:KeyboardEvent)=>{if(event.key==="Escape")setMore(false);};window.addEventListener("keydown",close);return()=>window.removeEventListener("keydown",close);},[more]);
   const setTab=(page:string,task:Row={})=>{if(navigate({page,entity:task.entity||"",view:task.view||"",month:task.month||"",search:"",status:"all"})){setMore(false);setNavQuery("");}};
   const requestGeneration=useRef(0);
   const [data,setData] = useState<Snapshot|null>(null);
+  const navKey=selectedTab==="wholesale"&&route.view==="finance"&&["管理员","财务"].includes(data?.actor.role)?"wholesale-reconciliation":selectedTab==="after-sales"?"quality-incidents":selectedTab;
+  useEffect(()=>{const group=NAV_GROUPS.find(g=>g.keys.includes(navKey));if(group)setCollapsedGroups(old=>({...old,[group.label]:false}));},[navKey]);
   const [loading,setLoading] = useState(true);
   const [busy,setBusy] = useState(false);
   const [toast,setToast] = useState("");
@@ -198,17 +200,33 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
   const shellT=(key:string)=>translateWholesale(tab==="wholesale"?wholesaleLocale.language:"zh",key);
 
   const navLabel=(key:string,label:string)=>shellT(key==="sales"?(actor.role==="运营"?"每日销售导入":"销售看板"):label);
-  const activeItem=visibleNav.find(([key])=>key===tab);
-  const activeGroup=NAV_GROUPS.find(group=>group.keys.includes(tab));
-  const filteredNav=visibleNav.filter(([key,label])=>`${navLabel(key,label)} ${label} ${key}`.toLowerCase().includes(navQuery.trim().toLowerCase()));
+  type MenuItem={key:string;label:string;page?:string;view?:string;href?:string};
+  const menu:MenuItem[]=[
+    ...visibleNav.map(([key,label])=>({key,label})),
+    ...workspaceShortcuts(actor.role,actor.site),
+  ];
+  const activeKey=navKey==="home"?tab:navKey;
+  const activeItem=menu.find(item=>item.key===activeKey);
+  const activeGroup=NAV_GROUPS.find(group=>group.keys.includes(activeKey));
+  const query=navQuery.trim().toLowerCase();
+  const groups=NAV_GROUPS.map(group=>({
+    ...group,
+    items:group.keys.map(key=>menu.find(item=>item.key===key)).filter((item):item is MenuItem=>Boolean(item)).filter(item=>
+      [group.label,shellT(group.label),item.key,item.label,navLabel(item.key,item.label)].join(" ").toLowerCase().includes(query)),
+  })).filter(group=>group.items.length);
   const navigation=(surface:string)=><>
     <div className="nav-search"><WorkspaceIcon name="search"/><input aria-label={shellT("搜索工作区")} placeholder={shellT("搜索工作区")} value={navQuery} onChange={event=>setNavQuery(event.target.value)}/>{navQuery&&<button aria-label={shellT("清除搜索")} onClick={()=>setNavQuery("")}><WorkspaceIcon name="close"/></button>}</div>
-    <div className="nav-sections">{NAV_GROUPS.filter(group=>filteredNav.some(([key])=>group.keys.includes(key))).map((group,index)=>{
-      const expanded=Boolean(navQuery.trim())||!collapsedGroups[group.label];
+    <div className="nav-sections">{groups.map((group,index)=>{
+      const expanded=Boolean(query)||!(collapsedGroups[group.label]??(group.label!==activeGroup?.label));
       const groupId=`nav-${surface}-${index}`;
-      return <div className="nav-group" key={group.label}><button className="nav-group-toggle" aria-expanded={expanded} aria-controls={groupId} onClick={()=>setCollapsedGroups(old=>({...old,[group.label]:!old[group.label]}))} disabled={Boolean(navQuery.trim())}><span>{shellT(group.label)}</span><WorkspaceIcon name="chevron"/></button>
-        <div id={groupId} hidden={!expanded}>{filteredNav.filter(([key])=>group.keys.includes(key)).map(([key,label])=><button key={key} className={classNames("nav-button",tab===key&&"active")} aria-current={tab===key?"page":undefined} onClick={()=>setTab(key)}><span className="nav-icon"><WorkspaceIcon name={key}/></span><span className="nav-label">{navLabel(key,label)}</span>{taskBadge(key)}</button>)}</div></div>;
-    })}{!filteredNav.length&&<div className="nav-no-results">{shellT("没有匹配的工作区")}<button onClick={()=>setNavQuery("")}>{shellT("清除搜索")}</button></div>}</div>
+      return <div className="nav-group" key={group.label}><button className="nav-group-toggle" aria-expanded={expanded} aria-controls={groupId} onClick={()=>setCollapsedGroups(old=>({...old,[group.label]:expanded}))} disabled={Boolean(navQuery.trim())}><span>{shellT(group.label)}</span><WorkspaceIcon name="chevron"/></button>
+        <div id={groupId} hidden={!expanded}>{group.items.map(item=>{
+          const label=navLabel(item.key,item.label);
+          const content=<><span className="nav-icon"><WorkspaceIcon name={item.key}/></span><span className="nav-label">{label}</span></>;
+          if(item.href)return <a className="nav-button nav-external" key={item.key} href={item.href} target="_blank" rel="noopener noreferrer" aria-label={label+" · "+shellT("在新标签页打开")}>{content}<span aria-hidden="true">↗</span></a>;
+          return <button key={item.key} className={classNames("nav-button",activeKey===item.key&&"active")} aria-current={activeKey===item.key?"page":undefined} onClick={()=>setTab(item.page||item.key,{view:item.view})}>{content}{!item.view&&taskBadge(item.key)}</button>;
+        })}</div></div>;
+    })}{!groups.length&&<div className="nav-no-results">{shellT("没有匹配的工作区")}<button onClick={()=>setNavQuery("")}>{shellT("清除搜索")}</button></div>}</div>
   </>;
 
   return <div className="app-shell" lang={tab==="wholesale"&&wholesaleLocale.language==="id"?"id":"zh-CN"}>
@@ -221,7 +239,7 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
     </aside>
     <main className="main">
       <header className="topbar">
-        <div className="workspace-breadcrumb"><span className="breadcrumb-section">{shellT(activeGroup?.label||"工作台")}</span><WorkspaceIcon name="chevron"/><h2>{activeItem?navLabel(activeItem[0],activeItem[1]):shellT("全链路可视化协同")}</h2></div>
+        <div className="workspace-breadcrumb"><span className="breadcrumb-section">{shellT(activeGroup?.label||"工作台")}</span><WorkspaceIcon name="chevron"/><h2>{activeItem?navLabel(activeItem.key,activeItem.label):shellT("全链路可视化协同")}</h2></div>
         <div className="workspace-top-actions">
           {hasPermission(actor.role,"backup.export")&&<button className="btn" onClick={exportBackup}>{shellT("导出备份")}</button>}
           <span className={`status-pill ${connectionError?"connection-failed":""}`} role="status">{connectionError?shellT("更新失败 · 数据可能已过时"):`${shellT(["wholesale","reviews","after-sales","quality-incidents"].includes(selectedTab)?"导航已更新":"工作区已更新")} ${lastSync||"—"}`}</span>{connectionError&&<button className="btn danger" onClick={()=>void refresh().catch(()=>{})}>{shellT("重新连接")}</button>}
@@ -260,7 +278,7 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
     {more&&<div className="mobile-more" role="dialog" aria-label={shellT("更多工作区")}><div className="panel-head"><h3>{shellT("全部工作区")}</h3><button className="btn" aria-label={shellT("关闭导航")} onClick={()=>setMore(false)}><WorkspaceIcon name="close"/>{shellT("关闭")}</button></div>{navigation("mobile")}</div>}
     <nav className="mobile-nav workspace-mobile-nav" aria-label={shellT("移动端导航")}>
       {mobileModules(actor.role).map((key:string)=>{const [,label]=navItems.find(row=>row[0]===key)!;return <button key={key} className={classNames("nav-button",tab===key&&"active")} aria-current={tab===key?"page":undefined} onClick={()=>setTab(key)}><WorkspaceIcon name={key}/><span>{shellT(key==="sales"?(actor.role==="运营"?"销售导入":"销售看板"):label)}</span>{taskBadge(key)}</button>})}
-      {visibleNav.length>mobileModules(actor.role).length&&<button className={classNames("nav-button",more&&"active")} aria-expanded={more} onClick={()=>setMore(!more)}><WorkspaceIcon name="more"/><span>{shellT("更多")}</span></button>}
+      {menu.some(item=>!mobileModules(actor.role).includes(item.key))&&<button className={classNames("nav-button",more&&"active")} aria-expanded={more} onClick={()=>setMore(!more)}><WorkspaceIcon name="more"/><span>{shellT("更多")}</span></button>}
     </nav>
     {toast && <div className="toast">{shellT(toast)}</div>}
   </div>;
@@ -769,7 +787,7 @@ function TransportControl({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}){
       {!creating?<div className="notice info">新版采购单请到“系列采购与生产 → 采购、发货通知与装箱清单”，复核工厂装箱清单后创建海运批次。此处供历史订单使用，当前有 <strong>{ready.length}</strong> 个质检通过且未发完的SKU。建立主批次后仍保留生产单、系列和SKU追溯。</div>:<div className="inline-editor"><div className="form-grid"><Field label="运输主批次号"><input value={form.batchNo} onChange={e=>setForm({...form,batchNo:e.target.value})}/></Field><Field label="柜号"><input value={form.containerNo} onChange={e=>setForm({...form,containerNo:e.target.value})}/></Field><Field label="提单号"><input value={form.billNo} onChange={e=>setForm({...form,billNo:e.target.value})}/></Field><Field label="承运商"><select value={form.carrierName} onChange={e=>setForm({...form,carrierName:e.target.value})}><option value="">请选择</option>{data.businessPartners.filter(row=>row.type==="carrier"&&Number(row.active)).map(row=><option key={row.id}>{row.name}</option>)}</select></Field></div><div className="table-wrap"><table><thead><tr><th>系列</th><th>SKU</th><th className="num">剩余可发</th><th className="num">本批发货</th><th>目的地分配（可手调）/目的仓</th></tr></thead><tbody>{ready.length===0?<tr><td colSpan={5}><Empty>暂无质检通过且待发的SKU</Empty></td></tr>:ready.map(item=><tr key={item.id}><td>{item.seriesName}</td><td>{item.sku}</td><td className="num">{fmt(item.remainingToShip)}</td><td className="num"><input className="qty-input" type="number" min="0" max={item.remainingToShip} value={selected[item.id]||"0"} onChange={e=>changeShipQty(item,e.target.value)}/></td><td>{(item.allocations||[]).map((row:Row)=>{const key=`${item.id}|${row.site}|${row.channel}`;return <div className="destination-allocation" key={key}><span>{row.site} · {row.channel}</span><input className="qty-input" type="number" min="0" value={allocationDraft[key]||"0"} onChange={e=>setAllocationDraft({...allocationDraft,[key]:e.target.value})}/><select value={warehouseDraft[key]||""} onChange={e=>setWarehouseDraft({...warehouseDraft,[key]:e.target.value})}><option value="">目的仓</option>{data.warehouses.filter(warehouse=>Number(warehouse.active)&&warehouse.site===row.site&&warehouse.channel===row.channel).map(warehouse=><option value={warehouse.id} key={warehouse.id}>{warehouse.name}</option>)}</select></div>})}</td></tr>)}</tbody></table></div><div className="notice info">短装或分批发货时，请人工确认每个SKU的目的地分配；系统会校验累计数量不能超过原始运营需求。</div><div className="form-actions"><button className="btn primary" disabled={busy||!form.batchNo||!form.carrierName||!Object.values(selected).some(value=>Number(value)>0)} onClick={create}>生成主批次与目的地分腿</button></div></div>}
     </Panel>}
     <Panel title="运输主批次（默认汇总、异常优先）" desc="主批次可跨系列；每个目的地分腿拥有独立ETD、ETA、到港、清关、派送、到仓和上架状态">
-      {data.transportBatches.length===0?<Empty>暂无新版运输主批次</Empty>:<div className="batch-card-list">{data.transportBatches.map(batch=><article className={classNames("batch-card",batch.exceptions.length&&"has-warning")} key={batch.id}><header><div><span>{batch.batch_no}</span><h4>{batch.carrier_name}</h4><p>{fmt(batch.series_count)}个系列 · {fmt(batch.visibleSkuCount)}个SKU · {fmt(batch.visibleQty)}件</p></div><Pill tone={batch.status==="completed"?"green":batch.exceptions.length?"amber":"blue"}>{batch.status==="completed"?"已完成":batch.status==="booking"?"待订舱交接":"运输中"}</Pill></header>{createdId===batch.id&&batch.legs.some((leg:Row)=>leg.stage==="booking")&&<TransportCreated batchNo={batch.batch_no}/>}<div className="transport-leg-list">{batch.legs.map((leg:Row)=><TransportLegCard key={leg.id} leg={leg} actor={data.actor} users={data.users} act={act} busy={busy} onReceive={()=>setReceivingLeg(receivingLeg===leg.id?"":leg.id)} receipt={activeLeg?.id===leg.id?<TransportReceipt key={leg.id} leg={leg} act={act} busy={busy} close={()=>setReceivingLeg("")}/>:undefined}/>)}</div></article>)}</div>}
+      {data.transportBatches.length===0?<Empty>暂无新版运输主批次</Empty>:<div className="batch-card-list">{data.transportBatches.map(batch=><article className={classNames("batch-card",batch.exceptions.length&&"has-warning")} key={batch.id}><header><div><span>{batch.batch_no}</span><h4>{batch.carrier_name}</h4><p>{fmt(batch.series_count)}个系列 · {fmt(batch.visibleSkuCount)}个SKU · {fmt(batch.visibleQty)}件</p></div><Pill tone={batch.status==="completed"?"green":batch.exceptions.length?"amber":"blue"}>{batch.status==="completed"?"已完成":batch.status==="booking"?"待订舱交接":"运输中"}</Pill></header>{createdId===batch.id&&batch.legs.some((leg:Row)=>leg.stage==="booking")&&<TransportCreated batchNo={batch.batch_no}/>}<div className="transport-leg-list">{batch.legs.map((leg:Row)=><TransportLegCard key={leg.id} leg={leg} carrier={batch.carrier_name} actor={data.actor} users={data.users} act={act} busy={busy} onReceive={()=>setReceivingLeg(receivingLeg===leg.id?"":leg.id)} receipt={activeLeg?.id===leg.id?<TransportReceipt key={leg.id} leg={leg} act={act} busy={busy} close={()=>setReceivingLeg("")}/>:undefined}/>)}</div></article>)}</div>}
     </Panel>
   </>;
 }
@@ -842,6 +860,7 @@ function Batches({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
 function Audit({data}:{data:Snapshot}) {return <><PageHead title="审计日志" desc="按账号、时间和对象追溯关键操作"/><HistoryBrowser kind="audit" actor={data.actor} refreshToken={data.generatedAt}/></>;}
 
 function MasterData({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}){
+  const [showProducts,setShowProducts]=useState(false);
   const [partner,setPartner]=useState({type:"supplier",code:"",name:"",contact:"",defaultLeadDays:"21",assignedUserId:"",active:true});
   const [warehouse,setWarehouse]=useState({site:SITES[0],channel:"TikTok",code:"",name:"",capacityQty:"0",active:true});
   const partnerRole=partner.type==="factory"?"工厂":partner.type==="carrier"?"海运":"供应链";
@@ -849,6 +868,8 @@ function MasterData({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}){
   const saveWarehouse=async()=>{const result=await act("saveWarehouse",{...warehouse,capacityQty:Number(warehouse.capacityQty)},"仓库主数据已保存");if(result)setWarehouse({...warehouse,code:"",name:""});};
   return <>
     <PageHead title="供应链主数据" desc="先绑定供应商、工厂账号、承运商账号和目的仓，再允许生成采购、生产与发运单"/>
+    <button className="btn" onClick={()=>setShowProducts(!showProducts)}>{showProducts?"收起商品资料":"商品资料与SKU匹配"}</button>
+    {showProducts&&<ProductInformation/>}
     <div className="grid-2 master-create-grid">
       <Panel collapsible title="新增合作方" desc="工厂和承运商必须绑定具体责任账号">
         <div className="form-grid"><Field label="类型"><select value={partner.type} onChange={e=>setPartner({...partner,type:e.target.value,assignedUserId:""})}><option value="supplier">供应商</option><option value="factory">工厂</option><option value="carrier">承运商</option></select></Field><Field label="编码"><input value={partner.code} onChange={e=>setPartner({...partner,code:e.target.value})}/></Field><Field label="名称"><input value={partner.name} onChange={e=>setPartner({...partner,name:e.target.value})}/></Field><Field label="默认交期（天）"><input type="number" min="0" value={partner.defaultLeadDays} onChange={e=>setPartner({...partner,defaultLeadDays:e.target.value})}/></Field><Field label="联系方式" span={2}><input value={partner.contact} onChange={e=>setPartner({...partner,contact:e.target.value})}/></Field><Field label={`绑定${partnerRole}账号`} span={2}><select value={partner.assignedUserId} onChange={e=>setPartner({...partner,assignedUserId:e.target.value})}><option value="">{partner.type==="supplier"?"可不绑定":"请选择负责人"}</option>{data.users.filter(user=>user.role===partnerRole&&Number(user.active)).map(user=><option value={user.id} key={user.id}>{user.name} · {user.email}</option>)}</select></Field></div><div className="form-actions"><button className="btn primary" disabled={busy||!partner.code||!partner.name||(partner.type!=="supplier"&&!partner.assignedUserId)} onClick={savePartner}>保存合作方</button></div>

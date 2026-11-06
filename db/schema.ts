@@ -638,3 +638,13 @@ export * from "./promotion-schema";
 
 export * from "./wholesale-catalog-schema";
 export * from "./product-cost-schema";
+
+export const bestTransportTracking = sqliteTable('best_transport_tracking', {
+  id: text('id').primaryKey(),
+  legId: text('leg_id').notNull().references(() => transportLegs.id, {onDelete:'cascade'}),
+  waybill: text('waybill').notNull(),
+  snapshotJson: text('snapshot_json').notNull(),
+  lastSuccessAt: text('last_success_at').notNull(),
+  lastAttemptAt: text('last_attempt_at').notNull(),
+  lastError: text('last_error').notNull().default(''),
+}, t => [uniqueIndex('idx_best_leg_waybill').on(t.legId,t.waybill), index('idx_best_tracking_due').on(t.lastAttemptAt)]);

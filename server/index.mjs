@@ -1,5 +1,8 @@
 import http from 'node:http';
+import {handleDistributorApplication} from '../lib/distributor-application.mjs';
+import {handleDistributor} from '../lib/distributor-http.mjs';
 import {handleWebsiteInquiry} from '../lib/website-inquiry-handler.mjs';
+import {pollBestTracking} from '../lib/best-tracking.mjs';
 import {schedulePromotionMonitor} from './promotion-monitor.mjs';
 import {scheduleBusinessActionMonitor} from './business-action-monitor.mjs';
 import {Readable} from 'node:stream';
@@ -24,6 +27,15 @@ async function smallBody(req){let chunks=[],size=0;for await(const b of req){siz
 const server=http.createServer(async(req,res)=>{try{
  res.setHeader('Permissions-Policy','camera=(), microphone=(), geolocation=(self)');res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('X-Frame-Options','DENY');res.setHeader('Referrer-Policy','same-origin');res.setHeader('Cache-Control','no-store');
  if(req.headers.host!==origin.host){res.writeHead(400);res.end('Invalid host');return}const url=new URL(req.url,origin);
+ if(['/distributor','/api/distributor','/distributor/apply'].includes(url.pathname)){
+  const request=new Request(url,{method:req.method,headers:req.headers,...(req.method==='POST'?{body:Readable.toWeb(req),duplex:'half'}:{})});
+  const response=url.pathname==='/distributor/apply'?await handleDistributorApplication(request,env.DB):await handleDistributor(request,env.DB,env.WHOLESALE_FILES);
+  await sendWebResponse(response,req,res,true);return;
+ }
+ if(['GET','HEAD'].includes(req.method)&&['/distributor-assets/service.js','/distributor-assets/ordering.js','/distributor-assets/ordering.css','/distributor-assets/application.css','/loong-jump-logo-black.png'].includes(url.pathname)){
+  if(!await tryServeStatic(req,res,resolve('dist-node/client'),url.pathname,true,undefined,{'Cache-Control':'public, no-cache'})){res.writeHead(404);res.end();}
+  return;
+ }
  if(url.pathname==='/api/integrations/website-inquiries'){
   const request=new Request(url,{method:req.method,headers:req.headers,...(req.method==='POST'?{body:Readable.toWeb(req),duplex:'half'}:{})});
   await sendWebResponse(await handleWebsiteInquiry(request,env.DB,process.env.LOONGJUMP_INQUIRY_SYNC_SECRET,process.env.LOONGJUMP_INQUIRY_SOURCE||'loongjump-website'),req,res,true);return;
@@ -67,3 +79,16 @@ if(process.env.LOONGJUMP_BACKUP_DIR){const {scheduleBackups}=await import('./bac
 schedulePromotionMonitor(env.DB);
 scheduleBusinessActionMonitor(env.DB);
 for(const signal of ['SIGINT','SIGTERM'])process.on(signal,()=>server.close(()=>{db.close();process.exit(0)}));
+
+if (env.BEST_PARTNER_ID && env.BEST_API_SECRET) {
+  let polling = false;
+  const poll = async () => {
+    if (polling) return;
+    polling = true;
+    try { await pollBestTracking(env.DB, env); }
+    catch (error) { if (error.status !== 409) console.error('BEST tracking sync unavailable'); }
+    finally { polling = false; }
+  };
+  void poll();
+  setInterval(poll, 60000).unref();
+}

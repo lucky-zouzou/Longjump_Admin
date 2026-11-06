@@ -1,4 +1,6 @@
 "use client";
+import BestTracking from './best-tracking';
+import {isBestCarrier} from '../lib/best-carrier.mjs';
 import {useDirtyGuard} from './workspace-hooks';
 import {useEffect,useRef,useState} from 'react';
 import {transportSteps,transportGuidance} from '../lib/transport-workflow.mjs';
@@ -13,7 +15,7 @@ export function TransportCreated({batchNo}:{batchNo:string}){
   useEffect(()=>{target.current?.focus({preventScroll:true});target.current?.scrollIntoView({block:'center',behavior:'smooth'});},[]);
   return <div className="notice info transport-created" ref={target} tabIndex={-1} role="status"><strong>{batchNo} 已建立。</strong> 下一步：供应链在下方每个目的地点击“登记开船并交接海运”，补齐日期与凭证。创建批次不等于已经开船。</div>;
 }
-export default function TransportLegCard({leg,actor,users,act,busy,onReceive,receipt}:{leg:Row;actor:Row;users:Row[];act:Act;busy:boolean;onReceive:()=>void;receipt?:React.ReactNode}){
+export default function TransportLegCard({leg,carrier,actor,users,act,busy,onReceive,receipt}:{leg:Row;carrier?:string;actor:Row;users:Row[];act:Act;busy:boolean;onReceive:()=>void;receipt?:React.ReactNode}){
   const guide=transportGuidance(leg,actor,users);
   const [mode,setMode]=useState(''),[error,setError]=useState(''),[feedback,setFeedback]=useState('');
   useDirtyGuard(Boolean(mode));
@@ -35,6 +37,7 @@ export default function TransportLegCard({leg,actor,users,act,busy,onReceive,rec
     <header><div><h4>{leg.leg_no}</h4><p>{leg.site} · {leg.channel} · {leg.warehouse_name}</p></div><span className={`pill ${leg.stage==='on_shelf'?'green':'blue'}`}>{transportSteps[guide.index]?.[1]||leg.stage}</span></header>
     <ol className="transport-flow" aria-label="目的地运输流程">{transportSteps.map(([key,label],i)=><li key={key} className={i<guide.index?'done':i===guide.index?'current':''} aria-current={i===guide.index?'step':undefined}><i>{i<guide.index?'✓':i+1}</i><span>{label}</span></li>)}</ol>
     <div className="transport-facts"><span>当前处理人<strong>{guide.owner}</strong></span><span>开船 / 预计到仓<strong>{leg.etd||'未登记'} / {leg.eta||'未登记'}</strong></span><span>已到仓 / 发运<strong>{fmt(leg.receivedQty)} / {fmt(leg.total_qty)} 件</strong></span><span>待上架 / 隔离<strong>{fmt(leg.pendingShelfQty)} / {fmt(leg.quarantineQty)} 件</strong></span></div>
+    {isBestCarrier(carrier) && <BestTracking key={leg.id} legId={leg.id} references={(leg.evidence || []).map((e:Row) => String(e.reference || ''))}/>}
     <div className="transport-next"><strong>{leg.stage==='on_shelf'?'流程完成':`下一步：${guide.label}`}</strong><p>{guide.hint}</p>{!guide.allowed&&leg.stage!=='on_shelf'&&<p className="transport-wait">等待 {guide.owner} 处理；当前账号可查看进展。</p>}{leg.stage==='shelf_pending'&&Number(leg.quarantineQty)>0&&<p className="transport-wait">仍有 {fmt(leg.quarantineQty)} 件隔离品，请供应链在库存流水中核对处理；全部处理并上架后才会完成。</p>}</div>
     {(leg.exceptions||[]).map((issue:Row,i:number)=><div className="notice warn" key={i}><strong>{issue.type}</strong> {issue.detail}</div>)}
     {!mode&&<div className="transport-actions">{guide.allowed&&guide.index<5&&<button className="btn primary" disabled={busy} onClick={()=>begin('advance')}>{guide.label}</button>}{guide.canEta&&<button className="btn" disabled={busy} onClick={()=>begin('eta')}>调整预计到仓日期</button>}{guide.allowed&&leg.stage==='awaiting_receipt'&&<button className="btn primary" disabled={busy} onClick={onReceive}>{guide.label}</button>}{guide.allowed&&leg.stage==='shelf_pending'&&pendingItems.map((item:Row)=><button key={item.id} className="btn primary" disabled={busy} onClick={()=>begin('shelf',item)}>{item.sku} · 确认上架</button>)}</div>}
