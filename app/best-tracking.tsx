@@ -2,8 +2,9 @@
 import {useEffect, useState} from 'react';
 
 type Event = {at:string|null;kind:'actual'|'estimate'|'unknown';state:string;description:string};
-type Row = {id:string;waybill:string;updatedAt:string;error:string;snapshot:{country:string;status:string;groups:{events:Event[]}[]}};
-type View = {canManage:boolean;rows:Row[]};
+type Row = {id:string;source:string;waybill:string;updatedAt:string;error:string;snapshot:{country:string;status:string;groups:{events:Event[]}[]}};
+type View = {canManage:boolean;rows:Row[];pending:{waybill:string;reason:string}[]};
+type Location={id:string;leg:string;batch:string;site:string;channel:string;status:string};
 const time = (value:string|null) => value ? new Date(value).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false}) : '时间待核实';
 
 function Events({events}:{events:Event[]}) {
@@ -19,7 +20,7 @@ function Events({events}:{events:Event[]}) {
 
 export function BestWaybillLookup(){
   const [waybill,setWaybill]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState('');
-  const [result,setResult]=useState<{waybill:string;snapshot:Row['snapshot']}|null>(null);
+  const [result,setResult]=useState<{waybill:string;snapshot:Row['snapshot'];locations:Location[]}|null>(null);
   async function lookup(){
     setBusy(true);setError('');setResult(null);
     try{
@@ -33,9 +34,10 @@ export function BestWaybillLookup(){
   return <section className="panel"><h3>百世运单查询</h3><form className="transport-actions" onSubmit={e=>{e.preventDefault();void lookup();}}>
     <label>百世运单号<input value={waybill} required maxLength={50} disabled={busy} onChange={e=>{setWaybill(e.target.value);setResult(null);setError('');}}/></label>
     <button type="submit" className="btn primary" disabled={busy||!waybill.trim()}>{busy?'查询中…':'查询运输轨迹'}</button></form>
-    <small>只读取百世实时轨迹。关联业务分批请在对应分批内操作。时间按北京时间显示。</small>
+    <small>输入单号可查轨迹和对应分批。系统按已登记的运单和收货国自动匹配，时间为北京时间。</small>
     {error&&<p role="alert" className="notice warn">{error}</p>}
     {result&&<div><p role="status"><strong>{result.waybill}</strong> · {result.snapshot.country} · {result.snapshot.status||'状态待核实'}</p>
+      {result.locations.length?<ul>{result.locations.map(l=><li key={l.id}><a href={'/?page=batches&entity='+encodeURIComponent(l.id)}>{l.batch} / {l.leg}</a> · {l.site} {l.channel} · {l.status}</li>)}</ul>:<p>未找到登记此单号的分批。请先核对发运资料。</p>}
       {result.snapshot.groups.map((g,i)=><Events key={i} events={g.events}/>)}
       {!result.snapshot.groups.some(g=>g.events.length)&&<p>百世暂未返回轨迹节点。</p>}</div>}
   </section>;
@@ -81,9 +83,10 @@ export default function BestTracking({legId,references}:{legId:string;references
     {error && <p role="alert" className="notice warn">{error} <button type="button" className="btn" onClick={()=>{setError('');setReload(n=>n+1);}}>重新读取</button></p>}
     {!view && !error && open && <p role="status">正在读取运单…</p>}
     {view && <>
-      {!view.rows.length && <p>此目的地分批尚未关联百世运单。</p>}
+      {!view.rows.length && <p>此分批暂无已核对运单。可在分批登记百世单号，或由系统核验已填写的提单号和交接凭证。</p>}
+      {view.pending.map(p=><p className="notice warn" key={p.waybill}>{p.waybill} · {p.reason}</p>)}
       {view.rows.map(row => <article key={row.id} className="best-shipment">
-        <header><div><strong>{row.waybill}</strong><p>收货国 {row.snapshot.country} · 同步于 {time(row.updatedAt)}（北京时间）</p></div>
+        <header><div><strong>{row.waybill}</strong><p>{row.source==='auto'?'自动匹配':'人工关联'} · 收货国 {row.snapshot.country} · 同步于 {time(row.updatedAt)}（北京时间）</p></div>
           <span className="pill blue">{row.snapshot.status || '百世暂未提供状态'}</span></header>
         {row.error && <p className="notice warn" role="status">{row.error}。当前显示上次成功同步的轨迹。</p>}
         {!row.snapshot.groups.some(g=>g.events.length) && <p>百世暂未返回轨迹节点。</p>}
@@ -91,7 +94,7 @@ export default function BestTracking({legId,references}:{legId:string;references
           {row.snapshot.groups.length>1 && <h5>运输分组 {i+1}</h5>}<Events events={group.events}/>
         </div>)}
         {view.canManage && <div className="transport-actions"><button type="button" className="btn" disabled={busy} onClick={()=>submit('refresh',row.id)}>刷新轨迹</button>
-          {removeId===row.id ? <><button type="button" className="btn" disabled={busy} onClick={()=>submit('unlink',row.id)}>确认解除本分批关联</button>
+          {removeId===row.id ? <><button type="button" className="btn" disabled={busy} onClick={()=>submit('unlink',row.id)}>确认解除并停止自动关联</button>
             <button type="button" className="btn" onClick={()=>setRemoveId('')}>取消</button></> :
             <button type="button" className="btn" disabled={busy} onClick={()=>setRemoveId(row.id)}>解除关联</button>}</div>}
       </article>)}
