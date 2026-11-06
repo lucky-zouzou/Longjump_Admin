@@ -10,7 +10,7 @@ services:
       LOONGJUMP_ADMIN_EMAIL: ${LOONGJUMP_ADMIN_EMAIL:?Set administrator email}
       LOONGJUMP_ADMIN_NAME: ${LOONGJUMP_ADMIN_NAME:-公司管理员}
       LOONGJUMP_ADMIN_PASSWORD_FILE: /run/secrets/admin_password
-      LOONGJUMP_BACKUP_RETENTION_DAYS: 30
+      LOONGJUMP_BACKUP_RETENTION_DAYS: 7
     secrets:
       - admin_password
     volumes:
