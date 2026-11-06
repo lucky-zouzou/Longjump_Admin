@@ -201,3 +201,20 @@ test('历史旧票、到港日缺失及更新的未知异常节点保留轨迹�
  await pollBestTracking(f.db,config,async()=>track([arrived,dispatched,{...signed,state:'Exception'}]));
  assert.equal(legState(f).stage,'sea_freight');
 });
+
+test('百世实际到港早于分批开船时显示两个冲突日期，保留签收轨迹；更正开船日后自动恢复且不入库',async t=>{
+ const f=await prepare(t);
+ registeredLeg(f,[registered],'port_arrived');
+ f.sqlite.prepare("UPDATE transport_legs SET etd='2026-06-06',ata='2026-06-07' WHERE id=?").run(f.leg.id);
+ const read=async()=>{const {cardSummaries}=await import('../lib/best-tracking-auto.mjs');return (await cardSummaries(f.db,[f.leg.id])).get(f.leg.id)[0];};
+ await pollBestTracking(f.db,config,async()=>track([arrived,signed]));
+ assert.equal(legState(f).stage,'port_arrived');
+ const card=await read();
+ assert.deepEqual(card.timelineConflict,{arrival:'2026-06-05',departure:'2026-06-06'});
+ assert.equal(card.description,signed.description);
+ f.sqlite.prepare("UPDATE transport_legs SET etd='2026-06-04',version=version+1 WHERE id=?").run(f.leg.id);
+ await pollBestTracking(f.db,config,()=>assert.fail('应重用新鲜轨迹'));
+ assert.equal(legState(f).stage,'awaiting_receipt');
+ assert.equal((await read()).timelineConflict,null);
+ assert.equal(f.sqlite.prepare('SELECT count(*) n FROM transport_receipts').get().n,0);
+});
