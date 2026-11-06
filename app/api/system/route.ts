@@ -5,6 +5,7 @@ import {overlapMessage} from "../../../lib/sales-completeness.mjs";
 import {workspaceTasks} from "../../../lib/workspace-tasks.mjs";
 import {purchaseDocumentsForSubmission,FactoryDocumentError,keyOf} from "../../../lib/purchase-documents.mjs";
 import {packingTransportContext} from "../../../lib/factory-documents.mjs";
+import {cardSummaries} from "../../../lib/best-tracking-auto.mjs";
 import {moduleSnapshot,MODULE_FIELDS,mobileModules} from "../../../lib/workspace-model.mjs";
 import {readHistory,historyCsv,HistoryError} from "../../../lib/history-query.mjs";
 import {previewInbound,submitInbound,readInboundDocuments,InboundError} from "../../../lib/inbound.mjs";
@@ -333,6 +334,7 @@ export async function GET(request:Request) {
       if(actor.role==="海运") return leg.assigned_user_id===actor.id;
       return true;
     });
+    const bestCards=module==="batches"&&roleVisibleTransportLegs.length?await cardSummaries(database(),roleVisibleTransportLegs.map(l=>l.id)):new Map();
     const transportLegViews:AnyRow[]=roleVisibleTransportLegs.map((leg):AnyRow=>{
       const items=transportLegItemsByLeg.get(leg.id)??[];
       const stageIndex=TRANSPORT_STAGE_ORDER.indexOf(leg.stage);
@@ -348,7 +350,7 @@ export async function GET(request:Request) {
       if(["sea_freight","port_arrived","customs_clearance","last_mile_delivery"].includes(leg.stage)&&!leg.eta) exceptions.push({level:"amber",type:"缺少ETA",detail:"目的地运输分批尚未维护ETA"});
       if(etaDays!==null&&etaDays<0&&!['shelf_pending','on_shelf'].includes(leg.stage)) exceptions.push({level:"red",type:"ETA逾期",detail:`预计到仓已逾期${Math.abs(etaDays)}天`});
       if(quarantine>0) exceptions.push({level:"amber",type:"隔离库存",detail:`${quarantine}件待质检或报损处理`});
-      return {...leg,items,evidence:parseJson(leg.evidence_json,[]),stageAgeDays:age,exceptions,pendingShelfQty:pendingShelf,quarantineQty:quarantine,receivedQty:received,sellableQty:sellable,progress:leg.stage==="on_shelf"?1:Math.max(0,stageIndex)/(TRANSPORT_STAGE_ORDER.length-1)};
+      return {...leg,items,bestTracking:bestCards.get(leg.id)||[],evidence:parseJson(leg.evidence_json,[]),stageAgeDays:age,exceptions,pendingShelfQty:pendingShelf,quarantineQty:quarantine,receivedQty:received,sellableQty:sellable,progress:leg.stage==="on_shelf"?1:Math.max(0,stageIndex)/(TRANSPORT_STAGE_ORDER.length-1)};
     });
     const transportLegsByBatch=new Map<string,AnyRow[]>();
     for(const leg of transportLegViews){const rows=transportLegsByBatch.get(leg.batch_id)??[];rows.push(leg);transportLegsByBatch.set(leg.batch_id,rows);}

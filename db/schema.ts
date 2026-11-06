@@ -647,4 +647,13 @@ export const bestTransportTracking = sqliteTable('best_transport_tracking', {
   lastSuccessAt: text('last_success_at').notNull(),
   lastAttemptAt: text('last_attempt_at').notNull(),
   lastError: text('last_error').notNull().default(''),
-}, t => [uniqueIndex('idx_best_leg_waybill').on(t.legId,t.waybill), index('idx_best_tracking_due').on(t.lastAttemptAt)]);
+  linkSource: text('link_source').notNull().default('manual'),
+}, t => [index('idx_best_waybill').on(t.waybill),uniqueIndex('idx_best_leg_waybill').on(t.legId,t.waybill), index('idx_best_tracking_due').on(t.lastAttemptAt)]);
+
+export const bestTrackingMatches = sqliteTable('best_tracking_matches', {
+  legId: text('leg_id').notNull().references(()=>transportLegs.id,{onDelete:'cascade'}),
+  waybill: text('waybill').notNull(),
+  attemptedAt: text('attempted_at').notNull().default(''),
+  reason: text('reason').notNull().default(''),
+  suppressed: integer('suppressed').notNull().default(0),
+}, t => [primaryKey({columns:[t.legId,t.waybill]})]);
