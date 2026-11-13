@@ -1,9 +1,11 @@
+
+import SkuLabel from './sku-label';
 import {clearanceReportLabels} from '../lib/clearance-progress.mjs';
 type Row=Record<string,any>;
 const num=(v:any)=>v==null?'待核实':Number(v).toLocaleString('zh-CN',{maximumFractionDigits:2});
 export default function ClearanceStock({r}:{r:Row}){
  const p=r.progress,labels=clearanceReportLabels as Row;
- return <section className="cl-stock" aria-label="日报与库存联动"><div className="cl-section-head"><div><h3>日报 → 清仓进度 → 实时库存</h3><p>{r.site} · {r.channel} · {r.sku} 自动关联，每笔销售只扣库一次。</p></div><span className={`cl-tag ${p.stockMatched?'active':''}`}>{!r.started_on?'待执行':!p.batches.length?(p.completeDays?'完整日报已关联 · 无销售扣库':'等待销售日报'):p.stockMatched?'已导入销量与扣库一致':'扣库流水待核对'}</span></div>
+ return <section className="cl-stock" aria-label="日报与库存联动"><div className="cl-section-head"><div><h3>日报 → 清仓进度 → 实时库存</h3><p>{r.site} · {r.channel} · <SkuLabel sku={r.sku}/> 自动关联，每笔销售只扣库一次。</p></div><span className={`cl-tag ${p.stockMatched?'active':''}`}>{!r.started_on?'待执行':!p.batches.length?(p.completeDays?'完整日报已关联 · 无销售扣库':'等待销售日报'):p.stockMatched?'已导入销量与扣库一致':'扣库流水待核对'}</span></div>
  <div className="cl-stock-cards"><article><small>期间已导入销量</small><b>{num(p.qty)}<em> 件</em></b><span>{p.through?`截至当地 ${p.through} · ${p.daily.at(-1)?.status==='in_progress'?'今日未结束':'按经营日期'}`:'登记平台执行后开始跟踪'}</span></article><article><small>销售净扣库</small><b>{num(p.netDeductedQty)}<em> 件</em></b><span>扣库 {num(p.deductedQty)} − 冲销恢复 {num(p.reversedQty)}</span></article><article><small>当前可售库存</small><b>{num(r.stock.available)}<em> 件</em></b><span>账面 {num(r.stock.qty)} − 预留 {num(r.stock.reserved)}</span></article><article><small>距目标还差 · 按已导入</small><b>{num(p.knownRemaining)}<em> 件</em></b><span>目标 {num(r.data.targetQty)} · {p.completionPct==null?'完成率待核实':`已导入达成 ${num(p.completionPct)}%`}</span></article></div>
  <p className="cl-muted">执行时可售 {num(r.oversight?.openingAvailable)} 件 → 当前 {num(r.stock.available)} 件，库存净变化 {r.oversight?.inventoryChange>0?'+':''}{num(r.oversight?.inventoryChange)} 件。该变化包含入仓、调拨、盘点、预留及其他出库，不能全当作清仓销量。</p>
  <p className="cl-muted">销量按执行期间的经营日期统计，包含非活动销量。当日未结束、部分日报和缺报不作完整一天。库存以实际台账为准；清仓看板不另扣库存。财务损益按已结束的日期核算。</p>

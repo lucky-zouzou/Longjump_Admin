@@ -28,3 +28,5 @@
 .creator-practice-method{font-size:1.08rem;font-weight:650;line-height:1.65;white-space:pre-wrap;}
 .creator-practice-effect{padding:9px 12px;background:#eff7f4;color:#225342;border-radius:6px;white-space:pre-wrap;}
 .creator-task-list{max-height:26rem;overflow:auto;}
+
+.creator-video-batch{display:grid;gap:12px;margin:12px 0 20px;padding-bottom:16px;border-bottom:1px solid #e3eaf2}.creator-video-batch label{display:grid;gap:6px;font-size:13px}.creator-video-batch input{width:100%;box-sizing:border-box;border:1px solid #d6e0ef;border-radius:8px;padding:10px}.creator-video-batch small{color:#64748b}.creator-video-batch .btn{justify-self:start}

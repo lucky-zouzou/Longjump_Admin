@@ -29,6 +29,7 @@ async function upload(sku: string, file: File) {
     const result = await response.json();
     if (!response.ok)
         throw Error(result.error || '图片上传失败');
+    window.dispatchEvent(new Event('product-images-changed'));
     return result;
 }
 const display = (value: unknown) => value == null || value === '' ? '待补录' : typeof value === 'number' ? value.toLocaleString('zh-CN', { maximumFractionDigits: 8 }) : String(value);
@@ -164,12 +165,13 @@ export default function ProductInformation() {
     <header className="pi-heading">
     <div>
     <h2>商品资料</h2>
-    <p>按SKU查规格、箱规、图片和成本来源，供应链补齐缺失资料。</p>
+    <p>按 SKU 查看图片、材质、尺寸、重量、体积和装箱数。供应链可直接补录。</p>
     </div>
     <button className="btn" disabled={busy} onClick={() => void run(load)}>刷新</button>
     </header>
     {error && <p className="notice warn" role="alert">{error}</p>}{message && <p className="notice info" role="status">{message}</p>}
     {!catalog ? <p>正在读取商品资料…</p> : <>
+    <p className="pi-effective">商品资料保存后立即生效，无需财务或管理员再次审批。空缺字段显示“待补录”，不影响已填写信息的使用。</p>
     <div className="pi-summary">
         <span>系统SKU <b>{catalog.rows.length}</b>
         </span>
@@ -182,7 +184,7 @@ export default function ProductInformation() {
         </div>
     {catalog.canWrite && <details className="pi-import">
             <summary>从商品信息表匹配导入</summary>
-            <p>使用带“商品编码SKU”表头的工作表。规格明细表优先，其他表补空缺。成本参考保留工作表与行号，等待财务核定。</p>
+            <p>使用带“商品编码SKU”表头的工作表，自动匹配图片与规格。保存成功的资料立即可见；空白不会覆盖已有资料。表内成本另存为参考，不影响商品资料生效。</p>
       <div className="pi-controls">
             <label>选择原始商品表<input type="file" accept=".xlsx" disabled={busy} onChange={e => {
                     const file = e.target.files?.[0];
@@ -264,10 +266,11 @@ export default function ProductInformation() {
         <thead>
         <tr>
         <th>商品</th>
-        <th>规格 / 材质</th>
+        <th>材质 / 尺寸</th>
         <th>净重 / 毛重 kg</th>
         <th>装箱资料</th>
-        <th>完整情况</th>
+        <th>体积 m³</th>
+        <th>资料状态</th>
         <th>操作</th>
         </tr>
         </thead>
@@ -279,12 +282,13 @@ export default function ProductInformation() {
             </div>
             </div>
             </td>
-            <td>{display(row.data.specification)}<small>{display(row.data.material)}</small>
+            <td>{display(row.data.material)}<small>{display(row.data.dimensions)}{row.data.dimensions ? ' cm' : ''}</small><small>{[row.data.color, row.data.specification].filter(Boolean).join(' · ')}</small>
             </td>
             <td>{display(row.data.netWeightKg)} / {display(row.data.grossWeightKg)}</td>
             <td>{display(row.data.cartonQty)} 件/箱<small>{[row.data.cartonLengthCm, row.data.cartonWidthCm, row.data.cartonHeightCm].map(display).join(' × ')} cm</small>
             </td>
-            <td>{row.missing.length ? '待补 ' + row.missing.length + ' 项' : '规格已齐'}<small>{row.version ? 'v' + row.version + ' · ' + row.actor_name : '待建资料'}</small>
+            <td>单件 {display(row.data.unitVolumeCbm)}<small>单箱 {display(row.data.cartonVolumeCbm)}</small></td>
+            <td>{row.version ? <span className="pi-live">已生效</span> : '尚未录入'}<small>{row.missing.length ? '缺少 ' + row.missing.length + ' 项，可继续补录' : '规格已齐'}</small><small>{row.version ? 'v' + row.version + ' · ' + row.actor_name : ''}</small>
             </td>
             <td>
             <button className="btn" disabled={busy} onClick={() => void open(row)}>{catalog.canWrite ? '查看 / 补录' : '查看资料'}</button>
@@ -375,7 +379,8 @@ export default function ProductInformation() {
                             e.target.value = '';
                         }}/>
                     </label>}
-      <h4>表内成本参考 · 待财务核定</h4>{detail.profile?.references?.length ? <div className="table-wrap">
+      <details className="pi-cost-references"><summary>表内成本参考（独立于已生效的商品资料）</summary>
+      <p>仅成本参考待财务核定；图片、材质、尺寸、重量、体积与装箱数已可直接使用。</p>{detail.profile?.references?.length ? <div className="table-wrap">
                     <table>
                     <thead>
                     <tr>
@@ -397,6 +402,7 @@ export default function ProductInformation() {
                     </table>
                     </div> : <p>待补充成本来源</p>}
       <p>财务核对费用范围、生效日期及差异后，在“商品成本与动销”中登记正式成本版本。</p>
+      </details>
       <details>
                 <summary>查看系统成本版本（CNY/件）</summary>
                 <div className="table-wrap">

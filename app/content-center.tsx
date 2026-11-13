@@ -1,4 +1,6 @@
 "use client";
+import SkuLabel from './sku-label';
+
 import {useCallback,useEffect,useRef,useState} from 'react';
 import {parseWorkspaceResponse} from '../lib/workspace-response.mjs';
 import {useVisibleRefresh} from './workspace-hooks';
@@ -7,7 +9,7 @@ import {ContentMaterials} from './content-materials';
 import './content-center.css';
 
 const tabs=['需求与排期','脚本与素材','站点发布','效果复盘','复拍与跨站测试','素材收发'];
-const tabOrder=[0,5,1,2,3,4];
+const tabOrder=[0,5,1,2,3];
 const stamp=(s:string)=>new Date(s).toLocaleString('zh-CN',{hour12:false});
 const inputTime=()=>{const n=new Date();return new Date(n.getTime()-n.getTimezoneOffset()*60000).toISOString().slice(0,16);};
 function Link({href,children}:{href?:string;children:React.ReactNode}){return href&&/^https:\/\//.test(href)?<a href={href} target="_blank" rel="noreferrer">{children} ↗</a>:null;}
@@ -56,7 +58,7 @@ export default function ContentCenter(){
  const newValues={source:'studio',site:data.writeSites[0]||'',scene:'公司静拍'};
  const canClaim=(s:Row)=>ops&&data.writeSites.some((site:string)=>s.source!=='creator'||s.allowedSites.includes(site));
  const go=(i:number)=>{if(form||materialDirty&&i!==tab)return;setTab(i);setNotice('');};
- function cardTitle(s:Row){return <><div className="cc-tagline"><span>{sourceLabels[s.source]}</span><span>{s.site} · {s.sku}</span></div><h4>{s.title}</h4><p>{s.selling_point} · {s.scene}</p></>;}
+ function cardTitle(s:Row){return <><div className="cc-tagline"><span>{sourceLabels[s.source]}</span><span>{s.site} · <SkuLabel sku={s.sku}/></span></div><h4>{s.title}</h4><p>{s.selling_point} · {s.scene}</p></>;}
  function actionsFor(s:Row){
   return <div className="cc-actions">{s.source==='studio'&&camera&&['待排期','已排期'].includes(s.status)&&<button className="btn" onClick={()=>open('schedule',{scriptId:s.id,version:s.version,shoot:s.shoot_date||'',delivery:s.delivery_date||'',jointWith:s.joint_with||'',context:s.title})}>安排拍摄</button>}
     {(s.source==='studio'&&camera&&s.shoot_date||s.source==='ai'&&ops&&ownsSite(s.site))&&<button className="btn" onClick={()=>open('deliver',{scriptId:s.id,version:s.version,context:s.title,storyboard:s.brief})}>交付新版本</button>}
@@ -76,23 +78,23 @@ export default function ContentCenter(){
    return <div className="cc-windows">{days.map(days=>{
      const m=selectedMetric(data,p,s,days);
      return <div key={days}><strong>{days===1?'24 小时':days+' 天'}{p.original&&days>1?' · 达人模块':''}</strong>
-     {m?<><span>播放 {number(m.views)} · 点击 {number(m.clicks)} · 订单 {number(m.orders)}</span><small>前 3 秒留存 {m.retention==null?'待补录':m.retention+'%'} · 取数 {stamp(m.observed_at)}</small>
+     {m?<><span>播放 {number(m.views)} · 点击 {number(m.clicks)} · 加购 {number(m.cart_adds)} · 订单 {number(m.orders)}</span><small>前 3 秒留存 {m.retention==null?'待补录':m.retention+'%'} · 取数 {stamp(m.observed_at)}</small>
       {m.note&&<small>{m.note}{m.evidence?' · '+m.evidence:''}</small>}</>:<span>{windowStatus(p.published_at,days)}</span>}</div>;
    })}</div>;
  }
  function postCard(p:Row,analysis=false){
-   const s=sFor(p),v=byVersion.get(p.version_id)!,own=ownsSite(p.site),reviewable=camera||own;
+   const s=sFor(p),v=byVersion.get(p.version_id)!,own=ownsSite(p.site);
    let typical='';
    if(analysis&&p.traffic!=='待核实'){const cohort=posts.filter(other=>other.id!==p.id&&other.published_at&&other.site===p.site&&other.account===p.account&&other.traffic===p.traffic)
     .map(other=>selectedMetric(data,other,sFor(other),7)?.views).filter((n):n is number=>typeof n==='number').sort((a,b)=>a-b);
     if(cohort.length){const mid=Math.floor(cohort.length/2);typical='同站同账号同流量类型 · 其他 '+cohort.length+' 条的 7 天播放中位数 '+number(cohort.length%2?cohort[mid]:(cohort[mid-1]+cohort[mid])/2);}}
    return <article className="cc-card" key={p.id}><div className="cc-tagline"><span>{p.site} · @{p.account}</span><span>{p.traffic} · {p.language}</span></div><h4>{s.title} / {v.label}</h4>
-    <p>{s.sku} · {p.changes}</p><p>{name(p.owner_id)} · {p.published_at?'已发布 '+stamp(p.published_at):'计划 '+p.planned}</p>
+    <p><SkuLabel sku={s.sku}/> · {p.changes}</p><p>{name(p.owner_id)} · {p.published_at?'已发布 '+stamp(p.published_at):'计划 '+p.planned}</p>
     <div className="cc-actions"><Link href={p.url}>发布链接</Link><Link href={p.local_url}>本地成片</Link></div>
     {analysis&&<>{metricsFor(p,s)}{typical&&<small>{typical}</small>}</>}
     <div className="cc-actions">{!p.published_at&&own&&(manager||actor.id===p.owner_id)&&<button className="btn" onClick={()=>open('publish',{postId:p.id,version:p.version,publishedAt:inputTime(),context:s.title+' · @'+p.account})}>登记已发布视频</button>}
      {p.published_at&&own&&<button className="btn" onClick={()=>open('observe',{postId:p.id,version:p.version,days:'1',observedAt:inputTime(),context:s.title+' · @'+p.account})}>记录数据</button>}
-     {p.published_at&&reviewable&&<button className="btn" onClick={()=>open('review',{postId:p.id,decision:'复拍',site:p.site,ownerId:p.owner_id,scene:'公司静拍',traffic:'自然',context:s.title+' · @'+p.account})}>复盘决定</button>}</div>
+</div>
    </article>;
  }
  return <section className="cc"><header className="cc-heading"><div><h2>TikTok 内容中心</h2></div>
@@ -116,7 +118,7 @@ export default function ContentCenter(){
      {actionsFor(s)}{versions.filter(v=>v.script_id===s.id).map(v=>asset(v,s))}</article>)}</>}
   {tab===2&&<><h3>站点发布记录</h3>{!visiblePosts.length&&<Empty>暂无发布任务。在素材库中认领一个已验收版本即可排入本站计划。</Empty>}<div className="cc-grid">{visiblePosts.map(p=>postCard(p))}</div></>}
   {tab===3&&<><h3>按脚本对照发布效果</h3>{!visiblePosts.some(p=>p.published_at)&&<Empty>发布后可按脚本对照各站版本，并记录 24 小时和 7 天表现。</Empty>}
-    {scripts.map(s=>{const group=visiblePosts.filter(p=>p.published_at&&sFor(p).id===s.id);return group.length?<section key={s.id} className="cc-group"><h4>{s.title} <small>{s.sku} · {group.length} 条发布</small></h4><div className="cc-grid">{group.map(p=>postCard(p,true))}</div></section>:null;})}</>}
+    {scripts.map(s=>{const group=visiblePosts.filter(p=>p.published_at&&sFor(p).id===s.id);return group.length?<section key={s.id} className="cc-group"><h4>{s.title} <small><SkuLabel sku={s.sku}/> · {group.length} 条发布</small></h4><div className="cc-grid">{group.map(p=>postCard(p,true))}</div></section>:null;})}</>}
   {tab===4&&<><h3>复盘决定与验证任务</h3>{!reviews.filter(r=>(!site||r.site===site)&&find(sFor(posts.find(p=>p.id===r.post_id)!))).length&&<Empty>暂无复盘决定。可在已发布视频下记录复拍、跨站测试或暂缓的原因。</Empty>}
    {reviews.filter(r=>(!site||r.site===site)&&find(sFor(posts.find(p=>p.id===r.post_id)!))).map(r=>{const original=posts.find(p=>p.id===r.post_id)!,next=posts.filter(p=>p.id===r.next_post_id||sFor(p).id===r.next_script_id),shot=byScript.get(r.next_script_id);
     return <article className="cc-card" key={r.id}><div className="cc-tagline"><span>{r.decision}</span><span>{r.site} · {name(r.owner_id)} · {r.due}</span></div><h4>{sFor(original).title}</h4>

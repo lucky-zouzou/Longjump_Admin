@@ -1,0 +1,18 @@
+.sku-label{display:inline-flex;align-items:center;gap:9px;max-width:100%;vertical-align:middle;text-align:left}
+.sku-label .sku-code{min-width:6ch;overflow-wrap:anywhere;font:inherit;color:inherit}
+td .sku-label{min-width:150px;max-width:340px}
+.sku-label .sku-photo{display:inline-flex;align-items:center;justify-content:center;flex:0 0 40px;width:40px;height:40px;min-width:40px;min-height:40px;margin:0;padding:0;overflow:hidden;border:1px solid #e0e7ef;border-radius:7px;background:#fff;box-shadow:none;vertical-align:middle;line-height:1;color:#7b8c9f}
+.sku-label button.sku-photo{cursor:zoom-in}
+.sku-label button.sku-photo:hover{border-color:#4677bb;background:#f6f9fe}
+.sku-label button.sku-photo:focus-visible{outline:2px solid #3266de;outline-offset:2px}
+.sku-label .sku-photo img{display:block;width:40px;height:40px;min-width:0;max-width:none;object-fit:contain;margin:0;border:0;border-radius:0}
+.sku-label .sku-photo-placeholder{display:flex;align-items:center;justify-content:center;flex-direction:column;gap:2px;font:400 9px/1.1 system-ui,sans-serif;color:#738299}
+.sku-label .sku-photo-placeholder svg{display:block;width:18px;height:18px;stroke:currentColor;stroke-width:1.5;fill:none}
+.sku-label .sku-photo-placeholder>span{display:block;font:inherit;color:inherit;white-space:nowrap}
+.sku-image-dialog{position:fixed;inset:0;margin:auto;max-width:min(900px,94vw);max-height:92dvh;width:fit-content;padding:0;border:1px solid #e1e8f0;border-radius:14px;background:#fff;color:#18304d;box-shadow:0 16px 60px #0b203230;overflow:auto}
+.sku-image-dialog::backdrop{background:#10223999}
+.sku-image-content{padding:16px}
+.sku-image-content>header{display:flex;align-items:center;justify-content:space-between;gap:24px;margin-bottom:14px;overflow-wrap:anywhere}
+.sku-image-content>img{display:block;max-width:min(820px,84vw);max-height:74dvh;width:auto;height:auto;object-fit:contain;margin:auto}
+.sku-image-error{padding:40px;display:flex;align-items:center;gap:16px}
+@media(max-width:640px){.sku-label{gap:6px}.sku-image-content{padding:12px}.sku-image-content>header{gap:12px}}

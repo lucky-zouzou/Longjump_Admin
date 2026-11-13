@@ -1,4 +1,6 @@
 "use client";
+import SkuLabel from './sku-label';
+
 
 import {Fragment,useRef,useState} from "react";
 
@@ -45,14 +47,14 @@ export default function InventoryCountReview({rows,busy,act}:Props){
         const delta=Number(row.counted_qty)-Number(row.system_qty),known=row.current_qty!==undefined;
         const stale=known&&Number(row.current_qty)!==Number(row.system_qty),active=editing?.id===row.id;
         return <Fragment key={row.id}><tr data-entity-id={row.id} tabIndex={-1}>
-          <td><strong>{row.sku}</strong><div className="cell-note">{row.site} · {row.channel}</div></td>
+          <td><strong><SkuLabel sku={row.sku}/></strong><div className="cell-note">{row.site} · {row.channel}</div></td>
           <td>{row.creator_name||row.creator_id}<div className="cell-note">{date(row.created_at)}（北京时间）</div></td>
           <td className="num">{fmt(Number(row.system_qty))}</td><td className="num">{fmt(Number(row.counted_qty))}</td>
           <td className="num">{delta>0?"+":""}{fmt(delta)}</td><td className="num">{known?fmt(Number(row.current_qty)):"—"}</td>
           <td>{row.reason}{row.decision_comment&&<div className="cell-note">{row.reviewer_name||"复核人"}：{row.decision_comment}</div>}</td>
           <td><span className={`pill ${row.status==="approved"?"green":"red"}`}>{row.status==="pending"?"待复核":row.status==="approved"?"已批准":"已驳回"}</span>{row.status==="pending"&&<><div className="count-actions"><button className="btn primary" disabled={locked||stale||!known} onClick={()=>open(row,"approve")}>批准</button><button className="btn danger" disabled={locked} onClick={()=>open(row,"reject")}>驳回</button></div>{stale&&<div className="count-conflict">库存已变化，请驳回后重新盘点。</div>}{!known&&<div className="count-conflict">库存尚未读取，请刷新页面。</div>}</>}</td>
         </tr>{active&&<tr><td colSpan={8}><form className="count-decision" aria-label={`${row.sku} 盘点复核`} onSubmit={event=>{event.preventDefault();void submit(row);}}>
-          <strong>{editing.decision==="approve"?"确认批准":"确认驳回"} · {row.sku}</strong>
+          <strong>{editing.decision==="approve"?"确认批准":"确认驳回"} · <SkuLabel sku={row.sku}/></strong>
           <p>{editing.decision==="approve"?`批准后账面库存：${known?fmt(Number(row.current_qty)):"—"} → ${fmt(Number(row.counted_qty))} 件；本次差额 ${delta>0?"+":""}${fmt(delta)} 件。请先核对原始盘点依据。`:"驳回不会改变库存；运营可核实最新数量后重新提交。"}</p>
           <label>复核意见（至少 3 个字）<textarea autoFocus maxLength={500} value={comment} disabled={locked} onChange={e=>setComment(e.target.value)} placeholder="请填写已核对的盘点表、ERP报表编号或驳回原因" aria-invalid={Boolean(error)} aria-describedby={error?`count-error-${row.id}`:undefined}/></label>
           {error&&<div className="notice error" role="alert" id={`count-error-${row.id}`}>{error}</div>}

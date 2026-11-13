@@ -266,7 +266,7 @@ test('运营发起、BD批量接收、修订确认与履约独立留痕',async()
  const proposal={creatorId,requestId:crypto.randomUUID(),contact:'合作测试',dueAt:future(),items:[{sku:'BAG-A',sampleQty:1}],method:'commission',commission:'12.5',videos:1,lives:0};
  const count=()=>f.sqlite.prepare('SELECT COUNT(*) n FROM creator_rounds').get().n;
  const requests=async actor=>(await readCreators(f.db,actor)).requests;
- await assert.rejects(()=>f.act(bd,'requestCreate',proposal),/仅店铺运营/);
+ const bdProposal={...proposal,requestId:crypto.randomUUID()};await f.act(bd,'requestCreate',bdProposal);assert.equal((await requests(bd)).find(r=>r.id===bdProposal.requestId).state,'following');await f.act(bd,'requestCancel',{requestId:bdProposal.requestId,version:1,note:'已验证BD可直接发起'});
  await f.act(ops,'requestCreate',proposal);await f.act(ops,'requestCreate',proposal);
  const second={...proposal,requestId:crypto.randomUUID()};await f.act(ops,'requestCreate',second);
  const other={...proposal,requestId:crypto.randomUUID()};await f.act(ops,'requestCreate',other);await f.act(ops,'requestCancel',{requestId:other.requestId,version:1,note:'撤回'});
@@ -285,9 +285,8 @@ test('运营发起、BD批量接收、修订确认与履约独立留痕',async()
  assert.equal(q.state,'executing');assert.equal(JSON.parse(r.terms_json).budgetMinor,null);assert.equal(JSON.parse(r.terms_json).commission,'15');
  const workflow=(a,action,p={})=>f.change(a,creatorId,action,{roundId:r.id,...p});
  await assert.rejects(()=>workflow(ops,'dispatch'),/由BD/);
- await assert.rejects(()=>workflow(bd,'complete',{note:'验收',evidence:proof}),/签收/);
+ await assert.rejects(()=>workflow(bd,'complete',{note:'验收',evidence:proof}),/寄样/);
  await workflow(bd,'dispatch',{warehouseRef:'TEST-REF',carrier:'TEST',tracking:'TEST-TRACK',qty:1,at:now(),evidence:proof});
- await workflow(bd,'receipt',{at:now(),evidence:proof});
  await workflow(bd,'content',{kind:'video',sku:'BAG-A',url:'https://example.test/confirm/1',at:now(),linkValid:true,skuCorrect:true,accurate:true,agreed:true,note:'验收',evidence:proof});
  await workflow(bd,'complete',{note:'交付完成',evidence:proof});
  assert.equal((await requests(ops)).find(x=>x.id===q.id).state,'completed');
@@ -338,4 +337,61 @@ test('BD姓名按唯一登录邮箱绑定账号，保留原达人归属，重复
  assert.equal((await readCreators(f.db,bd)).actor.name,binding.displayName);
  assert.equal((await readCreators(f.db,other)).actor.name,other.name);
  assert.equal(f.sqlite.prepare("SELECT count(*) n FROM creator_events WHERE action='bdName'").get().n,1);
+});
+
+test('BD 批量视频交付无需签收、截图按达人权限读取并随备份恢复，效果证据可选',async()=>{
+ const {readCreatorEvidence}=await import('../lib/creator-evidence.mjs');
+ const f=await setup(),row=await f.submit(),creatorId=row.creator_id,bd=f.users.bd;
+ const requestId=crypto.randomUUID();await f.act(bd,'requestCreate',{creatorId,requestId,contact:'不可覆盖档案',dueAt:future(),items:[{sku:'BAG-A',sampleQty:1}],method:'commission',commission:'10',videos:3,lives:0});
+ const pending=(await readCreators(f.db,bd)).requests.find(r=>r.id===requestId);assert.equal(pending.terms.contact,'test@example.test');
+ await f.act(bd,'requestConfirm',{requestId,version:1,confirmed:true});
+ const r=f.sqlite.prepare('SELECT * FROM creator_rounds').get(),change=(action,p={})=>f.change(bd,creatorId,action,{roundId:r.id,...p});
+ const attachment={name:'交付截图.png',base64:Buffer.from('\x89PNG\r\n\x1a\nTEST','binary').toString('base64')};
+ const input={kind:'video',sku:'BAG-A',videoCount:3,urls:['https://example.test/batch/1','https://example.test/batch/2','https://example.test/batch/3'],at:now(),linkValid:true,skuCorrect:true,accurate:true,agreed:true,note:'共同核验三条链接',attachments:[attachment]};
+ await assert.rejects(change('content',input),/先登记寄样/);
+ await change('dispatch',{orderNumber:'SAMPLE-TEST-1112',qty:1,at:now()});input.at=now();
+ await assert.rejects(change('content',{...input,videoCount:2}),/数量/);
+ await assert.rejects(change('content',{...input,urls:[input.urls[0],input.urls[0],input.urls[1]]}),/不同/);
+ await assert.rejects(change('content',{...input,attachments:[{name:'fake.png',base64:Buffer.from('not an image').toString('base64')}]}),/PNG/);
+ assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM creator_evidence_files').get().n,0);
+ await change('content',input);
+ await assert.rejects(change('content',{...input,urls:['https://example.test/new',...input.urls.slice(1)]}),/重复/);
+ let d=await readCreators(f.db,bd);assert.equal(d.contents.length,3);assert.ok(d.contents.every(c=>c.status==='accepted'));
+ assert.equal(JSON.stringify(d).includes(attachment.base64),false);
+ const fileId=d.contents[0].data.attachments[0].id;
+ assert.equal((await readCreatorEvidence(f.db,bd,fileId)).payload,attachment.base64);
+ await assert.rejects(readCreatorEvidence(f.db,f.users.malaysia,fileId),{status:404});
+ assert.equal((await readCreatorEvidence(f.db,f.users.finance,fileId)).mime,'image/png');
+ await change('complete',{attachments:[attachment,{...attachment,name:'第二件样品.png'}]});
+ d=await readCreators(f.db,bd);assert.equal(d.rounds[0].status,'completed');assert.equal(d.rounds[0].logistics.receipt,undefined);
+ const complete=d.events.find(e=>e.action==='complete');assert.equal(complete.detail.note,'已按要求完成交付');assert.equal(complete.detail.attachments.length,2);
+ const report={from:now().slice(0,10),to:now().slice(0,10),currency:'IDR',orders:0,evaluation:'真实出单待跟进',nextPlan:'观察自然流量'};
+ await change('roundResult',report);assert.equal((await readCreators(f.db,bd)).results[0].data.evidence,'');
+ await change('roundResult',{...report,resultRevision:1,attachments:[{name:'数据.pdf',base64:Buffer.from('%PDF-1.4 TEST').toString('base64')}]});
+ await change('roundResult',{...report,resultRevision:2});
+ assert.equal((await readCreators(f.db,bd)).results.find(v=>v.revision===3).data.attachments.length,1);
+ const root=mkdtempSync(join(tmpdir(),'creator-proof-'));try{const path=join(root,'backup.tar');await createBackup({DB:f.db,WHOLESALE_FILES:fileBucket(join(root,'files'))},path);await restoreBackup(path,join(root,'restored'));const db=openDatabase(join(root,'restored/business.sqlite'));try{assert.equal((await readCreatorEvidence(db,bd,fileId)).payload,attachment.base64);}finally{db.sqlite.close();}}finally{rmSync(root,{recursive:true,force:true});f.sqlite.close();}
+});
+
+test('跟进记录已完成沟通且不强制未来日期，后续待办可空但归属必须有效',async()=>{
+ const f=await setup(),row=await f.submit(),id=row.creator_id;
+ await f.change(f.users.bd,id,'follow',{note:'已沟通本月档期',nextOwner:f.users.bd.id});
+ const p=f.profile(id);assert.equal(p.next_at,null);assert.equal(p.next_action,'');assert.equal(p.next_owner_id,f.users.bd.id);
+ await assert.rejects(f.change(f.users.bd,id,'follow',{nextOwner:f.users.bd.id}),/本次跟进/);
+ await assert.rejects(f.change(f.users.bd,id,'follow',{note:'沟通完成',nextOwner:f.users.other.id}),/已分配/);
+ f.sqlite.close();
+});
+
+test('寄样与视频时间按表单秒精度核对，确认同一秒允许而更早一秒拒绝',async()=>{
+ const f=await setup(),row=await f.submit(),creatorId=row.creator_id,bd=f.users.bd,requestId=crypto.randomUUID();
+ await f.act(bd,'requestCreate',{creatorId,requestId,dueAt:future(),items:[{sku:'BAG-A',sampleQty:1}],method:'commission',commission:'10',videos:1,lives:0});
+ await f.act(bd,'requestConfirm',{requestId,version:1,confirmed:true});
+ const r=f.sqlite.prepare('SELECT * FROM creator_rounds').get(),second=Math.floor((Date.now()-1000)/1000)*1000;
+ f.sqlite.prepare('UPDATE creator_rounds SET approved_at=? WHERE id=?').run(new Date(second+500).toISOString(),r.id);
+ const change=(a,p)=>f.change(bd,creatorId,a,{roundId:r.id,...p});
+ await assert.rejects(change('dispatch',{orderNumber:'TEST-SECOND',qty:1,at:new Date(second-1000).toISOString()}),/不能早于/);
+ await change('dispatch',{orderNumber:'TEST-SECOND',qty:1,at:new Date(second).toISOString()});
+ const content={sku:'BAG-A',kind:'video',url:'https://example.test/second-precision',note:'通过',evidence:proof,linkValid:true,skuCorrect:true,accurate:true,agreed:true};
+ await assert.rejects(change('content',{...content,at:new Date(second-1000).toISOString()}),/寄样之后/);
+ await change('content',{...content,at:new Date(second).toISOString()});f.sqlite.close();
 });
