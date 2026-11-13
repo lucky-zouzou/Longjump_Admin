@@ -16,17 +16,22 @@ test('独立服务器：公司登录、禁止伪造身份、岗位隔离、出�
  }cleanFixture.close();
  const free=net.createServer();free.listen(0,'127.0.0.1');await once(free,'listening');const port=free.address().port;await new Promise(r=>free.close(r));const origin=`http://127.0.0.1:${port}`;let logs='';const child=spawn(process.execPath,['server/index.mjs'],{env:{...process.env,LOONGJUMP_INQUIRY_SYNC_SECRET:'test-http-inquiry-secret-32-characters',NODE_ENV:'production',LOONGJUMP_DATA_DIR:root,LOONGJUMP_ORIGIN:origin,LOONGJUMP_ALLOW_HTTP:'1',PORT:String(port),HOST:'127.0.0.1'},stdio:['ignore','pipe','pipe']});child.stdout.on('data',b=>logs+=b);child.stderr.on('data',b=>logs+=b);
  try{await new Promise((res,rej)=>{const timer=setTimeout(()=>rej(Error('Server startup timeout: '+logs)),15000);child.stdout.on('data',b=>{if(String(b).includes('ready at')){clearTimeout(timer);res()}});child.once('exit',code=>{clearTimeout(timer);rej(Error(`Server exited ${code}: ${logs}`))})});
- const portal=await fetch(origin+'/distributor',{redirect:'manual'});assert.equal(portal.status,200);const portalHtml=await portal.text();assert.match(portalHtml,/Pesanan grosir/);assert.equal(portal.headers.get('referrer-policy'),'no-referrer');
- for(const asset of ['ordering.css','ordering.js','service.js']){
+ const portal=await fetch(origin+'/distributor',{redirect:'manual'});assert.equal(portal.status,200);const portalHtml=await portal.text();assert.match(portalHtml,/<title>Ruang Mitra/);assert.equal(portal.headers.get('referrer-policy'),'no-referrer');
+ for(const asset of ['brand.css','ordering.css','ordering.js','service.js']){
   const assetPath=[...portalHtml.matchAll(/(?:href|src)="([^"]+)"/g)].map(m=>m[1]).find(url=>url.split('?')[0]==='/distributor-assets/'+asset);
   assert.ok(assetPath,'Missing distributor asset: '+asset);
   const response=await fetch(origin+assetPath,{redirect:'manual'});assert.equal(response.status,200);
   assert.match(response.headers.get('cache-control'),/no-cache/);
  }
  const application=await fetch(origin+'/distributor/apply',{redirect:'manual'});
- assert.equal(application.status,200);assert.equal(application.headers.get('referrer-policy'),'same-origin');assert.match(await application.text(),/Daftar sebagai mitra/);
+ assert.equal(application.status,200);assert.equal(application.headers.get('referrer-policy'),'same-origin');assert.match(await application.text(),/Jadi partner kami/);
  assert.ok(portalHtml.includes('href="/distributor/apply"'));
  for(const path of ['/distributor-assets/application.css','/loong-jump-logo-black.png'])assert.equal((await fetch(origin+path,{redirect:'manual'})).status,200);
+ for(const image of ['partner-green.webp','partner-pink.webp']){
+  const response=await fetch(origin+'/distributor-assets/'+image,{redirect:'manual'});
+  assert.equal(response.status,200);assert.equal(response.headers.get('content-type'),'image/webp');
+  assert.ok((await response.arrayBuffer()).byteLength>1000);
+ }
  assert.equal((await fetch(origin+'/api/distributor')).status,401);
  assert.equal((await fetch(origin+'/api/wholesale/distributor',{method:'POST',headers:{origin}})).status,401);
  const forged=await fetch(origin+'/api/system',{headers:{'oai-authenticated-user-id':'admin','oai-authenticated-user-email':'admin@example.test','x-local-test-user':'admin'}});assert.equal(forged.status,401);

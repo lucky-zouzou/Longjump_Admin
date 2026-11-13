@@ -2,20 +2,20 @@
 (async function () {
   const byId=id=>document.getElementById(id);
   const token=location.hash.slice(1);
-  const notice=message=>{byId('notice').textContent=message;};
+  const notice=message=>{const guest=document.body.classList.contains('portal-guest');byId('notice').textContent=guest?'':message;byId('login-notice').textContent=guest?message:'';};
   const validToken=value=>/^[0-9a-f]{64}$/.test(value);
   const authHeaders=()=>validToken(token)?{Authorization:'Bearer '+token}:{};
   const store=new URLSearchParams(location.search).get('store');
   let initialWorkspace=null;
   const endpoint='/api/distributor'+(store?'?store='+encodeURIComponent(store):'');
   function loginView(){
-    byId('portal-access').hidden=false;
+    document.body.className='portal-guest';byId('portal-access').hidden=false;byId('logout').hidden=true;byId('floating-sales').hidden=true;
     const activation=new URLSearchParams(location.hash.slice(1)),form=byId('store-login');
     if(activation.has('activate')){
       form.elements.username.value=activation.get('username')||'';
       form.elements.password.autocomplete='new-password';
       byId('activation-note').textContent='Aktifkan akun dengan membuat kata sandi 12–128 karakter. Tautan ini hanya berlaku sekali selama 48 jam.';
-      form.querySelector('button').textContent='Aktifkan akun';
+      form.querySelector('button').textContent='Aktifkan akun';byId('portal-access').querySelector('h2').textContent='Selamat bergabung!';
     }
     form.onsubmit=async event=>{
       event.preventDefault();form.querySelector('button').disabled=true;
@@ -28,7 +28,7 @@
     if(location.hash.startsWith('#activate=')){notice('Selamat datang. Buat kata sandi untuk mengaktifkan toko Anda.');loginView();return;}
     const session=await fetch(endpoint,{credentials:'same-origin',cache:'no-store'}).catch(()=>null);
     if(session?.ok)initialWorkspace=await session.json();
-    if(!session?.ok){notice(session?.status===403?'Tautan ini bukan milik akun Anda. Masuk dengan akun yang sesuai.':'Masuk untuk melihat stok dan pesanan toko Anda.');loginView();return;}
+    if(!session?.ok){notice(session?.status===403?'Tautan ini bukan milik akun Anda. Masuk dengan akun yang sesuai.':'');loginView();return;}
   }
   byId('logout').hidden=false;
   byId('logout').onclick=async()=>{const r=await fetch('/api/distributor?auth=logout',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:'{}'});if(r.ok)location.replace('/distributor');else notice('Gagal keluar. Coba lagi.');};
@@ -209,8 +209,13 @@
     state=await api();
     state.products.sort((a,b)=>Number(b.images.length>0)-Number(a.images.length>0));
     const c=state.customer;
-    byId('customer').textContent=c.name+' · '+c.code;byId('sales').textContent='Sales Anda: '+c.sales;
-    byId('address').textContent=c.address+', '+c.city;byId('workspace').hidden=false;
+    byId('customer').textContent=c.name+' · '+c.code;byId('sales').textContent='Sales Anda: '+(/[\u3400-\u9fff]/.test(c.sales||'')?'Tim LOONG JUMP':c.sales||'Tim LOONG JUMP');
+    byId('address').textContent=c.address+', '+c.city;byId('workspace').hidden=false;document.body.className='portal-member';byId('portal-access').hidden=true;
+    const contact=c.salesContact,available=contact&&/^https:\/\/wa\.me\/[1-9]\d{7,14}\?text=/.test(contact.href||'');
+    byId('sales-card-title').textContent=contact?.name||'Sales partner Anda';
+    byId('sales-contact-note').textContent=available?'Butuh saran produk atau bantuan pesanan? Saya siap membantu.':'Tim Anda tetap mendampingi setiap langkah.';
+    for(const id of ['sales-whatsapp','floating-sales']){const link=byId(id);link.hidden=!available;if(available){link.href=contact.href;link.setAttribute('aria-label','Hubungi '+contact.name+' melalui WhatsApp');}else link.removeAttribute('href');}
+    byId('sales-unavailable').hidden=Boolean(available);
     if(!key){
       key='lj.distributor.pending.'+c.code;
       try{pending=JSON.parse(sessionStorage.getItem(key));}catch{pending=null;}
@@ -236,6 +241,7 @@
     notice(error.status?error.message:'Koneksi terputus. Silakan coba kembali.');
   }
   function clearPending(){pending=null;try{sessionStorage.removeItem(key);}catch{/* optional storage */}}
+  for(const button of document.querySelectorAll('[data-desk]'))button.onclick=()=>{const desk=byId(button.dataset.desk);desk.open=true;desk.scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth',block:'start'});};
   byId('search').oninput=()=>{page=0;renderCatalog();};
   byId('refresh').onclick=()=>{if(!busy){notice('');load().catch(showError);}};
   byId('submit').onclick=async()=>{

@@ -118,6 +118,7 @@ test('分销商家与凭证备份可恢复，历史会话和激活链接不能�
   await f.change(f.users.finance,o.id,'orderApprove',{supplyUserId:f.users.supply.id,stockBasisConfirmed:true,reason:'TEST ONLY 核对库存'});
   await submitDistributorPayment(f.db,files,a.identity,proof(o.order_no));
   const id2=await enroll(f,f.users.sales2);await manageStore(f.db,f.users.admin,{action:'approve',customerId:id2,version:1,reason:'TEST ONLY 备份激活链接'});
+  await mutateDistribution(f.db,f.users.admin,{action:'salesContactSave',userId:f.users.indonesia.id,version:0,displayName:'Rani TEST',whatsapp:'+12025550123'});
   const locked=await backupStream(f.db,files,f.users.admin);
   assert.throws(()=>f.sqlite.prepare('UPDATE distributor_stores SET version=version+1').run(),/maintenance/);
   assert.throws(()=>f.sqlite.prepare('UPDATE distributor_payments SET version=version+1').run(),/maintenance/);await locked.cancel();
@@ -125,9 +126,49 @@ test('分销商家与凭证备份可恢复，历史会话和激活链接不能�
   assert(!manifest.tables.some(t=>['distributor_sessions','distributor_login_attempts'].includes(t.name)));
   await restoreBackup(archive,join(root,'restored'));restored=openDatabase(join(root,'restored/business.sqlite'));
   assert.equal(restored.sqlite.prepare('SELECT COUNT(*) n FROM distributor_stores').get().n,2);
+  assert.equal(restored.sqlite.prepare('SELECT whatsapp FROM distributor_sales_contacts').get().whatsapp,'+12025550123');
   assert.equal(restored.sqlite.prepare('SELECT COUNT(*) n FROM distributor_payments').get().n,1);
   assert.equal(restored.sqlite.prepare('SELECT COUNT(*) n FROM distributor_sessions').get().n,0);
   assert.equal(restored.sqlite.prepare('SELECT activation_hash FROM distributor_stores WHERE customer_id=?').get(id2).activation_hash,null);
   assert((await authenticateDistributor(restored,{username:a.username,password})).token);
  }finally{restored?.sqlite.close();f.sqlite.close();rmSync(root,{recursive:true,force:true});}
+});
+
+test('管理员维护对客 WhatsApp，商家只获得现任负责人的联系信息',async()=>{
+ const f=fixture(),id=await enroll(f),a=await activate(f,id);
+ const get=async()=>{const r=await handleDistributor(request(a),f.db);assert.equal(r.status,200);return r.json();};
+ assert.equal((await get()).customer.salesContact,null);
+ const save={action:'salesContactSave',userId:f.users.indonesia.id,version:0,displayName:'Rani',whatsapp:'+1 (202) 555-0123'};
+ for(const who of [f.users.indonesia,f.users.finance,f.users.sales])await assert.rejects(mutateDistribution(f.db,who,save),{status:403});
+ await mutateDistribution(f.db,f.users.admin,save);
+ const own=(await get()).customer.salesContact;assert.equal(own.name,'Rani');assert.equal(own.whatsapp,'+12025550123');assert.match(own.href,/^https:\/\/wa\.me\/12025550123\?text=/);
+ assert(!own.href.includes(id));assert(!own.href.includes('lj_distributor'));assert(!own.href.includes('Jakarta'));
+ await mutateDistribution(f.db,f.users.admin,{...save,userId:f.users.sales2.id,displayName:'Dewi',whatsapp:'+12025550124'});
+ assert(!(JSON.stringify(await get()).includes('+12025550124')));
+ assert.equal((await readDistribution(f.db,f.users.indonesia)).contacts.length,0);
+ assert.equal((await readDistribution(f.db,f.users.finance)).contacts.length,0);
+ f.sqlite.prepare('UPDATE wholesale_customers SET sales_user_id=? WHERE id=?').run(f.users.sales2.id,id);
+ assert.equal((await get()).customer.salesContact.whatsapp,'+12025550124');
+ await mutateDistribution(f.db,f.users.admin,{...save,userId:f.users.sales2.id,displayName:'Dewi',whatsapp:'',version:1});
+ assert.equal((await get()).customer.salesContact,null);
+ assert.equal((await handleDistributor(request(null),f.db)).status,401);
+});
+
+test('WhatsApp 号码与版本校验，禁用负责人和维护期不能错误发布对外联系人',async()=>{
+ const f=fixture(),save={action:'salesContactSave',userId:f.users.sales.id,version:0,displayName:'Sari',whatsapp:'081234567890'};
+ for(const phone of ['https://wa.me/6281234567890','javascript:alert(1)','6281234567890','+62012','+621234567890123456',null])await assert.rejects(mutateDistribution(f.db,f.users.admin,{...save,whatsapp:phone}),{status:400});
+ await assert.rejects(mutateDistribution(f.db,f.users.admin,{...save,displayName:'销售甲'}),{status:400});
+ await assert.rejects(mutateDistribution(f.db,f.users.admin,{...save,userId:f.users.finance.id}));
+ await mutateDistribution(f.db,f.users.admin,save);
+ assert.equal(f.sqlite.prepare('SELECT whatsapp FROM distributor_sales_contacts').get().whatsapp,'+6281234567890');
+ await assert.rejects(mutateDistribution(f.db,f.users.admin,{...save,whatsapp:'+12025550124'}));
+ assert.equal(f.sqlite.prepare('SELECT version FROM distributor_sales_contacts').get().version,1);
+ const {distributorSalesContact}=await import('../lib/distributor-sales-contacts.mjs');
+ f.sqlite.prepare('UPDATE users SET active=0 WHERE id=?').run(f.users.sales.id);
+ assert.equal(await distributorSalesContact(f.db,f.users.sales.id),null);
+ await assert.rejects(mutateDistribution(f.db,f.users.admin,{...save,version:1}));
+ f.sqlite.prepare('UPDATE users SET active=1 WHERE id=?').run(f.users.sales.id);
+ f.sqlite.prepare("INSERT INTO system_maintenance(id,mode,expires_at,actor_id,updated_at) VALUES('global','backup',?,'admin-1',?) ON CONFLICT(id) DO UPDATE SET mode=excluded.mode,expires_at=excluded.expires_at").run(new Date(Date.now()+60000).toISOString(),new Date().toISOString());
+ await assert.rejects(mutateDistribution(f.db,f.users.admin,{...save,version:1,whatsapp:''}));
+ assert.equal(f.sqlite.prepare('SELECT whatsapp FROM distributor_sales_contacts').get().whatsapp,'+6281234567890');
 });
