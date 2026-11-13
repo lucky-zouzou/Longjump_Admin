@@ -1,4 +1,5 @@
 "use client";
+import SkuLabel from './sku-label';
 import {useEffect,useState} from 'react';
 import {historyColumn,historyValue} from '../lib/history-query.mjs';
 type Row=Record<string,any>;
@@ -16,6 +17,6 @@ export default function HistoryBrowser({kind,actor,refreshToken,actions}:{kind:s
       <label>关键词<input type="search" placeholder={kind==='audit'?'操作 / 对象 / 操作人':'SKU / 凭证 / 文件名称'} value={draft.search} onChange={e=>setDraft({...draft,search:e.target.value})}/></label><button className="btn primary" disabled={busy}>查询</button>
     </form>
     {error&&<p className="notice error" role="alert">{error}</p>}{busy&&<p role="status">正在读取当前筛选…</p>}
-    {result&&!busy&&<><div className="history-result-meta">共 {result.total.toLocaleString()} 条 · 第 {result.page} / {result.pages} 页 · 每页 {result.pageSize} 条</div><div className="table-wrap"><table><thead><tr>{columns.map((k:string)=><th key={k}>{historyColumn(k)}</th>)}{actions&&<th>操作</th>}</tr></thead><tbody>{result.rows.map((r:Row)=><tr key={r.id}>{columns.map((k:string)=><td key={k}>{k==='detail_json'?<details><summary>查看变更内容</summary><pre className="history-json">{detailText(r[k])}</pre></details>:String(historyValue(k,r[k])??'—')}</td>)}{actions&&<td>{actions(r)}</td>}</tr>)}{!result.rows.length&&<tr><td colSpan={columns.length+1}>当前筛选没有记录，可扩大日期范围。</td></tr>}</tbody></table></div><div className="report-pagination"><button className="btn" disabled={result.page<=1} onClick={()=>setPage(result.page-1)}>上一页</button><span>{result.page} / {result.pages}</span><button className="btn" disabled={result.page>=result.pages} onClick={()=>setPage(result.page+1)}>下一页</button></div></>}
+    {result&&!busy&&<><div className="history-result-meta">共 {result.total.toLocaleString()} 条 · 第 {result.page} / {result.pages} 页 · 每页 {result.pageSize} 条</div><div className="table-wrap"><table><thead><tr>{columns.map((k:string)=><th key={k}>{historyColumn(k)}</th>)}{actions&&<th>操作</th>}</tr></thead><tbody>{result.rows.map((r:Row)=><tr key={r.id}>{columns.map((k:string)=><td key={k}>{k==='sku'?<SkuLabel sku={r[k]}/>:k==='detail_json'?<details><summary>查看变更内容</summary><pre className="history-json">{detailText(r[k])}</pre></details>:String(historyValue(k,r[k])??'—')}</td>)}{actions&&<td>{actions(r)}</td>}</tr>)}{!result.rows.length&&<tr><td colSpan={columns.length+1}>当前筛选没有记录，可扩大日期范围。</td></tr>}</tbody></table></div><div className="report-pagination"><button className="btn" disabled={result.page<=1} onClick={()=>setPage(result.page-1)}>上一页</button><span>{result.page} / {result.pages}</span><button className="btn" disabled={result.page>=result.pages} onClick={()=>setPage(result.page+1)}>下一页</button></div></>}
   </section>;
 }

@@ -78,7 +78,7 @@ test('asset contribution uses latest verified finance and preserves unknown cost
 
 test('only independently reviewed experience is shared across countries without private contacts or ledger data',async()=>{
  const f=await setup(),id=await f.create();await f.accept(id);const r=await completedRound(f,id);await f.finance(id,r);
- await assert.rejects(()=>f.act(f.users.bd,'caseCreate',casePayload(f,r,{shareConfirmed:false})),/公司五站/);
+ const draft=(await f.act(f.users.bd,'caseCreate',{roundId:r,version:f.r(r).version})).id;assert.equal(bookRow(f,draft).status,'pending');await assert.rejects(()=>f.act(f.users.admin,'caseReview',{playbookId:draft,version:1,decision:'approve',note:'尚未确认共享范围'}),/公司共享/);
  const b=(await f.act(f.users.bd,'caseCreate',casePayload(f,r))).id;assert.equal((await readCreators(f.db,f.users.bd2)).playbooks.length,0);
  await assert.rejects(()=>f.act(f.users.bd,'caseReview',{playbookId:b,version:1,decision:'approve',note:'自行审核'}),/组长|管理员/);
  const self=(await f.act(f.users.admin,'caseCreate',casePayload(f,r,{title:'管理员撰写'}))).id;

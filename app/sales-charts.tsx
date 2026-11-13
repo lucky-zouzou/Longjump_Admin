@@ -1,4 +1,5 @@
 "use client";
+import SkuLabel from './sku-label';
 import {useId,useMemo,useState} from 'react';
 import {chartDays,chartScale} from '../lib/sales-charts.mjs';
 type Row=Record<string,any>;
@@ -31,7 +32,7 @@ export function RankingBars({rows,valueKey,labelKey='sku',unit='件',color='blue
   if(!items.length)return <div className="chart-empty">暂无可展示数据</div>;
   return <div className={`ranking-bars ${negative?'has-negative':''}`} role="list" aria-label={`${unit==='×'?'投产比':'数量'}排名，显示前${limit}名`}>
     {items.map((r,i)=>{const value=Number(r[valueKey])||0,label=String(r[labelKey]||'—'),width=Math.abs(value)/max*(negative?50:100),start=negative?(value<0?50-width:50):0;
-      return <div className="ranking-bar-row" role="listitem" key={`${label}-${i}`}><span className={`ranking-position ${i<3?'leading':''}`}>{r.rank??i+1}</span><div className="ranking-main"><div className="ranking-caption">{onSelect?<button onClick={()=>onSelect(r.sku)} title={r.name||label}>{label}</button>:<span>{label}</span>}<strong>{fmt(value)} <small>{unit}</small></strong></div><div className="ranking-track"><span className={`ranking-fill ${color} ${value<0?'negative':''}`} style={{width:`${width}%`,left:`${start}%`,...(color==='mixed'?{background:['#3763eb','#17a58c','#8a66d9','#e39b23','#56788d'][i%5]}:{})}}/>{negative&&<i className="ranking-zero"/>}</div></div></div>;
+      return <div className="ranking-bar-row" role="listitem" key={`${label}-${i}`}><span className={`ranking-position ${i<3?'leading':''}`}>{r.rank??i+1}</span><div className="ranking-main"><div className="ranking-caption">{onSelect?<button onClick={()=>onSelect(r.sku)} title={r.name||label}>{labelKey==='sku'?<SkuLabel sku={r.sku} preview={false}/>:label}</button>:<span>{labelKey==='sku'?<SkuLabel sku={r.sku}/>:label}</span>}<strong>{fmt(value)} <small>{unit}</small></strong></div><div className="ranking-track"><span className={`ranking-fill ${color} ${value<0?'negative':''}`} style={{width:`${width}%`,left:`${start}%`,...(color==='mixed'?{background:['#3763eb','#17a58c','#8a66d9','#e39b23','#56788d'][i%5]}:{})}}/>{negative&&<i className="ranking-zero"/>}</div></div></div>;
     })}
   </div>;
 }

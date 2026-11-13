@@ -1,4 +1,6 @@
 "use client";
+import SkuLabel from './sku-label';
+
 
 import {useDirtyGuard} from "./workspace-hooks";
 import {useState} from "react";
@@ -43,7 +45,7 @@ function PlanCard({row,data,act,busy,goInventory}:{row:Row;data:Row;act:Act;busy
     {pending&&<div className={`notice ${own&&admin?"warn":"info"}`}>{own&&admin?"这张计划由您送审，不能自行批准或驳回。请先撤回，再由供应链账号重新送审，之后您就可以审批。":own?"您是本次送审人，等待管理员审批。需要调整时可以撤回。":admin?"请核对计划明细；批准时指定供应链负责人，驳回时填写原因。":"当前等待管理员审批；供应链账号负责送审和执行，不负责审批。"}</div>}
     {["withdrawn","rejected"].includes(row.status)&&<div className="notice info">运营已提交的需求保留，可以调整后再次提交；由供应链账号核对并重新送审，再交管理员审批。</div>}
     {row.status==="approved"&&<p className="cell-note">已进入采购与生产流程；后续数量调整请到月度计划提交变更审批。</p>}
-    <details className="approval-detail"><summary>查看本版计划明细（{items.length} 个 SKU）</summary><div className="table-wrap"><table><thead><tr><th>SKU / 商品</th><th>站点 / 渠道分配</th><th className="num">总数量</th></tr></thead><tbody>{items.length?items.map((item:Row)=><tr key={item.sku}><td><strong>{item.sku}</strong><div className="cell-note">{item.name}</div></td><td>{(item.allocations||[]).map((a:Row)=><div key={`${a.site}-${a.channel}`}>{a.site} · {a.channel}：{format(a.qty)} 件</div>)}</td><td className="num">{format(item.total)}</td></tr>):<tr><td colSpan={3}>本月已确认无备货需求</td></tr>}</tbody></table></div></details>
+    <details className="approval-detail"><summary>查看本版计划明细（{items.length} 个 SKU）</summary><div className="table-wrap"><table><thead><tr><th>SKU / 商品</th><th>站点 / 渠道分配</th><th className="num">总数量</th></tr></thead><tbody>{items.length?items.map((item:Row)=><tr key={item.sku}><td><strong><SkuLabel sku={item.sku}/></strong><div className="cell-note">{item.name}</div></td><td>{(item.allocations||[]).map((a:Row)=><div key={`${a.site}-${a.channel}`}>{a.site} · {a.channel}：{format(a.qty)} 件</div>)}</td><td className="num">{format(item.total)}</td></tr>):<tr><td colSpan={3}>本月已确认无备货需求</td></tr>}</tbody></table></div></details>
     {!mode&&<div className="approval-actions">
       {canWithdraw&&<button className="btn danger" disabled={busy} onClick={()=>open("withdraw")}>撤回本人计划</button>}
       {canResubmit&&<PurchasePreparation month={row.month} planVersion={row.version} act={act} busy={busy}/>}
@@ -59,7 +61,7 @@ function PlanCard({row,data,act,busy,goInventory}:{row:Row;data:Row;act:Act;busy
       {error&&<div className="notice error" role="alert">{error}</div>}
       <div className="approval-actions"><button type="button" className="btn" disabled={busy} onClick={()=>setMode("")}>取消操作</button><button type="submit" className={`btn ${["withdraw","reject"].includes(mode)?"danger":"primary"}`} disabled={busy||(mode==="resubmit"?complete!==10:comment.trim().length<(mode==="withdraw"?4:3))||(mode==="approve"&&(!supplyUserId||!inventoryCheck||inventoryCheck.blocking>0||(inventoryCheck.warnings>0&&!inventoryCheck.ack)))}>{busy?"处理中…":mode==="withdraw"?"确认撤回":mode==="resubmit"?"确认由我重新送审":mode==="approve"?"确认批准":"确认驳回"}</button></div>
     </form>}
-    <details className="approval-detail approval-history"><summary>操作记录（{(row.history||[]).length}）</summary>{row.history?.length?<ol>{row.history.map((entry:Row)=><li key={entry.id}><div><strong>{entry.action}</strong>{entry.version!=null&&<span>V{entry.version}</span>}<time>{date(entry.createdAt)}</time></div><p>{entry.actorName}{entry.comment?` · ${entry.comment}`:""}</p>{entry.inventoryReview?.issues?.length>0&&<details><summary>库存预警确认记录（{entry.inventoryReview.issues.length} 项）</summary>{entry.inventoryReview.issues.map((r:Row)=><p key={JSON.stringify([r.sku,r.site,r.channel])}>{r.sku} · {r.site} · {r.channel}：账面 {r.qty}，预留 {r.reserved_qty}；{r.reason}</p>)}</details>}{entry.totalQty!=null&&<p>{entry.seriesCount} 个系列 · {entry.skuCount} 个 SKU · {format(entry.totalQty)} 件</p>}</li>)}</ol>:<p>暂无历史操作日志。原送审人：{row.creator_name||"历史账号"}，创建时间：{date(row.created_at)}；后续操作会逐项记录。</p>}</details>
+    <details className="approval-detail approval-history"><summary>操作记录（{(row.history||[]).length}）</summary>{row.history?.length?<ol>{row.history.map((entry:Row)=><li key={entry.id}><div><strong>{entry.action}</strong>{entry.version!=null&&<span>V{entry.version}</span>}<time>{date(entry.createdAt)}</time></div><p>{entry.actorName}{entry.comment?` · ${entry.comment}`:""}</p>{entry.inventoryReview?.issues?.length>0&&<details><summary>库存预警确认记录（{entry.inventoryReview.issues.length} 项）</summary>{entry.inventoryReview.issues.map((r:Row)=><p key={JSON.stringify([r.sku,r.site,r.channel])}><SkuLabel sku={r.sku}/> · {r.site} · {r.channel}：账面 {r.qty}，预留 {r.reserved_qty}；{r.reason}</p>)}</details>}{entry.totalQty!=null&&<p>{entry.seriesCount} 个系列 · {entry.skuCount} 个 SKU · {format(entry.totalQty)} 件</p>}</li>)}</ol>:<p>暂无历史操作日志。原送审人：{row.creator_name||"历史账号"}，创建时间：{date(row.created_at)}；后续操作会逐项记录。</p>}</details>
   </article>;
 }
 

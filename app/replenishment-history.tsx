@@ -1,4 +1,6 @@
 "use client";
+import SkuLabel from './sku-label';
+
 import {useEffect,useId,useState} from 'react';
 import {HISTORY_CHANNELS,HISTORY_SITES,previousPlanMonth} from '../lib/replenishment-history.mjs';
 import {parseWorkspaceResponse} from '../lib/workspace-response.mjs';
@@ -53,7 +55,7 @@ export default function ReplenishmentHistory({actor,currentMonth,refreshToken}:{
           <div className="rh-submissions">{data.submissions.map(s=><div className="rh-submission" key={s.id}><div><strong>{s.site} · {s.channel}</strong><span>{s.zeroDemand?'已确认无需备货':`${s.skuCount} 款 · ${fmt(s.totalQty)} 件`}</span></div><p>{s.actorName} · 提交 V{s.version} · {time(s.submittedAt)}（北京时间）</p>{s.zeroDemand&&<p>无需备货说明：{s.zeroReason||'未记录说明'}</p>}</div>)}</div>
           {!data.submissions.length&&<p className="notice info">该范围有审批计划分配，未找到运营提交明细；提交量显示为“—”。</p>}
           <div className="rh-detail-heading"><h4>SKU 补货明细</h4><label><span className="sr-only">搜索历史补货 SKU</span><input type="search" placeholder="搜索 SKU、商品、调整原因" value={search} onChange={e=>{setSearch(e.target.value);setPage(1);}}/></label></div>
-          <div className="table-wrap"><table><thead><tr><th>SKU / 商品</th><th>站点 / 渠道</th><th className="num">运营提交量</th><th className="num">{planQtyLabel}</th><th>运营调整原因</th></tr></thead><tbody>{rows.slice((visiblePage-1)*30,visiblePage*30).map(row=><tr key={row.id}><td><strong>{row.sku}</strong><span className="rh-product-name">{row.name||'—'}</span></td><td>{row.site}<span className="rh-product-name">{row.channel}</span></td><td className="num">{fmt(row.submittedQty)}</td><td className={'num '+(row.planQty!==null&&row.submittedQty!==null&&row.planQty!==row.submittedQty?'rh-changed':'')}>{fmt(row.planQty)}</td><td className="rh-reason">{row.reason||'—'}</td></tr>)}{!rows.length&&<tr><td colSpan={5} className="rh-empty">{search?'没有匹配的 SKU，请调整搜索词。':'本月无 SKU 补货明细，请查看上方无需备货说明。'}</td></tr>}</tbody></table></div>
+          <div className="table-wrap"><table><thead><tr><th>SKU / 商品</th><th>站点 / 渠道</th><th className="num">运营提交量</th><th className="num">{planQtyLabel}</th><th>运营调整原因</th></tr></thead><tbody>{rows.slice((visiblePage-1)*30,visiblePage*30).map(row=><tr key={row.id}><td><strong><SkuLabel sku={row.sku}/></strong><span className="rh-product-name">{row.name||'—'}</span></td><td>{row.site}<span className="rh-product-name">{row.channel}</span></td><td className="num">{fmt(row.submittedQty)}</td><td className={'num '+(row.planQty!==null&&row.submittedQty!==null&&row.planQty!==row.submittedQty?'rh-changed':'')}>{fmt(row.planQty)}</td><td className="rh-reason">{row.reason||'—'}</td></tr>)}{!rows.length&&<tr><td colSpan={5} className="rh-empty">{search?'没有匹配的 SKU，请调整搜索词。':'本月无 SKU 补货明细，请查看上方无需备货说明。'}</td></tr>}</tbody></table></div>
           <div className="rh-pagination"><span>共 {rows.length} 条站点渠道明细 · 数量单位：件</span><div><button className="btn" disabled={visiblePage<=1} onClick={()=>setPage(visiblePage-1)}>上一页</button><span>{visiblePage} / {pages}</span><button className="btn" disabled={visiblePage>=pages} onClick={()=>setPage(visiblePage+1)}>下一页</button></div></div>
         </>}
       </>}

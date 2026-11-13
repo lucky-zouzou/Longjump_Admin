@@ -94,3 +94,39 @@ test('同批十二个成片共用实拍需求与两个站点，禁止错配产�
   assert.ok(list.items.every(row=>row.script_id===source&&row.sites.length===1&&row.sites[0].site==='印尼'));
   assert.equal((await f.list(f.users.malaysia,{status:'pending'})).total,12);
 });
+
+test('成片元数据单独修订，替换完成才切换原片且重新收件，删除保留历史',async t=>{
+ const f=setup(t),id=f.users.indonesia;
+ await f.upload({...f.meta,metadata:{productName:'演示通勤包',colors:['黑色'],directions:['容量展示'],sellingPoints:['大容量']}});
+ const original=(await f.list(id)).items[0];assert.equal(original.metadata.productName,'演示通勤包');
+ await assert.rejects(f.modify(id,'edit',{version:1,title:'越权',sku:f.meta.sku}),{status:403});
+ await f.modify(f.camera,'edit',{version:1,title:'已修正名称',sku:f.meta.sku,metadata:{productName:'更新产品名',colors:['自定义色']}});
+ await assert.rejects(f.modify(f.camera,'edit',{version:1,title:'旧版本',sku:f.meta.sku}),{status:409});
+ assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM content_material_parts').get().n,1);
+ await f.modify(id,'downloaded',{site:'印尼'});
+ const replacement={...f.meta,id:crypto.randomUUID(),replacesId:f.meta.id,replacesRevision:2,size:partBytes+4};
+ const first=new Uint8Array(partBytes);first.set(f.data);
+ await f.upload(replacement,first);
+ assert.equal((await f.list(id)).items[0].id,f.meta.id);
+ await f.upload(replacement,new Uint8Array([1,2,3,4]),1);
+ await f.upload(replacement,new Uint8Array([1,2,3,4]),1);
+ const next=(await f.list(id)).items[0];assert.equal(next.id,replacement.id);assert.equal(next.sites[0].status,'pending');
+ const old=(await f.list(f.camera,{archived:'1'})).items[0];assert.equal(old.title,'已修正名称');assert.equal(old.sites[0].status,'downloaded');
+ await assert.rejects(f.modify(id,'delete',{ids:[next.id]}),{status:403});
+ await f.modify(f.camera,'delete',{ids:[next.id]});assert.equal((await f.list(id)).total,0);
+ assert.equal((await f.list(f.camera,{archived:'1'})).total,2);
+});
+
+test('替换期间原片分发变化会阻止覆盖；选项维护限管理员并校验版本',async t=>{
+ const f=setup(t);await f.upload();
+ const replacement={...f.meta,id:crypto.randomUUID(),replacesId:f.meta.id,replacesRevision:1,size:partBytes+4};
+ const first=new Uint8Array(partBytes);first.set(f.data);await f.upload(replacement,first);
+ await f.modify(f.camera,'assign',{sites:['马来西亚']});
+ await assert.rejects(f.upload(replacement,new Uint8Array([1,2,3,4]),1),{status:409});
+ assert.equal((await f.list(f.users.malaysia)).items[0].id,f.meta.id);
+ const options={colors:['红色','自定义'],directions:['测评'],sellingPoints:[]};
+ await assert.rejects(f.modify(f.camera,'options',{version:0,options}),{status:403});
+ await f.modify(f.users.admin,'options',{version:0,options});
+ await assert.rejects(f.modify(f.users.admin,'options',{version:0,options}),{status:409});
+ assert.deepEqual((await f.list(f.camera)).options,{version:1,values:options});
+});

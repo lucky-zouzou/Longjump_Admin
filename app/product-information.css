@@ -25,6 +25,20 @@
   color:#718397;
   font-size:12px
 }
+.pi-effective {
+  margin:16px 0 0;
+  line-height:1.7;
+  color:#567084
+}
+.pi-live {
+  color:#247557;
+  font-weight:600
+}
+.pi-cost-references {
+  border-top:1px solid #e7edf3;
+  margin-top:24px;
+  padding-top:10px
+}
 .pi-summary {
   display:flex;
   flex-wrap:wrap;
@@ -92,7 +106,7 @@
 }
 .product-info table {
   font-size:12px;
-  min-width:800px
+  min-width:920px
 }
 .product-info td,.product-info th {
   padding:13px 10px

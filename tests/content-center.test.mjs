@@ -67,3 +67,13 @@ test('重复提交、维护锁、越权与 AI 返工：成片修订保留旧版'
  f.sqlite.prepare("INSERT OR REPLACE INTO system_maintenance(id,mode,actor_id,expires_at,updated_at) VALUES('global','backup','test',?,?)").run(ago(-1),ago(0));
  await assert.rejects(f.act(f.users.malaysia,'create',base),{status:409});f.sqlite.close();
 });
+
+test('精简需求可保存，效果记录保留加购与出单数据，缺失不变成零',async()=>{
+ const f=contentFixture();const created=await f.act(f.users.indonesia,'create',{source:'studio',site:'印尼',sku:'BAG-A',title:'容量演示',scene:'公司静拍',due:date()});
+ assert.equal(f.current('content_scripts',created.id).brief,'');
+ const {post}=await original(f);
+ await f.act(f.users.malaysia,'observe',{postId:post,version:2,days:7,observedAt:ago(0),views:100,clicks:20,cartAdds:6,orders:2,evidence:'平台效果截图',note:'完整7天数据'});
+ const d=await readCenter(f.db,f.camera),metric=d.metrics.find(m=>m.post_id===post);assert.equal(metric.cart_adds,6);assert.equal(metric.orders,2);
+ await f.act(f.users.malaysia,'observe',{postId:post,version:3,days:7,observedAt:ago(0),views:100,evidence:'修订口径',note:'加购和订单暂缺'});
+ assert.equal((await readCenter(f.db,f.camera)).metrics.find(m=>m.post_id===post&&m.revision===2).cart_adds,null);f.sqlite.close();
+});

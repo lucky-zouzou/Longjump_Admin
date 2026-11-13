@@ -137,6 +137,7 @@ export async function GET(request:Request) {
     const requestedModule=requestUrl.searchParams.get("module")||(actor.role==="达人BD"?"creators":actor.role==="拍摄剪辑"?"content-center":"");
     const module=requestedModule==="home"?(mobileModules(actor.role)[0]||"overview"):requestedModule;
     if(module&&!navigationForRole(actor.role).includes(module))throw new HttpError(403,"当前账号无权打开此工作区");
+    const needs=(field:string)=>!module||(MODULE_FIELDS[module as keyof typeof MODULE_FIELDS] as readonly string[]|undefined)?.includes(field);
     const forecastTrend=requestUrl.searchParams.get("forecastTrend");
     if(forecastTrend){
       if(!navigationForRole(actor.role).includes("suggestions"))throw new HttpError(403,"无权查看补货趋势");
@@ -145,7 +146,7 @@ export async function GET(request:Request) {
       return Response.json({dailySeries:row.dailySeries,generatedAt:nowIso()});
     }
     // Independent workspaces fetch their own ledgers; avoid constructing the global forecast.
-    if(["content-center","creators","cost-profit","sales-targets","wholesale","reviews","after-sales","quality-incidents","promotions","business-actions","audit","users","permissions","production-tracking"].includes(module)){
+    if(["clearance","content-center","creators","cost-profit","sales-targets","wholesale","reviews","after-sales","quality-incidents","promotions","business-actions","audit","users","permissions","production-tracking"].includes(module)){
       const empty=Object.fromEntries([...new Set(Object.values(MODULE_FIELDS).flat())].filter(key=>!["currentMonth","metrics"].includes(key)).map(key=>[key,[]]));
       const users=["users","permissions"].includes(module)?await all("SELECT id,email,name,role,site,channel,responsibility_unit,active,created_at,updated_at FROM users ORDER BY created_at"):[];
       const tracking=module==="production-tracking"?productionTracking(...await Promise.all([all("SELECT * FROM series_production_orders"),all("SELECT * FROM series_production_order_items"),all("SELECT * FROM series_purchase_orders"),all("SELECT entity_id,created_at,actor_name FROM audit_logs WHERE entity_type='series_production_order' AND action='生成工厂订单导出' ORDER BY created_at")]) as [AnyRow[],AnyRow[],AnyRow[],AnyRow[]]):[];
@@ -471,7 +472,7 @@ export async function GET(request:Request) {
     const myTasks:AnyRow[]=await workspaceTasks(database(),actor);
     // Only the two roles that can read approval records receive their timeline.
     const approvalHistory=new Map<string,AnyRow[]>();
-    if(["管理员","供应链"].includes(actor.role)&&approvals.length){
+    if(needs("approvals")&&["管理员","供应链"].includes(actor.role)&&approvals.length){
       const history=await all("SELECT a.id,a.entity_id,a.action,a.actor_id,a.actor_name,a.created_at,a.detail_json FROM audit_logs a JOIN approval_requests r ON r.id=a.entity_id WHERE a.entity_type='approval' AND r.type='monthly_plan' AND (r.status IN ('pending','withdrawn','rejected') OR r.id IN (SELECT id FROM approval_requests ORDER BY created_at DESC LIMIT 100)) ORDER BY a.created_at,a.id");
       for(const entry of history){
         const detail=parseJson<AnyRow>(entry.detail_json,{}),events=approvalHistory.get(entry.entity_id)||[];
@@ -487,17 +488,23 @@ export async function GET(request:Request) {
     })):[];
     return Response.json(publicSystemSnapshot(moduleSnapshot({
       actor, currentMonth, metrics, myTasks, generatedAt:new Date().toISOString(),
-      productionTracking:canReadDomain(actor.role,"production_tracking")?productionTracking(productionOrderRows,productionItemRows,purchaseOrderRows,await all("SELECT entity_id,created_at,actor_name FROM audit_logs WHERE entity_type='series_production_order' AND action='生成工厂订单导出' ORDER BY created_at")):[],
-      adSpend:hasPermission(actor.role,"sales.ad_spend")?await all(`SELECT * FROM sales_ad_spend${scope.clause} ORDER BY business_date DESC`,scope.args):[],
+      productionTracking:needs("productionTracking")&&canReadDomain(actor.role,"production_tracking")?productionTracking(productionOrderRows,productionItemRows,purchaseOrderRows,await all("SELECT entity_id,created_at,actor_name FROM audit_logs WHERE entity_type='series_production_order' AND action='生成工厂订单导出' ORDER BY created_at")):[],
+      adSpend:needs("adSpend")&&hasPermission(actor.role,"sales.ad_spend")?await all(`SELECT * FROM sales_ad_spend${scope.clause} ORDER BY business_date DESC`,scope.args):[],
       inventory:canReadDomain(actor.role,"inventory")?inventory:[],
       movements:canReadDomain(actor.role,"inventory")?movements:[],
       sales:canReadDomain(actor.role,"sales")?sales:[],
       imports:canReadDomain(actor.role,"sales")?imports:[],
       receipts:canReadDomain(actor.role,"inventory")?receipts:[],
-      inboundDocuments:await readInboundDocuments(database(),actor),
+      inboundDocuments:needs("inboundDocuments")?await readInboundDocuments(database(),actor):[],
       supplyPolicies:canReadDomain(actor.role,"planning")?policies:[],
-      forecastHistory:canReadDomain(actor.role,"planning")?(await all(`SELECT f.*,COALESCE((SELECT SUM(s.qty) FROM sales_records s WHERE s.sku=f.sku AND s.site=f.site AND s.channel=f.channel AND substr(s.business_date,1,7)=f.month AND s.reversed_at IS NULL),0)-COALESCE((SELECT SUM(c.return_qty) FROM sales_demand_corrections c WHERE c.sku=f.sku AND c.site=f.site AND c.channel=f.channel AND substr(c.business_date,1,7)=f.month),0) actual_sales FROM forecast_snapshots f${actor.role==="运营"?" WHERE f.site=? AND f.channel=?":""} ORDER BY month DESC`,actor.role==="运营"?[actor.site,actor.channel]:[])).map((r:AnyRow)=>{const model=parseJson<AnyRow>(r.model_json,{});return {...r,system_qty:model.suggestedProduction===null?null:r.system_qty,forecast_sales:model.forecastReady===false?null:r.forecast_sales};}):[],
-      planChanges: ["管理员","供应链"].includes(actor.role)?(await all("SELECT * FROM plan_changes ORDER BY created_at DESC")).map(r=>({...r,old:parseJson(r.old_json,{}),next:parseJson(r.new_json,{})})):[],
+      forecastHistory:needs("forecastHistory")&&canReadDomain(actor.role,"planning")?(await all(`WITH sales AS (
+        SELECT sku,site,channel,substr(business_date,1,7) month,SUM(qty) qty FROM sales_records WHERE reversed_at IS NULL GROUP BY sku,site,channel,substr(business_date,1,7)
+      ), corrections AS (
+        SELECT sku,site,channel,substr(business_date,1,7) month,SUM(return_qty) qty FROM sales_demand_corrections GROUP BY sku,site,channel,substr(business_date,1,7)
+      ) SELECT f.*,COALESCE(s.qty,0)-COALESCE(c.qty,0) actual_sales FROM forecast_snapshots f
+        LEFT JOIN sales s ON s.sku=f.sku AND s.site=f.site AND s.channel=f.channel AND s.month=f.month
+        LEFT JOIN corrections c ON c.sku=f.sku AND c.site=f.site AND c.channel=f.channel AND c.month=f.month${actor.role==="运营"?" WHERE f.site=? AND f.channel=?":""} ORDER BY f.month DESC`,actor.role==="运营"?[actor.site,actor.channel]:[])).map((r:AnyRow)=>{const model=parseJson<AnyRow>(r.model_json,{});return {...r,system_qty:model.suggestedProduction===null?null:r.system_qty,forecast_sales:model.forecastReady===false?null:r.forecast_sales};}):[],
+      planChanges: needs("planChanges")&&["管理员","供应链"].includes(actor.role)?(await all("SELECT * FROM plan_changes ORDER BY created_at DESC")).map(r=>({...r,old:parseJson(r.old_json,{}),next:parseJson(r.new_json,{})})):[],
       submissions:canReadDomain(actor.role,"planning")?submissions.map((r) => ({ ...r, items:parseJson(r.items_json, []) })):[],
       approvals:canReadDomain(actor.role,"planning")?approvals.map((r) => ({ ...r, payload:parseJson(r.payload_json, {}),history:approvalHistory.get(r.id)||[] })):[],
       batches:canReadDomain(actor.role,"transport")?visibleBatches:[],

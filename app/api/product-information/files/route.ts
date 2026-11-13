@@ -31,10 +31,14 @@ function failure(error: unknown) {
 export async function GET(request: Request) {
     try {
         await ensureSchema();
-        const actor = await requireActor(request), file = await readProductImage(database(), actor, new URL(request.url).searchParams.get('id') || ''), object = await bucket().get(file.object_key);
+        const actor = await requireActor(request), file = await readProductImage(database(), actor, new URL(request.url).searchParams.get('id') || '');
+        // Revalidate permissions before serving a cached image, without retransmitting bytes.
+        const etag = `"${file.sha256}"`, cache = { 'Cache-Control': 'private, no-cache', ETag: etag };
+        if (request.headers.get('if-none-match') === etag) return new Response(null, { status: 304, headers: cache });
+        const object = await bucket().get(file.object_key);
         if (!object)
             throw new HttpError(404, '图片文件暂不可用');
-        return new Response(object.body, { headers: { 'Content-Type': file.content_type, 'Content-Disposition': `inline; filename*=UTF-8''${encodeURIComponent(file.name)}`, 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'none'; sandbox" } });
+        return new Response(object.body, { headers: { 'Content-Type': file.content_type, 'Content-Disposition': `inline; filename*=UTF-8''${encodeURIComponent(file.name)}`, ...cache, 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'none'; sandbox" } });
     }
     catch (error) {
         return failure(error);

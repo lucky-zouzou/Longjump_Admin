@@ -1,4 +1,6 @@
 "use client";
+import SkuLabel from './sku-label';
+
 import {useEffect,useMemo,useState} from 'react';
 import {SalesTrend,RankingBars} from './sales-charts';
 import SalesCnySummary from './sales-cny-summary';
@@ -80,13 +82,13 @@ export default function SalesDashboard({actor,refreshToken}:{actor:Row;refreshTo
         <RankingBars rows={report.skuRanking} valueKey="qty" onSelect={sku=>setSearch(search===sku?"":sku)}/>
         <details className="chart-details" open={search?true:undefined}><summary>查看完整销量排名与商品明细</summary>
         <label className="report-search">搜索SKU或商品<input type="search" placeholder="输入SKU或商品名称" value={search} onChange={e=>setSearch(e.target.value)}/></label>
-        <ReportTable rows={rankings} columns={[{label:'排名',render:r=><span className={r.rank<=3?'rank-medal':''}>{r.rank}</span>},{label:'SKU / 商品',render:r=><><strong>{r.sku}</strong><small className="report-secondary">{r.name}</small></>},{label:'销售总数量',numeric:true,render:r=><strong>{number(r.qty)}</strong>},{label:'销量占比',numeric:true,render:r=>r.share==null?'—':`${number(r.share*100)}%`},{label:'覆盖站点',numeric:true,render:r=>number(r.siteCount)}]}/></details>
+        <ReportTable rows={rankings} columns={[{label:'排名',render:r=><span className={r.rank<=3?'rank-medal':''}>{r.rank}</span>},{label:'SKU / 商品',render:r=><><strong><SkuLabel sku={r.sku}/></strong><small className="report-secondary">{r.name}</small></>},{label:'销售总数量',numeric:true,render:r=><strong>{number(r.qty)}</strong>},{label:'销量占比',numeric:true,render:r=>r.share==null?'—':`${number(r.share*100)}%`},{label:'覆盖站点',numeric:true,render:r=>number(r.siteCount)}]}/></details>
       </Panel>
       <Panel title={`SKU投产比排名 · ${selected==='UNKNOWN'?'历史未标币种':selected}`} desc="按同一SKU在所选范围的销售额合计 ÷ 投放成本合计排序；只有准确归属到SKU的成本用于此榜；成本未知不排名，渠道总费用不分摊。">
         <RankingBars rows={roiRows.filter((r:Row)=>r.roas!==null)} valueKey="roas" unit="×" color="teal"/>
         <details className="chart-details"><summary>查看完整投产比与未排名商品</summary>
         <label className="report-toggle"><input type="checkbox" checked={showUnranked} onChange={e=>setShowUnranked(e.target.checked)}/>同时显示未填报和无投放SKU（不排名）</label>
-        <ReportTable rows={roiRows} empty="暂无符合条件的SKU：请导入实际销售额及大于0的投放成本" columns={[{label:'排名',render:r=>r.rank??'—'},{label:'SKU',render:r=><strong>{r.sku}</strong>},...moneyColumns]}/></details>
+        <ReportTable rows={roiRows} empty="暂无符合条件的SKU：请导入实际销售额及大于0的投放成本" columns={[{label:'排名',render:r=>r.rank??'—'},{label:'SKU',render:r=><strong><SkuLabel sku={r.sku}/></strong>},...moneyColumns]}/></details>
       </Panel>
       </div>
       <details className="panel chart-details"><summary>每日销售明细 · {selected}</summary><ReportTable rows={daily} columns={[{label:`日期 · ${selected}`,render:r=>r.date},...moneyColumns]}/></details>
@@ -99,7 +101,7 @@ export default function SalesDashboard({actor,refreshToken}:{actor:Row;refreshTo
 function FactorySalesReport({report}:{report:Row}){return <>
   <div className="report-metrics"><Card label="销售总数量" value={`${number(report.totalQty)} 件`} note="当前日期和站点范围"/><Card label="产生销量的SKU" value={number(report.skuCount)} note="同一SKU合并去重"/></div>
   <div className="sales-visual-grid"><Panel title="销量趋势" desc={`${report.filters.from} — ${report.filters.to}；缺报日期不视为零销量`}><SalesTrend rows={report.daily} from={report.filters.from} to={report.filters.to} mode="qty" currency=""/></Panel><Panel title="站点与渠道销量" desc="按销售件数比较"><RankingBars rows={report.scopes.map((r:Row)=>({...r,label:`${r.site} · ${r.channel}`}))} labelKey="label" valueKey="qty" color="mixed"/></Panel></div>
-  <Panel title="SKU销量排名" desc="按所选范围的销售件数排序"><RankingBars rows={report.skuRanking} valueKey="qty"/><ReportTable rows={report.skuRanking} columns={[{label:'排名',render:r=>r.rank},{label:'SKU',render:r=>r.sku},{label:'商品',render:r=>r.name},{label:'销售数量',numeric:true,render:r=>number(r.qty)}]}/></Panel>
+  <Panel title="SKU销量排名" desc="按所选范围的销售件数排序"><RankingBars rows={report.skuRanking} valueKey="qty"/><ReportTable rows={report.skuRanking} columns={[{label:'排名',render:r=>r.rank},{label:'SKU',render:r=><SkuLabel sku={r.sku}/>},{label:'商品',render:r=>r.name},{label:'销售数量',numeric:true,render:r=>number(r.qty)}]}/></Panel>
   <details className="panel"><summary>每日销量明细</summary><ReportTable rows={report.daily} columns={[{label:'日期',render:r=>r.date},{label:'销量',numeric:true,render:r=>number(r.qty)},{label:'日报完整度',render:r=>r.salesComplete?'已齐':'待补齐'}]}/></details>
   <p className="report-timestamp">最近成功读取：{new Date(report.generatedAt).toLocaleString('zh-CN')}</p>
 </>;}

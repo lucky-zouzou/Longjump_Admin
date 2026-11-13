@@ -20,7 +20,7 @@ function fields(input:Row,d:Row):Field[]{
   case 'create':return [select('source','内容来源',Object.entries(sourceLabels).filter(([key])=>!input.parentId||key!=='creator')),
     ...(input.source==='creator'?[select('sourceContentId','已验收的达人原视频',d.sources.filter((r:Row)=>!scripts.some(s=>s.source_content_id===r.id)).map((r:Row)=>[r.id,r.site+' · '+r.shop+' · @'+r.platform_id+' · '+r.sku]))]:
      [select('site','需求站点',sites),select('sku','指定产品 SKU',d.skus.map((r:Row)=>[r.sku,r.sku+' · '+r.name]))]),
-    f('title','脚本标题'),f('audience','目标顾客'),f('sellingPoint','本条要证明的卖点'),f('brief','脚本、开头和必拍镜头','textarea'),
+    f('title','需求标题'),f('brief','补充要求（可选）','textarea',true),
     ...(input.source==='studio'?[select('scene','拍摄场景',scenes)]:[]),f('due','期望交付日期','date')];
   case 'schedule':return [f('shoot','拍摄日期','date'),f('delivery','交付日期','date'),
     select('jointWith','与同款需求合拍',scripts.filter(r=>r.id!==s?.id&&r.sku===s?.sku&&r.source==='studio'&&r.shoot_date&&r.shoot_date===input.shoot&&!r.joint_with).map(r=>[r.id,r.site+' · '+r.title]),true)];
@@ -32,7 +32,7 @@ function fields(input:Row,d:Row):Field[]{
   case 'claim':return [select('site','发布站点',s?.source==='creator'?sites.filter(site=>s.allowedSites.includes(site)):sites),f('planned','计划发布日期','date'),...claimFields];
   case 'publish':return [f('url','TikTok 视频完整链接','url'),f('publishedAt','实际发布时间（本机时区）','datetime-local')];
   case 'observe':return [select('days','累计观察窗口',post?.original?[['1','24 小时']]:[['1','24 小时'],['7','7 天']]),f('observedAt','实际取数时间（本机时区）','datetime-local'),
-    f('views','播放量','number',true),f('retention','前 3 秒留存率（%）','percent',true),f('clicks','商品点击数','number',true),f('orders','视频归属订单数','number',true),
+    f('views','播放量','number',true),f('retention','前 3 秒留存率（%）','percent',true),f('clicks','商品点击数','number',true),f('cartAdds','加购次数','number',true),f('orders','视频归属订单数','number',true),
     f('evidence','数据出处或凭据'),f('note','统计口径、修订或缺失原因','textarea')];
   case 'review':return [select('decision','复盘决定',['复拍','跨站测试','暂缓']),f('finding','观察到的实际表现','textarea'),f('hypothesis','可能原因','textarea'),f('change','下一次具体改什么／暂缓原因','textarea'),
     select('site','执行站点',(manager||d.actor.role==='拍摄剪辑'?d.sites:sites).filter((site:string)=>input.decision!=='跨站测试'||site!==post?.site)),
