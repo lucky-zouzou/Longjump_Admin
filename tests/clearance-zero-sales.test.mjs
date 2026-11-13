@@ -12,7 +12,7 @@ import {readWorkspaceRoute,workspaceUrl} from '../lib/workspace-model.mjs';
 const now=new Date('2026-11-04T05:00:00Z');
 mock.timers.enable({apis:['Date'],now});
 const sites=['印尼','马来西亚','泰国','越南','菲律宾'];
-const dates=Array.from({length:7},(_,i)=>shiftDay('2026-11-03',-i));
+const dates=Array.from({length:30},(_,i)=>shiftDay('2026-11-03',-i));
 function setup(t){const f=systemFixture();t.after(()=>f.sqlite.close());
  f.read=(a=f.users.admin,at=now,detail=null)=>readClearanceZeroSales(f.db,a,'2026-11',at,detail);
  f.zero=(site='印尼',channel='TikTok',days=dates)=>{for(const date of days){const id=crypto.randomUUID();f.sqlite.prepare("INSERT INTO sales_imports(id,import_key,business_date,site,channel,row_count,total_qty,actor_id,created_at,report_kind) VALUES(?,?,?,?,?,0,0,'admin-1',?,'zero')").run(id,id,date,site,channel,date);}};
@@ -45,7 +45,7 @@ test('read snapshot rejects concurrent stock revision; export preserves missing 
 test('proposal transaction rejects a concurrent newly imported sale',async t=>{const f=setup(t);f.zero();const batch=f.db.batch;let changed=false;f.db.batch=async stmts=>{if(!changed){changed=true;await svc.salesImport(f.users.indonesia,sale());}return batch(stmts);};await assert.rejects(f.apply(),e=>e.status===409);assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM clearance_lines').get().n,0);});
 test('legacy overlapping other-SKU sales invalidate zero-day completeness for this SKU',async t=>{const f=setup(t);f.zero();f.zero('印尼','Shopee');for(const tr of f.sqlite.prepare("SELECT name,sql FROM sqlite_master WHERE type='trigger' AND tbl_name='sales_records'").all().filter(t=>t.sql.includes('sales_summary_overlap')))f.sqlite.exec('DROP TRIGGER '+tr.name);
  for(const i of [1,2]){const id='TEST-overlap-'+i;f.sqlite.prepare("INSERT INTO sales_imports(id,import_key,business_date,site,channel,row_count,total_qty,actor_id,created_at,report_kind) VALUES(?,?,'2026-11-03','印尼','TikTok',1,1,'id-ops','2026-11-03','partial')").run(id,id);f.sqlite.prepare("INSERT INTO sales_records(id,import_id,business_date,site,channel,sku,qty,currency,actor_id,created_at) VALUES(?,?,'2026-11-03','印尼','TikTok','BAG-B',1,'IDR','id-ops','2026-11-03')").run(id,id);}
- const r=await f.item();assert.equal(r.status,'pending');assert.equal(r.channels[0].coverage,6);assert.equal(r.channels[0].recentQty,null);assert.equal(r.channels[0].canApply,false);const d=await f.read(f.users.indonesia,now,{site:'印尼',channel:'TikTok',sku:'BAG-A'});assert.equal(d.progress.daily.find(d=>d.date==='2026-11-03').status,'overlap');
+ const r=await f.item();assert.equal(r.status,'pending');assert.equal(r.channels[0].coverage,29);assert.equal(r.channels[0].recentQty,null);assert.equal(r.channels[0].canApply,false);const d=await f.read(f.users.indonesia,now,{site:'印尼',channel:'TikTok',sku:'BAG-A'});assert.equal(d.progress.daily.find(d=>d.date==='2026-11-03').status,'overlap');
 });
 
 function notificationsFixture(t){const f=setup(t);f.sqlite.exec('UPDATE inventory_balances SET qty=0');f.stock('BAG-A',10,10);return f;}
@@ -62,7 +62,7 @@ test('one platform recovery removes its reminder without hiding idle stock on th
  const a=(await zeroSalesNotifications(f.db,f.users.finance,now))[0].alert;assert.equal(a.confirmed,1);assert.equal(a.available,10);assert.equal(a.knownValueCny,250);const row=await f.item();assert.equal(row.status,'recovering');assert.equal(zeroSalesAlert(row).channels[0].channel,'Shopee');
  f.stock('BAG-A',7,0);assert.deepEqual(await zeroSalesNotifications(f.db,f.users.finance,now),[]);
 });
-test('repeated notice refresh and same problem on next day reuse identity, never create plans or deduct stock',async t=>{const f=notificationsFixture(t);f.zero();f.verify();const first=await zeroSalesNotifications(f.db,f.users.indonesia,now),again=await zeroSalesNotifications(f.db,f.users.indonesia,now);assert.deepEqual(first,again);f.zero('印尼','TikTok',['2026-11-04']);f.sqlite.prepare("UPDATE promotion_availability SET verified_through='2026-11-04'").run();const next=await zeroSalesNotifications(f.db,f.users.indonesia,new Date('2026-11-05T05:00Z'));assert.equal(next[0].id,first[0].id);assert.equal(next[0].alert.start,'2026-10-29');assert.equal(next[0].alert.cutoff,'2026-11-04');
+test('repeated notice refresh and same problem on next day reuse identity, never create plans or deduct stock',async t=>{const f=notificationsFixture(t);f.zero();f.verify();const first=await zeroSalesNotifications(f.db,f.users.indonesia,now),again=await zeroSalesNotifications(f.db,f.users.indonesia,now);assert.deepEqual(first,again);f.zero('印尼','TikTok',['2026-11-04']);f.sqlite.prepare("UPDATE promotion_availability SET verified_through='2026-11-04'").run();const next=await zeroSalesNotifications(f.db,f.users.indonesia,new Date('2026-11-05T05:00Z'));assert.equal(next[0].id,first[0].id);assert.equal(next[0].alert.start,'2026-10-06');assert.equal(next[0].alert.cutoff,'2026-11-04');
  assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM clearance_lines').get().n,0);assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM inventory_movements').get().n,0);assert.equal(f.sqlite.prepare("SELECT qty FROM inventory_balances WHERE site='印尼' AND channel='TikTok' AND sku='BAG-A'").get().qty,10);
 });
 test('daily notice links roundtrip into the exact site and shared candidate filter, including partial-platform zero',async t=>{const f=notificationsFixture(t);f.zero();f.zero('印尼','Shopee');await svc.salesImport(f.users.indonesia,sale({businessDate:'2026-11-03'}));const tasks=await zeroSalesNotifications(f.db,f.users.admin,now),pool=await f.read();const route=readWorkspaceRoute(workspaceUrl({page:tasks[0].tab,view:tasks[0].view,month:tasks[0].month}).slice(1));const site=zeroSalesAlertSite(route.view);assert.equal(site,'印尼');assert.equal(route.page,'clearance');assert.equal(pool.items.filter(r=>r.site===site&&zeroSalesAlert(r)).length,tasks[0].alert.total);assert.equal(pool.items.find(r=>r.site===site).status,'channel_zero');assert.equal(zeroSalesAlertSite('zero-alerts:invalid'),'');
@@ -72,3 +72,25 @@ test('workspace badge and overview share one notice per site, without duplicate 
 });
 test('existing clearance followup stays visible and links to its plan instead of creating a daily duplicate',async t=>{const f=notificationsFixture(t);f.zero();const created=await f.apply();const a=(await zeroSalesNotifications(f.db,f.users.indonesia,now))[0].alert;assert.equal(a.following,1);assert.equal((await f.read(f.users.indonesia)).items[0].channels[0].plan.id,created.id);assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM clearance_lines').get().n,1);});
 test('local midnight changes each site window independently, including month-boundary plan lookup',async t=>{const f=notificationsFixture(t);f.stock('BAG-A',10,10,'马来西亚');const at=new Date('2026-10-31T16:30Z');f.sqlite.prepare("INSERT INTO clearance_lines(id,month,site,channel,sku,owner_id,status,data_json,created_by,created_at,updated_at) VALUES('new-month','2026-11','马来西亚','TikTok','BAG-A','my-ops','draft','{}','admin-1','2026-10-31','2026-10-31')").run();const tasks=await zeroSalesNotifications(f.db,f.users.finance,at),id=tasks.find(t=>t.alert.site==='印尼'),my=tasks.find(t=>t.alert.site==='马来西亚');assert.equal(id.month,'2026-10');assert.equal(id.alert.cutoff,'2026-10-30');assert.equal(my.month,'2026-11');assert.equal(my.alert.cutoff,'2026-10-31');assert.equal(my.alert.following,1);});
+
+
+test('known new products stay observing, cannot auto-propose clearance and do not notify finance or operators',async t=>{
+ const f=notificationsFixture(t);f.zero();f.zero('印尼','Shopee');f.verify();f.verify('印尼','Shopee');
+ f.sqlite.prepare("UPDATE promotion_availability SET listed_since='2026-10-06' WHERE site='印尼'").run();
+ const r=await f.item();assert.equal(r.status,'observing');assert(r.channels.every(c=>c.newProduct&&!c.canApply));
+ const exported=zeroSalesCandidateExport({items:[r],generatedAt:now.toISOString(),windowDays:30});assert.equal(exported[1][21],'新品未满30天，观察中');assert.equal(exported[1][22],30);
+ for(const actor of [f.users.indonesia,f.users.finance,f.users.admin])assert.deepEqual(await zeroSalesNotifications(f.db,actor,now),[]);
+ await assert.rejects(f.apply(),e=>e.status===409);
+ f.sqlite.prepare("UPDATE promotion_availability SET listed_since='2026-10-05' WHERE site='印尼'").run();
+ assert.equal((await f.item()).status,'zero');assert.equal((await zeroSalesNotifications(f.db,f.users.finance,now))[0].alert.confirmed,1);
+});
+
+test('legacy sales without import headers remain unmatched evidence and cannot break the 30-day pool',async t=>{
+ const f=setup(t);f.zero();
+ for(const [i,date] of [dates[29],dates[7]].entries())f.sqlite.prepare("INSERT INTO sales_records(id,import_id,site,channel,sku,business_date,qty,currency,actor_id,created_at) VALUES(?,?,'印尼','TikTok','BAG-A',?,1,'IDR','id-ops',?)").run('orphan-'+i,'missing-header-'+i,date,date);
+ const detail=await f.read(f.users.indonesia,now,{site:'印尼',channel:'TikTok',sku:'BAG-A'});
+ assert.equal(detail.stockMatched,false);assert.equal(detail.canApply,false);assert.equal(detail.recentQty,2);
+ assert.deepEqual(detail.progress.batches.map(b=>b.date),[dates[29],dates[7]]);assert(detail.progress.batches.every(b=>!b.matched&&b.importedAt===null));
+ assert.equal(detail.progress.netDeductedQty,0);assert.equal(detail.progress.qty,2);
+ assert((await f.read(f.users.admin)).items.length>0);
+});
