@@ -7,7 +7,7 @@ export default function ZeroSalesNotifications({tasks,actor,go}:{tasks:Row[];act
  const alerts=tasks.filter(t=>t.kind==='zero-sales-alert');
  const total=alerts.reduce((n,t)=>n+t.alert.confirmed,0),pending=alerts.reduce((n,t)=>n+t.alert.verify+t.alert.pending,0);
  return <section className="overview-card zero-notices" aria-label="每日零动销预警">
-  <header><div><h2><Icon name="promotions"/>每日零动销预警 <span className="zero-notice-daily">滚动 7 天</span></h2><p>{actor.role==='运营'?`${actor.site} · ${actor.channel} · 您负责的商品`:'五站汇总 · 管理、财务与运营共同跟进'} · 按当地昨日截止</p></div><button className="overview-link" onClick={()=>go('clearance')}>进入月度清仓<Icon name="arrow"/></button></header>
+  <header><div><h2><Icon name="promotions"/>每日零动销预警 <span className="zero-notice-daily">滚动 30 天</span></h2><p>{actor.role==='运营'?`${actor.site} · ${actor.channel} · 您负责的商品`:'五站汇总 · 管理、财务与运营共同跟进'} · 按当地昨日截止</p></div><button className="overview-link" onClick={()=>go('clearance')}>进入月度清仓<Icon name="arrow"/></button></header>
   {alerts.length?<>
    <div className="zero-notice-summary"><strong>{num(total)}<span>个已确认零动销 SKU</span></strong><strong>{num(pending)}<span>个待核实 SKU</span></strong><small>同站 SKU 按最高提醒级别计一次；不同站点分别统计。部分平台零销量单独标明。</small></div>
    <div className={`zero-notice-grid${alerts.length===1?' single':''}`}>{alerts.map(t=>{const a=t.alert;return <article key={t.id} className={a.confirmed?'confirmed':'pending'}>
@@ -18,6 +18,6 @@ export default function ZeroSalesNotifications({tasks,actor,go}:{tasks:Row[];act
     <p className="zero-notice-next">{a.next}</p><button className="zero-notice-open" onClick={()=>go(t.tab,t)}>查看 {num(a.total)} 个 SKU 与处理入口 <Icon name="arrow"/></button><small className="zero-notice-following">{a.following} 个 SKU 已有跟进记录</small>
    </article>;})}</div>
   </>:<div className="zero-notice-empty">当前没有符合条件的零动销提醒。可进入商品池查看销售、库存及数据完整性。</div>}
-  <p className="zero-notice-note">每日滚动统计，页面停留时及返回后台自动更新。同一问题持续跟进，恢复销量或可售库存归零后移出；缺报不当作零销量。</p>
+  <p className="zero-notice-note">每日滚动统计，页面停留时及返回后台自动更新。同一问题持续跟进，恢复销量或可售库存归零后移出；新品上架未满30天单列观察，不纳入零动销预警；缺报不当作零销量。</p>
  </section>;
 }

@@ -11,6 +11,7 @@ const paths:Record<string,string>={
   promotions:"M20 4H10L3 11l10 10 7-7z M14 8h.01 M9 14l6-3",
   "after-sales":"M9 4 4 9l5 5 M4 9h10a6 6 0 0 1 0 12h-3",
   "quality-incidents":"M12 3 2 21h20z M12 9v5 M12 17h.01",
+  distribution:"M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z",
   wholesale:"M3 9h18 M5 9v12h14V9 M2 9l3-6h14l3 6 M9 21v-7h6v7",
   sales:"M4 3v18h17 M8 16l4-5 4 2 5-7 M17 6h4v4",
   suggestions:"M12 3a9 9 0 1 0 9 9 M12 7a5 5 0 1 0 5 5 M12 12l8-8 M16 4h4v4",

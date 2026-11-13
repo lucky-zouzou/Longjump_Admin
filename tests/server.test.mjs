@@ -16,17 +16,22 @@ test('独立服务器：公司登录、禁止伪造身份、岗位隔离、出�
  }cleanFixture.close();
  const free=net.createServer();free.listen(0,'127.0.0.1');await once(free,'listening');const port=free.address().port;await new Promise(r=>free.close(r));const origin=`http://127.0.0.1:${port}`;let logs='';const child=spawn(process.execPath,['server/index.mjs'],{env:{...process.env,LOONGJUMP_INQUIRY_SYNC_SECRET:'test-http-inquiry-secret-32-characters',NODE_ENV:'production',LOONGJUMP_DATA_DIR:root,LOONGJUMP_ORIGIN:origin,LOONGJUMP_ALLOW_HTTP:'1',PORT:String(port),HOST:'127.0.0.1'},stdio:['ignore','pipe','pipe']});child.stdout.on('data',b=>logs+=b);child.stderr.on('data',b=>logs+=b);
  try{await new Promise((res,rej)=>{const timer=setTimeout(()=>rej(Error('Server startup timeout: '+logs)),15000);child.stdout.on('data',b=>{if(String(b).includes('ready at')){clearTimeout(timer);res()}});child.once('exit',code=>{clearTimeout(timer);rej(Error(`Server exited ${code}: ${logs}`))})});
- const portal=await fetch(origin+'/distributor',{redirect:'manual'});assert.equal(portal.status,200);const portalHtml=await portal.text();assert.match(portalHtml,/Pesanan grosir/);assert.equal(portal.headers.get('referrer-policy'),'no-referrer');
- for(const asset of ['ordering.css','ordering.js','service.js']){
+ const portal=await fetch(origin+'/distributor',{redirect:'manual'});assert.equal(portal.status,200);const portalHtml=await portal.text();assert.match(portalHtml,/<title>Ruang Mitra/);assert.equal(portal.headers.get('referrer-policy'),'no-referrer');
+ for(const asset of ['brand.css','ordering.css','ordering.js','service.js']){
   const assetPath=[...portalHtml.matchAll(/(?:href|src)="([^"]+)"/g)].map(m=>m[1]).find(url=>url.split('?')[0]==='/distributor-assets/'+asset);
   assert.ok(assetPath,'Missing distributor asset: '+asset);
   const response=await fetch(origin+assetPath,{redirect:'manual'});assert.equal(response.status,200);
   assert.match(response.headers.get('cache-control'),/no-cache/);
  }
  const application=await fetch(origin+'/distributor/apply',{redirect:'manual'});
- assert.equal(application.status,200);assert.equal(application.headers.get('referrer-policy'),'same-origin');assert.match(await application.text(),/Daftar sebagai mitra/);
+ assert.equal(application.status,200);assert.equal(application.headers.get('referrer-policy'),'same-origin');assert.match(await application.text(),/Jadi partner kami/);
  assert.ok(portalHtml.includes('href="/distributor/apply"'));
  for(const path of ['/distributor-assets/application.css','/loong-jump-logo-black.png'])assert.equal((await fetch(origin+path,{redirect:'manual'})).status,200);
+ for(const image of ['partner-green.webp','partner-pink.webp']){
+  const response=await fetch(origin+'/distributor-assets/'+image,{redirect:'manual'});
+  assert.equal(response.status,200);assert.equal(response.headers.get('content-type'),'image/webp');
+  assert.ok((await response.arrayBuffer()).byteLength>1000);
+ }
  assert.equal((await fetch(origin+'/api/distributor')).status,401);
  assert.equal((await fetch(origin+'/api/wholesale/distributor',{method:'POST',headers:{origin}})).status,401);
  const forged=await fetch(origin+'/api/system',{headers:{'oai-authenticated-user-id':'admin','oai-authenticated-user-email':'admin@example.test','x-local-test-user':'admin'}});assert.equal(forged.status,401);
@@ -326,15 +331,26 @@ test('独立服务器：公司登录、禁止伪造身份、岗位隔离、出�
  const paid=await request('finance','/api/wholesale',{action:'financeAdd',orderId:order.id,version:order.version,kind:'receipt',amount:100000,businessDate:day,reference:'HTTP-PAYMENT-001',note:'Verified actual bank credit',proofIds:[paymentFile.id]});assert.equal(paid.status,200,JSON.stringify(paid.body));
  view=await request('finance','/api/wholesale');order=view.body.orders[0];assert.equal(order.paid,100000);const financeEntry=order.entries.find(e=>e.reference==='HTTP-PAYMENT-001');assert.equal(order.financeFiles[0].finance_entry_id,financeEntry.id);
  assert.equal((await paymentUpload('finance',financeEntry.id)).status,200);view=await request('finance','/api/wholesale');assert.equal(view.body.orders[0].paid,100000);assert.equal(view.body.orders[0].financeFiles.length,2);
+ // Distributor accounts use their own cookie and explicit admin approval through real HTTP routes.
  const linkPayload={customerId:order.customer_id,action:'issue',version:0};
- assert.equal((await request('finance','/api/wholesale/distributor',linkPayload)).status,403);
- const linkResult=await request('sales','/api/wholesale/distributor',linkPayload);assert.equal(linkResult.status,200);
- const auth={Authorization:'Bearer '+linkResult.body.path.split('#')[1]};
- const ownPortal=await fetch(origin+'/api/distributor',{headers:auth});assert.equal(ownPortal.status,200);
+ assert.equal((await request('sales','/api/wholesale/distributor',linkPayload)).status,403);
+ assert.equal((await request('sales','/api/distribution',{action:'enroll',customerId:order.customer_id})).status,200);
+ let store=(await request('admin','/api/distribution')).body.stores.find(s=>s.customer_id===order.customer_id);
+ assert.equal(store.status,'pending');
+ const approveStore={action:'approve',customerId:store.customer_id,version:store.version,reason:'HTTP TEST ONLY 商家资料已核实'};
+ assert.equal((await request('finance','/api/distribution',approveStore)).status,403);
+ const invitation=await request('admin','/api/distribution',approveStore);assert.equal(invitation.status,200,JSON.stringify(invitation.body));
+ const activation=new URLSearchParams(invitation.body.activationPath.split('#')[1]).get('activate');
+ const loginDistributor=await fetch(origin+'/api/distributor?auth=login',{method:'POST',headers:{origin,'content-type':'application/json'},body:JSON.stringify({username:store.username,password:'HTTP-Test-Distributor-1113',activation})});
+ assert.equal(loginDistributor.status,200);const distributorCookie=loginDistributor.headers.get('set-cookie').split(';')[0];
+ assert.equal((await fetch(origin+'/api/distributor',{headers:{cookie:cookies.admin}})).status,401);
+ const ownPortal=await fetch(origin+'/api/distributor',{headers:{cookie:distributorCookie}});assert.equal(ownPortal.status,200);
  const mine=await ownPortal.json();assert.equal(mine.customer.name,order.customer.name);assert.deepEqual(mine.orders,[]);
- assert.equal((await fetch(origin+'/api/wholesale',{headers:auth})).status,401);
- assert.equal((await request('sales','/api/wholesale/distributor',{...linkPayload,action:'revoke',version:1})).status,200);
- assert.equal((await fetch(origin+'/api/distributor',{headers:auth})).status,401);
+ assert.equal((await fetch(origin+'/api/wholesale',{headers:{cookie:distributorCookie}})).status,401);
+ assert.equal((await request('sales','/api/wholesale/distributor',linkPayload)).status,403);
+ store=(await request('admin','/api/distribution')).body.stores.find(s=>s.customer_id===order.customer_id);
+ assert.equal((await request('admin','/api/distribution',{action:'suspend',customerId:store.customer_id,version:store.version,reason:'HTTP TEST ONLY 商家停用'})).status,200);
+ assert.equal((await fetch(origin+'/api/distributor',{headers:{cookie:distributorCookie}})).status,401);
  const foreignOrigin=await fetch(origin+'/api/wholesale',{method:'POST',headers:{origin:'https://attacker.test',cookie:cookies.admin,'content-type':'application/json'},body:'{}'});assert.equal(foreignOrigin.status,403);
  }finally{const done=once(child,'exit');child.kill('SIGTERM');await done;rmSync(root,{recursive:true,force:true})}
 });

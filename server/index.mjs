@@ -32,7 +32,7 @@ const server=http.createServer(async(req,res)=>{try{
   const response=url.pathname==='/distributor/apply'?await handleDistributorApplication(request,env.DB):await handleDistributor(request,env.DB,env.WHOLESALE_FILES);
   await sendWebResponse(response,req,res,true);return;
  }
- if(['GET','HEAD'].includes(req.method)&&['/distributor-assets/service.js','/distributor-assets/ordering.js','/distributor-assets/ordering.css','/distributor-assets/application.css','/loong-jump-logo-black.png'].includes(url.pathname)){
+ if(['GET','HEAD'].includes(req.method)&&['/distributor-assets/brand.css','/distributor-assets/partner-green.webp','/distributor-assets/partner-pink.webp','/distributor-assets/payment.js','/distributor-assets/service.js','/distributor-assets/ordering.js','/distributor-assets/ordering.css','/distributor-assets/application.css','/loong-jump-logo-black.png'].includes(url.pathname)){
   if(!await tryServeStatic(req,res,resolve('dist-node/client'),url.pathname,true,undefined,{'Cache-Control':'public, no-cache'})){res.writeHead(404);res.end();}
   return;
  }

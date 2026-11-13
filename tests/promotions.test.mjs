@@ -26,13 +26,13 @@ function reports(f,ds=dates){for(const d of ds)f.sqlite.prepare("INSERT INTO sal
 function sale(f,date,qty,{reversed=false,amount=qty*80}={}){f.sqlite.prepare("INSERT INTO sales_records(id,import_id,business_date,site,channel,sku,qty,reported_amount,actor_id,created_at,reversed_at) VALUES(?,'external',?,'印尼','TikTok','BAG-A',?,?,?,'2026-10-01',?)").run(crypto.randomUUID(),date,qty,amount,f.users.indonesia.id,reversed?'2026-10-02':null);}
 function observation(f){f.sqlite.prepare("INSERT INTO promotion_availability VALUES('印尼','TikTok','BAG-A','2026-08-01','2026-08-01',?,'库存报表证据','已核实连续上架且有货',?,'2026-10-20')").run(cutoff,f.users.indonesia.id);}
 const base=()=>({stock:{site:'印尼',channel:'TikTok',sku:'BAG-A',name:'Bag',qty:10,reserved_qty:2},sales:[],completeDates:dates,availability:{listed_since:'2026-08-01',available_since:'2026-08-01',verified_through:cutoff},observations:[]});
-test('完整7天以WIB昨天截止，缺报不是零，毛销量不与退货抵销，今日销售不进入窗口',()=>{
+test('完整30天以WIB昨天截止，缺报不是零，毛销量不与退货抵销，今日销售不进入窗口',()=>{
  assert.equal(localDay('2026-10-19T18:00:00Z'),'2026-10-20');const x=base();assert.equal(evaluateZeroSales(x,now).zeroDays,30);assert.equal(evaluateZeroSales(x,now).available,8);
- x.completeDates=dates.filter(d=>d!==dates[3]);assert.equal(evaluateZeroSales(x,now).status,'observe');assert.equal(evaluateZeroSales(x,now).coverage,6);x.completeDates=dates;
+ x.completeDates=dates.filter(d=>d!==dates[3]);assert.equal(evaluateZeroSales(x,now).status,'observe');assert.equal(evaluateZeroSales(x,now).coverage,29);x.completeDates=dates;
  x.sales=[{business_date:cutoff,qty:1},{business_date:cutoff,qty:-1}];assert.equal(evaluateZeroSales(x,now).status,'closed');x.sales=[{business_date:day,qty:4}];assert.equal(evaluateZeroSales(x,now).status,'open');
  x.stock.reserved_qty=10;assert.equal(evaluateZeroSales(x,now).status,'closed');
 });
-test('连续可售/上架不足7天观察，已知缺货覆盖人工核验，不补造历史',()=>{
+test('连续可售/上架不足30天观察，已知缺货覆盖人工核验，不补造历史',()=>{
  const x=base();x.availability=null;assert.equal(evaluateZeroSales(x,now).status,'observe');x.availability=base().availability;x.availability.listed_since=dates[4];assert.equal(evaluateZeroSales(x,now).zeroDays,5);
  x.availability=base().availability;x.observations=[{day:cutoff,min_available:0}];assert.equal(evaluateZeroSales(x,now).zeroDays,0);
  x.availability.verified_through=dates[1];x.observations=[{day:cutoff,min_available:2,first_at:'2026-10-18T17:01:00Z'}];assert.equal(evaluateZeroSales(x,now).status,'open');x.observations[0].first_at='2026-10-19T12:00:00Z';assert.equal(evaluateZeroSales(x,now).status,'observe');
@@ -89,4 +89,14 @@ test('撤回/退回保留记录，旧版本不可覆盖新记录，任务按角�
 });
 test('优惠全部表与图片随全量备份恢复，维护锁保护写入和监测',async()=>{
  const root=mkdtempSync(join(tmpdir(),'lj-promotion-'));try{const f=fixture(),b=fileBucket(join(root,'files')),id=await create(f);await proof(f,id,'proposal',b);const stream=await backupStream(f.db,b,f.users.admin);await assert.rejects(refreshPromotions(f.db,now),/备份|迁移/);assert.throws(()=>f.sqlite.prepare("UPDATE promotions SET status='active'").run(),/maintenance/);await stream.cancel();const path=join(root,'backup.tar');await createBackup({DB:f.db,WHOLESALE_FILES:b},path);assert.equal((await verifyArchive(path)).files.length,1);const target=join(root,'restore');await restoreBackup(path,target);const db=openDatabase(join(target,'business.sqlite'));assert.equal(db.sqlite.prepare('SELECT * FROM promotions WHERE id=?').get(id).status,'draft');assert.equal(db.sqlite.prepare('SELECT COUNT(*) n FROM promotion_files').get().n,1);db.sqlite.close();}finally{rmSync(root,{recursive:true,force:true})}
+});
+
+
+test('30天边界：29天上架只观察，第30天才触发；第8至30天销售也会解除零销量',()=>{
+ const x=base();x.availability.listed_since=dates[28];
+ let r=evaluateZeroSales(x,now);assert.equal(r.newProduct,true);assert.equal(r.status,'observe');assert.equal(r.zeroDays,29);
+ x.availability.listed_since=dates[29];r=evaluateZeroSales(x,now);assert.equal(r.newProduct,false);assert.equal(r.status,'open');assert.equal(r.start,dates[29]);
+ for(const day of [dates[7],dates[15],dates[29]]){x.sales=[{business_date:day,qty:1}];assert.equal(evaluateZeroSales(x,now).status,'closed');}
+ x.sales=[{business_date:shiftDay(dates[29],-1),qty:1}];assert.equal(evaluateZeroSales(x,now).status,'open');
+ x.completeDates=dates.slice(0,29);r=evaluateZeroSales(x,now);assert.equal(r.status,'observe');assert.equal(r.coverage,29);assert.ok(r.missing.includes(dates[29]));
 });

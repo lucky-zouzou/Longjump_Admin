@@ -1,3 +1,4 @@
+import {storeInsert} from '../lib/distributor-accounts.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {fixture} from './fixtures.mjs';
@@ -10,6 +11,7 @@ async function customer(f,sales=f.users.sales){
 }
 const root='https://example.test';
 async function access(f,actor,id,version=0){
+  if(!f.sqlite.prepare('SELECT 1 FROM distributor_stores WHERE customer_id=?').get(id))await storeInsert(f.db,id,f.users.admin,{approved:true}).run();
   const result=await manageDistributorLink(f.db,actor,{action:'issue',customerId:id,version});
   const auth='Bearer '+result.path.split('#')[1];
   const send=(body,extra={})=>handleDistributor(new Request(root+'/api/distributor',{method:body?'POST':'GET',headers:{authorization:auth,origin:root,'content-type':'application/json',...extra},...(body?{body:JSON.stringify(body)}:{})}),f.db);
@@ -108,8 +110,8 @@ test('分销详情按SKU展示最新对客资料；缺项留空，成本、供�
   assert.match(ok.headers.get('cache-control'),/no-store/);assert.deepEqual([...new Uint8Array(await ok.arrayBuffer())],[255,216,255,4,5]);
   assert.equal((await image('a-main','')).status,401);
   for(const fileId of ['b','not-image','invalid','private/missing'])assert.equal((await image(fileId)).status,404);
-  f.stock(sku,0,0);assert.equal((await image('a-main')).status,404);
-  assert.deepEqual((await (await send()).json()).products.map(p=>p.sku),['BAG-B']);
+  f.stock(sku,0,0);assert.equal((await image('a-main')).status,200);
+  assert.deepEqual((await (await send()).json()).products.map(p=>p.sku),['BAG-A','BAG-B']);assert.equal((await (await send()).json()).products[0].available,0);
   f.stock(sku,10,10);
   await f.call(f.users.finance,'priceWithdraw',{sku,priceVersion:1,reason:'重新核实当前印尼报价'});
   assert.equal((await image('a-main')).status,404);

@@ -2,7 +2,7 @@
 import SkuLabel from './sku-label';
 
 import EvidenceWorkbench from './evidence-workbench';
-import {useCallback,useEffect,useRef,useState} from 'react';
+import {useCallback,useEffect,useRef,useState,useMemo} from 'react';
 import {actionKinds,actionStates,actionRoles,financeFields,diagnosisFields} from '../lib/business-action-model.mjs';
 import {actionOverdue} from '../lib/business-action-supervision.mjs';
 import {useDirtyGuard,useVisibleRefresh} from './workspace-hooks';
@@ -10,42 +10,65 @@ import './business-actions.css';
 import ProductHealth from './product-health';
 import SkuHealthBadge from './sku-health-badge';
 import {healthKey} from '../lib/product-health.mjs';
+import {createWorkspaceLoader} from '../lib/workspace-loader.mjs';
 type Row=Record<string,any>;
 const n=(v:any)=>v==null?'待核实':Number(v).toLocaleString('zh-CN',{maximumFractionDigits:2});
 const money=(v:any,c='CNY')=>v==null?'待核实':`${c} ${n(v)}`;
 const time=(v:any)=>v?new Date(v).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}):'待安排';
 const localInput=(v:any)=>{const d=new Date(v);return new Date(+d-d.getTimezoneOffset()*60000).toISOString().slice(0,16);};
 const daysLater=(days:number)=>localInput(Date.now()+days*86400000);
-async function api(p?:Row,path='/api/business-actions'){const res=await fetch(path,p?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)}:{cache:'no-store'}),d=await res.json();if(!res.ok)throw Error(d.error||'操作失败');return d;}
+async function api(p?:Row,path='/api/business-actions',signal?:AbortSignal){const res=await fetch(path,p?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(p)}:{cache:'no-store',signal:signal?AbortSignal.any([signal,AbortSignal.timeout(30000)]):AbortSignal.timeout(30000)}),d=await res.json();if(!res.ok)throw Error(d.error||'操作失败');return d;}
 const condition=(r:Row)=>r.snapshot.condition==='verify'?'待核实':r.snapshot.condition==='clear'?'信号已缓解，待复查':'已触发';
 
 export default function BusinessActions({initialId=''}:{initialId?:string}){
  const [data,setData]=useState<Row|null>(null),[error,setError]=useState(''),[message,setMessage]=useState(''),[busy,setBusy]=useState(false),[selected,setSelected]=useState(initialId),[kind,setKind]=useState(''),[site,setSite]=useState('印尼'),[channel,setChannel]=useState(''),[q,setQ]=useState(''),[lane,setLane]=useState('action'),[limit,setLimit]=useState(30);
  const scopeInitialized=useRef(false);
  const [health,setHealth]=useState<Row|null>(null),[healthError,setHealthError]=useState('');
- const detail=useRef<HTMLElement>(null),load=useCallback(async()=>{const d=await api();setData(d);if(!scopeInitialized.current){const target=d.records.find((r:Row)=>r.id===initialId);setSite(target?.site||(d.actor.role==='运营'?d.actor.site:'印尼'));setChannel(target?.channel||(d.actor.role==='运营'?d.actor.channel:''));scopeInitialized.current=true;}if(['管理员','财务','运营','运营主管'].includes(d.actor.role)){try{setHealth(await api(undefined,'/api/product-costs'));setHealthError('');}catch(e){setHealthError((e as Error).message);setHealth(null);}}return d;},[initialId]);
- const healthMap=new Map((health?.items||[]).map((r:Row)=>[healthKey(r),r.performance.category]));
- useEffect(()=>{void load().catch(e=>setError(e.message));},[load]);useVisibleRefresh(load,60000,true,true);
- useEffect(()=>{const handler=()=>{void load().catch(e=>setError(e.message));};window.addEventListener('product-evidence-saved',handler);return()=>window.removeEventListener('product-evidence-saved',handler);},[load]);
+ const [showHealth,setShowHealth]=useState(false),[showEvidence,setShowEvidence]=useState(false);
+ const [selectedRecord,setSelectedRecord]=useState<Row|null>(null),[detailLoading,setDetailLoading]=useState(false),[detailError,setDetailError]=useState(''),[detailRetry,setDetailRetry]=useState(0);
+ const detail=useRef<HTMLElement>(null),loader=useRef<ReturnType<typeof createWorkspaceLoader>|null>(null);
+ if(!loader.current)loader.current=createWorkspaceLoader((_key:string,signal:AbortSignal)=>api(undefined,'/api/business-actions?view=queue',signal));
+ const load=useCallback(async(force=false)=>{
+  const d=await loader.current!.load('actions',{force});if(!d)return;
+  setData(d);setError('');
+  if(!scopeInitialized.current){const target=d.records.find((r:Row)=>r.id===initialId);setSite(target?.site||(d.actor.role==='运营'?d.actor.site:'印尼'));setChannel(target?.channel||(d.actor.role==='运营'?d.actor.channel:''));scopeInitialized.current=true;}
+  return d;
+ },[initialId]);
+ const healthMap=useMemo(()=>new Map((health?.items||[]).map((r:Row)=>[healthKey(r),r.performance.category])),[health]);
+ useEffect(()=>{void load().catch(e=>setError(e.message));return()=>loader.current!.cancel();},[load]);useVisibleRefresh(load,60000,true,true);
+ useEffect(()=>{const handler=()=>{void load(true).catch(e=>setError(e.message));};window.addEventListener('product-evidence-saved',handler);return()=>window.removeEventListener('product-evidence-saved',handler);},[load]);
+ const selectedVersion=data?.records.find((r:Row)=>r.id===selected)?.version;
+ useEffect(()=>{
+  if(!selected||!data)return;
+  const abort=new AbortController();setDetailLoading(true);setDetailError('');
+  void api(undefined,'/api/business-actions?id='+encodeURIComponent(selected),abort.signal).then(r=>{if(!abort.signal.aborted)setSelectedRecord(r);}).catch(e=>{if(!abort.signal.aborted)setDetailError(e.message);}).finally(()=>{if(!abort.signal.aborted)setDetailLoading(false);});
+  return()=>abort.abort();
+ },[selected,selectedVersion,Boolean(data),detailRetry]);
+ useEffect(()=>{
+  if(!showHealth||!data||!['管理员','财务','运营','运营主管'].includes(data.actor.role))return;
+  const abort=new AbortController();
+  void api(undefined,'/api/product-costs',abort.signal).then(d=>{if(!abort.signal.aborted){setHealth(d);setHealthError('');}}).catch(e=>{if(!abort.signal.aborted){setHealthError(e.message);setHealth(null);}});
+  return()=>abort.abort();
+ },[showHealth,data?.actor.id,data?.latestEvidenceAt]);
  const guard=useDirtyGuard(false);
- const refresh=async()=>{if(!guard())return;setBusy(true);setError('');setMessage('');try{await api({action:'refresh'});await load();setMessage('已按最新证据更新，既有行动单继续保留。');}catch(e){setError((e as Error).message);}finally{setBusy(false);}};
- async function act(p:Row){setBusy(true);setError('');setMessage('');try{await api(p);setMessage('已保存并留痕。');if(p.action==='finance'){try{await api({action:'refresh'});}catch{setMessage('财务核算已保存；重新计算暂未完成，请稍后点击更新证据。');}}await load();return true;}catch(e){setError((e as Error).message);return false;}finally{setBusy(false);}}
- const records:Row[]=data?.records||[],active=records.filter(r=>r.status!=='resolved'&&(!site||r.site===site)&&(!channel||r.channel===channel)),chosen=records.find(r=>r.id===selected),userName=(id:string)=>data?.users.find((u:Row)=>u.id===id)?.name||'待管理员分配';
+ const refresh=async()=>{if(!guard())return;setBusy(true);setError('');setMessage('');try{await api({action:'refresh'});await load(true);setMessage('已按最新证据更新，既有行动单继续保留。');}catch(e){setError((e as Error).message);}finally{setBusy(false);}};
+ async function act(p:Row){setBusy(true);setError('');setMessage('');try{await api(p);setMessage('已保存并留痕。');if(p.action==='finance'){try{await api({action:'refresh'});}catch{setMessage('财务核算已保存；重新计算暂未完成，请稍后点击更新证据。');}}await load(true);setDetailRetry(v=>v+1);return true;}catch(e){setError((e as Error).message);return false;}finally{setBusy(false);}}
+ const records:Row[]=data?.records||[],active=records.filter(r=>r.status!=='resolved'&&(!site||r.site===site)&&(!channel||r.channel===channel)),chosen=selectedRecord?.id===selected?selectedRecord:null,userName=(id:string)=>data?.users.find((u:Row)=>u.id===id)?.name||'待管理员分配';
  const filtered=records.filter(r=>(!kind||r.kind===kind)&&(!site||r.site===site)&&(!channel||r.channel===channel)&&(!q||[r.sku,r.snapshot.name,userName(r.owner_id),r.site,r.channel].join(' ').toLowerCase().includes(q.toLowerCase()))&&(lane==='all'||lane==='done'&&r.status==='resolved'||r.status!=='resolved'&&(lane==='verify'?r.snapshot.condition==='verify':lane==='unassigned'?!r.owner_id&&(r.snapshot.condition==='active'||r.ever_active||r.executed_at):lane==='review'?r.status==='review_pending':lane==='clear'?r.snapshot.condition==='clear':r.snapshot.condition==='active'||['in_progress','review_pending'].includes(r.status))));
- const choose=(id:string)=>{if(!guard())return;setSelected(id);requestAnimationFrame(()=>detail.current?.scrollIntoView({behavior:'smooth',block:'start'}));};
+ const choose=(id:string)=>{if(!guard())return;if(id!==selected)setSelectedRecord(null);setSelected(id);requestAnimationFrame(()=>detail.current?.scrollIntoView({behavior:'smooth',block:'start'}));};
  return <div className="business-actions"><header className="ba-heading"><div><small>{site||'全部可见站点'} · {channel||'全部平台'} / 每日持续跟进</small><h2>每日经营行动单</h2><p>用可靠证据排优先级，用复查结果确认解决</p></div><button className="btn primary" disabled={busy} onClick={()=>void refresh()}>{busy?'处理中…':'更新证据与行动单'}</button></header>
  <div className="ba-scope-note">建议模式 · 系统不会自动改价、调整广告或下采购单。截止及复查时间按当前设备时区显示；统计按各站点当地昨天截止。</div>
  {error&&<div className="notice error" role="alert">{error}</div>}{message&&<div className="notice success" role="status">{message}</div>}
- {!data?<div className="panel">正在读取经营行动…</div>:<>
- {['管理员','财务','运营','运营主管'].includes(data.actor.role)&&<ProductHealth data={health} error={healthError} records={records} onAction={choose} site={site} onSite={setSite}/>}
- <EvidenceWorkbench site={site} channel={channel} refresh={data.latestEvidenceAt||''}/><section className="ba-categories" aria-label="三类经营行动">{Object.entries(actionKinds).map(([k,label],i)=>{const list=active.filter(r=>r.kind===k),count=list.filter(r=>r.snapshot.condition==='active').length;return <button key={k} onClick={()=>{setKind(kind===k?'':k);setLimit(30);}} className={`ba-category ${kind===k?'selected':''}`}><span className="ba-number">0{i+1}</span><h3>{label}</h3><p>{k==='loss'?'运营主责 · 财务核算':k==='stockout'?'供应链主责 · 运营配合':'站点运营主责 · 先诊断后处置'}</p><strong>{count}<small> 条已触发</small></strong><span className="ba-subcount">{list.filter(r=>r.snapshot.condition==='verify').length} 条待核实</span></button>;})}</section>
+ {!data?<div className="panel">{error?<button className="btn" onClick={()=>void load(true).catch(e=>setError(e.message))}>重新读取行动清单</button>:'正在读取经营行动…'}</div>:<>
+ {['管理员','财务','运营','运营主管'].includes(data.actor.role)&&<details className="panel ba-on-demand" onToggle={e=>{if(e.currentTarget.open)setShowHealth(true);}}><summary>商品健康全景 · 展开核对库存、动销与成本</summary>{showHealth&&<ProductHealth data={health} error={healthError} records={records} onAction={choose} site={site} onSite={setSite}/>}</details>}
+ <details className="panel ba-on-demand" onToggle={e=>{if(e.currentTarget.open)setShowEvidence(true);}}><summary>共同证据核对 · 展开处理缺报、费用与库存差异</summary>{showEvidence&&<EvidenceWorkbench site={site} channel={channel} refresh={data.latestEvidenceAt||''}/>}</details><section className="ba-categories" aria-label="三类经营行动">{Object.entries(actionKinds).map(([k,label],i)=>{const list=active.filter(r=>r.kind===k),count=list.filter(r=>r.snapshot.condition==='active').length;return <button key={k} onClick={()=>{setKind(kind===k?'':k);setLimit(30);}} className={`ba-category ${kind===k?'selected':''}`}><span className="ba-number">0{i+1}</span><h3>{label}</h3><p>{k==='loss'?'运营主责 · 财务核算':k==='stockout'?'供应链主责 · 运营配合':'站点运营主责 · 先诊断后处置'}</p><strong>{count}<small> 条已触发</small></strong><span className="ba-subcount">{list.filter(r=>r.snapshot.condition==='verify').length} 条待核实</span></button>;})}</section>
  <section className="ba-supervision" aria-label="责任与复查概况"><button onClick={()=>setLane('unassigned')}><b>{active.filter(r=>!r.owner_id&&(r.snapshot.condition==='active'||r.ever_active||r.executed_at)).length}</b> 经营风险待分配负责人</button><button onClick={()=>setLane('review')}><b>{active.filter(r=>r.status==='review_pending').length}</b> 待复查</button><span title="仅统计已触发、已指定责任或已执行待复查的行动；未分配的证据缺口不计执行逾期"><b>{active.filter(r=>actionOverdue(r)).length}</b> 到期未完成</span><span>证据最近更新：{time(data.latestEvidenceAt)}</span></section>
  <div className="ba-layout"><section className="panel ba-list"><div className="ba-list-head"><div><h3>今天先处理什么</h3><p>证据可靠 → 最迟行动日 → 近期可避免损失；不按 GMV 排名。</p></div><span>{filtered.length} 条</span></div>
  <div className="ba-filters"><label>工作队列<select value={lane} onChange={e=>{setLane(e.target.value);setLimit(30);}}><option value="action">已触发 / 跟进中</option><option value="verify">待核实证据</option><option value="clear">信号缓解 / 待核对</option><option value="unassigned">待分配负责人</option><option value="review">待复查</option><option value="done">复查已解决</option><option value="all">全部记录</option></select></label><label>国家<select value={site} onChange={e=>setSite(e.target.value)}><option value="">全部可见站点</option>{[...new Set([site,...records.map(r=>r.site),...(health?.items||[]).map((r:Row)=>r.site)].filter(Boolean))].map(s=><option key={s}>{s}</option>)}</select></label><label>平台<select value={channel} onChange={e=>setChannel(e.target.value)}><option value="">全部平台</option><option>TikTok</option><option>Shopee</option></select></label><label className="ba-search">查找 SKU / 商品 / 负责人<input value={q} placeholder="输入关键词" onChange={e=>setQ(e.target.value)}/></label></div>
  {!filtered.length?<div className="ba-empty">{!records.length?'首次使用请更新证据，生成持续跟进行动单。':'当前队列没有记录。数据不完整的 SKU 在“待核实证据”中，不能视作没有问题。'}</div>:<div className="ba-items">{filtered.slice(0,limit).map((r,i)=><button className={`ba-item ${selected===r.id?'selected':''}`} onClick={()=>choose(r.id)} key={r.id}><div className="ba-item-top"><span className="ba-rank">{String(i+1).padStart(2,'0')}</span><div><strong>{health&&<SkuHealthBadge category={healthMap.get(healthKey(r)) as string|null}/ >}<SkuLabel sku={r.sku} preview={false}/></strong><p>{r.site} / {r.channel} · {(actionKinds as Row)[r.kind]}</p></div><span className={`ba-tag ${r.snapshot.condition}`}>{r.status==='resolved'?'复查已解决':condition(r)}</span></div><h4>{r.snapshot.title}</h4><p className="ba-today">建议最迟行动：{r.snapshot.mustActDate||"待核实"} · 今天：{r.snapshot.today}</p><div className="ba-item-bottom"><span>负责人：<b>{userName(r.owner_id)}</b> · {(actionStates as Row)[r.status]}</span><span>{r.status==='review_pending'?'复查':'截止'} {time(r.status==='review_pending'?r.review_at:r.due_at)}</span></div></button>)}</div>}
  {filtered.length>limit&&<button className="btn" onClick={()=>setLimit(limit+30)}>再显示30条</button>}
  </section><aside className="ba-guide"><h3>行动规则</h3><ol><li>先核实证据，再按最迟行动日和近期可避免损失排序。</li><li>同一问题持续跟进，不按天重建。</li><li>负责人唯一，协作人可补充跟进。</li><li>执行后观察，复查结果决定是否关闭。</li></ol><details><summary>查看计算口径</summary><p>亏损：本期实际销售额减去财务核实的成本及其他直接费用；折扣已包含在成交额，不能重复扣减。</p><p>断货：与补货模块共用完整日报的7/21/56天需求预测，逐日计入有效到货和需求。只累计当天未满足量，到货恢复覆盖后停止计损；补货量仍遵守供应参数和约束。</p><p>动销：连续14天在售有货、日报完整；近7天比前7天下降至少30%，且库存覆盖≥60天，或近7天零销量。库存年龄未知时不宣称为历史呆滞。</p><p>收益是规则情景上限，非承诺。金额缺失不参与金额排名；跨币种只使用有效人民币参考汇率。</p></details></aside></div>
- {chosen&&<section className="panel ba-detail" ref={detail} aria-label="行动单详情"><div className="ba-list-head"><div><small>持续跟进 · 重开 {chosen.reopen_count} 次</small><h3>{health&&<SkuHealthBadge category={healthMap.get(healthKey(chosen)) as string|null}/>}<SkuLabel sku={chosen.sku}/> · {chosen.site} / {chosen.channel}</h3></div><button className="btn" onClick={()=>{if(guard())setSelected('');}}>收起详情</button></div><ActionDetail key={chosen.id} r={chosen} data={data} busy={busy} act={act} serverError={error}/></section>}
+ {selected&&<section className="panel ba-detail" ref={detail} aria-label="行动单详情"><div className="ba-list-head"><div><small>持续跟进 · 重开 {chosen?.reopen_count??'—'} 次</small><h3>{chosen?<>{health&&<SkuHealthBadge category={healthMap.get(healthKey(chosen)) as string|null}/>}<SkuLabel sku={chosen.sku}/> · {chosen.site} / {chosen.channel}</>:"行动单详情"}</h3></div><button className="btn" onClick={()=>{if(guard())setSelected('');}}>收起详情</button></div><div role="status">{detailLoading?"正在读取这条行动单的完整证据…":detailError&&<p className="notice error">{detailError} <button className="btn" onClick={()=>setDetailRetry(v=>v+1)}>重试详情</button></p>}</div>{chosen&&!detailError&&<ActionDetail key={chosen.id} r={chosen} data={data} busy={busy||detailLoading} act={act} serverError={error}/>}</section>}
  </>}
  </div>;
 }

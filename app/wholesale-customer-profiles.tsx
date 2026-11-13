@@ -1,6 +1,5 @@
 "use client";
 import {Fragment, useMemo, useState} from "react";
-import DistributorLink from "./distributor-link";
 import {useWholesaleLanguage} from "./wholesale-language";
 import {customerProfiles, portfolioTotals} from "../lib/wholesale-customer-profiles.mjs";
 
@@ -101,7 +100,7 @@ export default function CustomerProfiles({data, canManage, refresh}:{
           <span>{say("最近正向成交日","Tanggal penjualan positif terakhir")} <strong>{row.lastSale || "—"}</strong></span>
           <span>{say("期末应收","Piutang akhir periode")} <strong>{money(row.receivable)}</strong></span>
           <span>{say("当前订单数 / 合同待收款","Pesanan saat ini / sisa tagihan kontrak")} <strong>{fmt(row.orderCount)} / {money(row.currentOutstanding)}</strong></span>
-          {canManage && Boolean(c.active || c.distributor_active) && <DistributorLink customerId={c.id} active={Boolean(c.distributor_active)} version={c.distributor_version} refresh={refresh}/>}
+          {canManage && Boolean(c.active || c.distributor_active) && <a className="btn" href="/?page=distribution">{say("分销管理","Manajemen mitra")}</a>}
         </div></td></tr>}</Fragment>;
       }) : slice(groups).map(row=><tr key={row.key}><td><button type="button" className="wh-profile-name" onClick={()=>{
         if(group==="region"){setRegion(row.key);setCity(null);}else if(group==="city")setCity(row.key);else setOwner(row.key);setGroup("customer");setPage(0);

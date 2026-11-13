@@ -3,7 +3,7 @@
   const fields=form.elements, message=document.getElementById('service-message'), history=document.getElementById('service-history');
   const itemField=fields.namedItem('item');
   const refresh=document.getElementById('service-refresh'), labels={submitted:'Menunggu persetujuan',approved:'Sedang diproses keuangan',completed:'Selesai',rejected:'Ditolak'};
-  const headers={Authorization:'Bearer '+location.hash.slice(1)};
+  const headers=/^[a-f0-9]{64}$/.test(location.hash.slice(1))?{Authorization:'Bearer '+location.hash.slice(1)}:{};
   let pending=null,busy=false,sequence=0;
   async function requestKey(body,files){
     // Persist only a digest and UUID so a lost response can be retried after refresh.
@@ -18,7 +18,7 @@
   const paragraph=(parent,value)=>{const p=document.createElement('p');p.textContent=value;parent.append(p);};
   function limit(){fields.qty.max=itemField.selectedOptions[0]?.dataset.available || '0';}
   async function api(body){
-    const response=await fetch('/api/distributor?service=1',{method:body?'POST':'GET',headers,body,credentials:'omit',cache:'no-store'});
+    const response=await fetch('/api/distributor?service=1',{method:body?'POST':'GET',headers,body,credentials:'same-origin',cache:'no-store'});
     const result=await response.json();if(!response.ok)throw Error(result.error||'Gagal memproses permintaan.');return result;
   }
   async function load(success=''){

@@ -37,6 +37,7 @@ const TransportCreated=lazy(()=>import("./transport-workflow").then(m=>({default
 const PlanChanges=lazy(()=>import("./plan-changes"));
 const SupplyPicker=lazy(()=>import("./plan-changes").then(m=>({default:m.SupplyPicker})));
 const PurchaseReassign=lazy(()=>import("./plan-changes").then(m=>({default:m.PurchaseReassign})));
+const Distribution=lazy(()=>import("./distribution"));
 const Wholesale=lazy(()=>import("./wholesale"));
 const UserManagement=lazy(()=>import("./user-management"));
 import type {ManagedUser} from "./user-management";
@@ -89,7 +90,7 @@ type AllocationDraft = { site:string; channel:string; qty:string };
 type Act = (action:string,payload:Row,success:string,onError?:(message:string)=>void)=>Promise<Row|null>;
 
 const navItems = [
-  ["overview","总览","◫"], ["cost-profit","成本利润透明","◈"], ["sales-targets","月度任务与贡献","◎"], ["business-actions","每日经营行动单","✓"], ["reviews","周报与月度复盘","▤"], ["clearance","月度清仓", "↓"],["promotions","零销量与优惠","↓"], ["after-sales","售后反馈","↩"], ["quality-incidents","品质与交付异常","⚑"], ["users","用户管理","♙"], ["wholesale","印尼线下批发","▣"], ["suggestions","补货驾驶舱","◎"], ["new-products","新品孵化","◇"], ["sales","销售数据","↗"], ["creators","达人与直播 BD","◉"], ["content-center","TikTok 内容中心","▷"], ["inventory","库存流水","▦"],
+  ["overview","总览","◫"], ["cost-profit","成本利润透明","◈"], ["sales-targets","月度任务与贡献","◎"], ["business-actions","每日经营行动单","✓"], ["reviews","周报与月度复盘","▤"], ["clearance","月度清仓", "↓"],["promotions","零销量与优惠","↓"], ["after-sales","售后反馈","↩"], ["quality-incidents","品质与交付异常","⚑"], ["users","用户管理","♙"], ["wholesale","印尼线下批发","▣"], ["distribution","分销管理","▣"], ["suggestions","补货驾驶舱","◎"], ["new-products","新品孵化","◇"], ["sales","销售数据","↗"], ["creators","达人与直播 BD","◉"], ["content-center","TikTok 内容中心","▷"], ["inventory","库存流水","▦"],
   ["receipt","历史到仓","↓"], ["monthly","月度计划","▤"], ["approval","审批中心","✓"], ["fulfillment","系列采购生产","▥"], ["production-tracking","生产动态","◉"], ["batches","海运批次","⇢"],
   ["master","主数据","⌘"], ["audit","审计日志","◷"], ["permissions","权限测试","⊙"],
 ];
@@ -201,12 +202,12 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
   if (loading&&!data) return <BrandWelcome/>;
   if (!data) return <div className="empty" style={{paddingTop:160}}><p>{connectionError||"系统暂时无法读取数据"}</p><button className="btn" onClick={()=>void refresh().catch(()=>{})}>重新连接</button></div>;
   const actor=data.actor;
-  const roleNav=navigationForRole(actor.role).filter(key=>key!=="wholesale"||actor.role!=="运营"||actor.site==="印尼");
+  const roleNav=navigationForRole(actor.role).filter(key=>!["wholesale","distribution"].includes(key)||actor.role!=="运营"||actor.site==="印尼");
   const tab=roleNav.includes(selectedTab)?selectedTab:roleNav[0];
   const visibleNav = navItems.filter(([key]) => roleNav.includes(key)&&key!=="after-sales");
   const taskCount=(key:string)=>key==="overview"?data.myTasks.length:data.myTasks.filter(task=>task.tab===key).length;
   const taskBadge=(key:string)=>taskCount(key)>0?<span className="nav-task-count" aria-label={`${taskCount(key)}项待办`}>{taskCount(key)>99?"99+":taskCount(key)}</span>:null;
-  const shellT=(key:string)=>translateWholesale(tab==="wholesale"?wholesaleLocale.language:"zh",key);
+  const shellT=(key:string)=>translateWholesale(["wholesale","distribution"].includes(tab)?wholesaleLocale.language:"zh",key);
 
   const navLabel=(key:string,label:string)=>shellT(key==="sales"?(actor.role==="运营"?"每日销售导入":"销售看板"):label);
   const activeItem=visibleNav.find(([key])=>key===tab);
@@ -222,7 +223,7 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
     })}{!filteredNav.length&&<div className="nav-no-results">{shellT("没有匹配的工作区")}<button onClick={()=>setNavQuery("")}>{shellT("清除搜索")}</button></div>}</div>
   </>;
 
-  return <SkuImagesProvider key={`${actor.id}|${actor.role}|${actor.site}|${actor.channel}`} role={actor.role}><div className="app-shell" lang={tab==="wholesale"&&wholesaleLocale.language==="id"?"id":"zh-CN"}>
+  return <SkuImagesProvider key={`${actor.id}|${actor.role}|${actor.site}|${actor.channel}`} role={actor.role}><div className="app-shell" lang={["wholesale","distribution"].includes(tab)&&wholesaleLocale.language==="id"?"id":"zh-CN"}>
     <aside className="sidebar">
       <div className="brand"><img className="brand-logo" src="/loong-jump-logo-white.png" alt="LOONG JUMP"/><p>{shellT("品牌出海供应链控制塔")}</p><span className="brand-workspace">WORKSPACE</span></div>
       <nav className="nav" aria-label={shellT("系统导航")}>{navigation("desktop")}</nav>
@@ -240,6 +241,7 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
       </header>
       <div className="content"><Suspense fallback={<div className="panel" role="status">正在打开工作区…</div>}>{data.module&&data.module!==tab?<div className="panel" role="status">正在读取当前工作区…{connectionError&&<p>{connectionError}</p>}</div>:<>
         {actor.role==="运营" && (!actor.site || !actor.channel) && <div className="notice warn">当前账号尚未绑定站点和渠道，请联系管理员在“用户管理”中完成分配后再录入业务数据。</div>}
+        {tab==="distribution" && <WholesaleLanguageContext.Provider value={wholesaleLocale}><Distribution route={route} navigate={navigate} onChanged={()=>refresh(true)}/></WholesaleLanguageContext.Provider>}
         {tab==="wholesale" && <WholesaleLanguageContext.Provider value={wholesaleLocale}><Wholesale onChanged={()=>refresh(true)} route={route} navigate={navigate}/></WholesaleLanguageContext.Provider>}
         {tab==="reviews" && <BusinessReviews initialView={route.view} initialDate={route.entity}/>}
         {tab==="content-center" && <ContentCenter/>}
@@ -253,7 +255,7 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
         {tab==="overview" && <Overview data={data} go={setTab}/>}
         {tab==="suggestions" && <Suggestions data={data} act={act} busy={busy}/>}
         {tab==="new-products" && <NewProducts data={data} act={act} busy={busy}/>}
-        {["sales","suggestions"].includes(tab)&&["管理员","供应链","运营","运营主管"].includes(actor.role)&&<div className="notice info"><span>五站 TikTok／Shopee：查看近7天零销量、有库存的商品及日报缺口</span> <button className="btn" onClick={()=>setTab("promotions")}>零销量预警与优惠申请 →</button></div>}
+        {["sales","suggestions"].includes(tab)&&["管理员","供应链","运营","运营主管"].includes(actor.role)&&<div className="notice info"><span>五站 TikTok／Shopee：查看近30天零销量、有库存的商品及日报缺口</span> <button className="btn" onClick={()=>setTab("promotions")}>零销量预警与优惠申请 →</button></div>}
         {tab==="sales" && <SalesImport data={data} act={act} busy={busy}/>}
         {tab==="inventory" && <Inventory data={data} act={act} busy={busy} scope={inventoryScope} clearScope={()=>setInventoryScope(null)}/>}
         {tab==="receipt" && <Receipt data={data} act={act} busy={busy}/>}
