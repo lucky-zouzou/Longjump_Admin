@@ -326,15 +326,26 @@ test('独立服务器：公司登录、禁止伪造身份、岗位隔离、出�
  const paid=await request('finance','/api/wholesale',{action:'financeAdd',orderId:order.id,version:order.version,kind:'receipt',amount:100000,businessDate:day,reference:'HTTP-PAYMENT-001',note:'Verified actual bank credit',proofIds:[paymentFile.id]});assert.equal(paid.status,200,JSON.stringify(paid.body));
  view=await request('finance','/api/wholesale');order=view.body.orders[0];assert.equal(order.paid,100000);const financeEntry=order.entries.find(e=>e.reference==='HTTP-PAYMENT-001');assert.equal(order.financeFiles[0].finance_entry_id,financeEntry.id);
  assert.equal((await paymentUpload('finance',financeEntry.id)).status,200);view=await request('finance','/api/wholesale');assert.equal(view.body.orders[0].paid,100000);assert.equal(view.body.orders[0].financeFiles.length,2);
+ // Distributor accounts use their own cookie and explicit admin approval through real HTTP routes.
  const linkPayload={customerId:order.customer_id,action:'issue',version:0};
- assert.equal((await request('finance','/api/wholesale/distributor',linkPayload)).status,403);
- const linkResult=await request('sales','/api/wholesale/distributor',linkPayload);assert.equal(linkResult.status,200);
- const auth={Authorization:'Bearer '+linkResult.body.path.split('#')[1]};
- const ownPortal=await fetch(origin+'/api/distributor',{headers:auth});assert.equal(ownPortal.status,200);
+ assert.equal((await request('sales','/api/wholesale/distributor',linkPayload)).status,403);
+ assert.equal((await request('sales','/api/distribution',{action:'enroll',customerId:order.customer_id})).status,200);
+ let store=(await request('admin','/api/distribution')).body.stores.find(s=>s.customer_id===order.customer_id);
+ assert.equal(store.status,'pending');
+ const approveStore={action:'approve',customerId:store.customer_id,version:store.version,reason:'HTTP TEST ONLY 商家资料已核实'};
+ assert.equal((await request('finance','/api/distribution',approveStore)).status,403);
+ const invitation=await request('admin','/api/distribution',approveStore);assert.equal(invitation.status,200,JSON.stringify(invitation.body));
+ const activation=new URLSearchParams(invitation.body.activationPath.split('#')[1]).get('activate');
+ const loginDistributor=await fetch(origin+'/api/distributor?auth=login',{method:'POST',headers:{origin,'content-type':'application/json'},body:JSON.stringify({username:store.username,password:'HTTP-Test-Distributor-1113',activation})});
+ assert.equal(loginDistributor.status,200);const distributorCookie=loginDistributor.headers.get('set-cookie').split(';')[0];
+ assert.equal((await fetch(origin+'/api/distributor',{headers:{cookie:cookies.admin}})).status,401);
+ const ownPortal=await fetch(origin+'/api/distributor',{headers:{cookie:distributorCookie}});assert.equal(ownPortal.status,200);
  const mine=await ownPortal.json();assert.equal(mine.customer.name,order.customer.name);assert.deepEqual(mine.orders,[]);
- assert.equal((await fetch(origin+'/api/wholesale',{headers:auth})).status,401);
- assert.equal((await request('sales','/api/wholesale/distributor',{...linkPayload,action:'revoke',version:1})).status,200);
- assert.equal((await fetch(origin+'/api/distributor',{headers:auth})).status,401);
+ assert.equal((await fetch(origin+'/api/wholesale',{headers:{cookie:distributorCookie}})).status,401);
+ assert.equal((await request('sales','/api/wholesale/distributor',linkPayload)).status,403);
+ store=(await request('admin','/api/distribution')).body.stores.find(s=>s.customer_id===order.customer_id);
+ assert.equal((await request('admin','/api/distribution',{action:'suspend',customerId:store.customer_id,version:store.version,reason:'HTTP TEST ONLY 商家停用'})).status,200);
+ assert.equal((await fetch(origin+'/api/distributor',{headers:{cookie:distributorCookie}})).status,401);
  const foreignOrigin=await fetch(origin+'/api/wholesale',{method:'POST',headers:{origin:'https://attacker.test',cookie:cookies.admin,'content-type':'application/json'},body:'{}'});assert.equal(foreignOrigin.status,403);
  }finally{const done=once(child,'exit');child.kill('SIGTERM');await done;rmSync(root,{recursive:true,force:true})}
 });

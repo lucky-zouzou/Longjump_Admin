@@ -4,24 +4,34 @@
   const token=location.hash.slice(1);
   const notice=message=>{byId('notice').textContent=message;};
   const validToken=value=>/^[0-9a-f]{64}$/.test(value);
-  if(!validToken(token)){
-    notice('Gunakan tautan pribadi dari sales untuk melihat produk, pesanan, dan status retur Anda.');
-    const input=byId('private-link');
+  const authHeaders=()=>validToken(token)?{Authorization:'Bearer '+token}:{};
+  const store=new URLSearchParams(location.search).get('store');
+  let initialWorkspace=null;
+  const endpoint='/api/distributor'+(store?'?store='+encodeURIComponent(store):'');
+  function loginView(){
     byId('portal-access').hidden=false;
-    input.addEventListener('input',()=>input.setCustomValidity(''));
-    byId('open-private-link').addEventListener('submit',event=>{
-      event.preventDefault();
-      const link=URL.canParse(input.value)?new URL(input.value):null;
-      if(!link||link.origin!==location.origin||link.pathname!=='/distributor'||link.search||link.username||link.password||!validToken(link.hash.slice(1))){
-        input.setCustomValidity('Masukkan tautan distributor LOONG JUMP yang lengkap dari sales Anda.');
-        input.reportValidity();
-        return;
-      }
-      location.replace(link.hash);
-      location.reload();
-    });
-    return;
+    const activation=new URLSearchParams(location.hash.slice(1)),form=byId('store-login');
+    if(activation.has('activate')){
+      form.elements.username.value=activation.get('username')||'';
+      form.elements.password.autocomplete='new-password';
+      byId('activation-note').textContent='Aktifkan akun dengan membuat kata sandi 12–128 karakter. Tautan ini hanya berlaku sekali selama 48 jam.';
+      form.querySelector('button').textContent='Aktifkan akun';
+    }
+    form.onsubmit=async event=>{
+      event.preventDefault();form.querySelector('button').disabled=true;
+      try{const r=await fetch('/api/distributor?auth=login',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:form.elements.username.value,password:form.elements.password.value,activation:activation.get('activate')||''})});
+        const d=await r.json();if(!r.ok)throw Error(d.error);location.replace('/distributor?store='+encodeURIComponent(d.store));
+      }catch(e){notice(e.message);}finally{form.querySelector('button').disabled=false;}
+    };
   }
+  if(!validToken(token)){
+    if(location.hash.startsWith('#activate=')){notice('Selamat datang. Buat kata sandi untuk mengaktifkan toko Anda.');loginView();return;}
+    const session=await fetch(endpoint,{credentials:'same-origin',cache:'no-store'}).catch(()=>null);
+    if(session?.ok)initialWorkspace=await session.json();
+    if(!session?.ok){notice(session?.status===403?'Tautan ini bukan milik akun Anda. Masuk dengan akun yang sesuai.':'Masuk untuk melihat stok dan pesanan toko Anda.');loginView();return;}
+  }
+  byId('logout').hidden=false;
+  byId('logout').onclick=async()=>{const r=await fetch('/api/distributor?auth=logout',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:'{}'});if(r.ok)location.replace('/distributor');else notice('Gagal keluar. Coba lagi.');};
   const format=new Intl.NumberFormat('id-ID',{style:'currency',currency:'IDR',maximumFractionDigits:0});
   const money=value=>format.format(value);
   const labels={pending:'Menunggu persetujuan',approved:'Disetujui',packing:'Sedang dikemas',partial:'Dikirim sebagian',completed:'Selesai dikirim',closed:'Ditutup',rejected:'Ditolak',cancelled:'Dibatalkan'};
@@ -30,9 +40,10 @@
   const selection=new Map();
   let state,key,pending=null,busy=false;
   async function api(body){
-    const headers={Authorization:'Bearer '+token};
+    if(!body&&initialWorkspace){const value=initialWorkspace;initialWorkspace=null;return value;}
+    const headers=authHeaders();
     if(body)headers['Content-Type']='application/json';
-    const r=await fetch('/api/distributor',{method:body?'POST':'GET',credentials:'omit',cache:'no-store',headers,body:body?JSON.stringify(body):undefined});
+    const r=await fetch(endpoint,{method:body?'POST':'GET',credentials:'same-origin',cache:'no-store',headers,body:body?JSON.stringify(body):undefined});
     const data=await r.json();
     if(!r.ok){const error=new Error(data.error||'Coba lagi nanti.');error.status=r.status;throw error;}
     return data;
@@ -58,7 +69,7 @@
     '加小':'XS','中号':'M','小号':'S','大号':'L','中号均码':'M / satu ukuran',
     '月亮包':'Tas bulan sabit','龙耀系列布包':'Tas kain seri Long Yao','女士手提包':'Tas tangan wanita','女士斜挎包':'Tas selempang wanita','托特包':'Tas tote','背包':'Ransel'
   }));
-  const display=value=>typeof value==='string'?value.split(/[~～]/).map(part=>words.get(part.trim())||part.trim()).join(' · '):value;
+  const display=value=>typeof value==='string'?value.split(/[~～]/).map(part=>words.get(part.trim())||(/[\u3400-\u9fff]/.test(part)?'Informasi produk sedang dilengkapi':part.trim())).join(' · '):value;
   const fields=[['dimensions','Dimensi produk','cm'],['material','Bahan'],['color','Warna'],['specification','Ukuran / varian'],
     ['netWeightKg','Berat bersih','kg'],['grossWeightKg','Berat kotor','kg'],['unitVolumeCbm','Volume per unit','m³'],
     ['cartonQty','Isi per karton','unit'],['cartonLengthCm','Panjang karton','cm'],['cartonWidthCm','Lebar karton','cm'],
@@ -88,7 +99,7 @@
     if(!id)return;
     try{
       const response=await fetch('/api/distributor?photo='+encodeURIComponent(id),{
-        headers:{Authorization:'Bearer '+token},signal,credentials:'omit',cache:'no-store'
+        headers:authHeaders(),signal,credentials:'same-origin',cache:'no-store'
       });
       if(!response.ok)throw Object.assign(new Error('Foto tidak tersedia.'),{status:response.status});
       const blob=await response.blob();
@@ -103,6 +114,10 @@
       if(error.status===401)showError(error);
     }
   }
+  byId('download-photo').onclick=async()=>{
+    const id=detailProduct?.images[photoIndex];if(!id){notice('Foto belum tersedia.');return;}
+    try{const r=await fetch('/api/distributor?photo='+encodeURIComponent(id),{headers:authHeaders(),credentials:'same-origin',cache:'no-store'});if(!r.ok)throw Error('Foto tidak tersedia.');const blob=await r.blob(),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=detailProduct.sku+'-'+(photoIndex+1)+'.'+(blob.type==='image/png'?'png':blob.type==='image/webp'?'webp':'jpg');a.click();setTimeout(()=>URL.revokeObjectURL(url),10000);}catch(e){notice(e.message);}
+  };
   function renderPhoto(){
     if(photoLife)photoLife.abort();
     photoLife=new AbortController();
@@ -161,7 +176,7 @@
       info.append(detailLink);
       const buy=document.createElement('div');buy.className='product-buy';
       buy.append(entry('strong',money(p.price)),entry('small','Stok '+p.available));
-      qty.type='number';qty.min='0';qty.max=String(p.available);qty.step='1';qty.placeholder='0';qty.disabled=Boolean(pending)||busy;
+      qty.type='number';qty.min='0';qty.max=String(p.available);qty.step='1';qty.placeholder='0';qty.disabled=Boolean(pending)||busy||p.available<=0;
       qty.setAttribute('aria-label','Jumlah '+p.sku);qty.value=selection.get(p.sku)?.qty||'';
       qty.oninput=()=>{
         if(!qty.validity.valid){selection.delete(p.sku);qty.reportValidity();}
@@ -182,6 +197,7 @@
       const line=row(),info=document.createElement('div');info.append(entry('strong',o.order_no),entry('small',o.business_date+' · '+o.total_qty+' unit'));
       line.append(info,entry('span',labels[o.status]||o.status),entry('strong',money(o.total_amount)));
       const details=document.createElement('details');details.append(entry('summary','Rincian pesanan'));
+      if(o.payment)details.append(entry('p','Dana tercatat '+money(o.payment.paid)+' · Sisa pembayaran '+money(o.payment.outstanding)+(o.payment.refundDue?' · Pengembalian dana menunggu '+money(o.payment.refundDue):'')));
       for(const item of o.items)details.append(entry('p',item.sku+' · '+item.qty+' × '+money(item.price)));
       for(const shipment of o.shipments)details.append(entry('p',shipment.date+' · '+shipment.carrier+(shipment.tracking?' · Resi '+shipment.tracking:'')));
       line.append(details);history.append(line);
@@ -213,7 +229,7 @@
   }
   function showError(error){
     if(error.status===401){
-      byId('workspace').hidden=true;
+      byId('workspace').hidden=true;loginView();
       if(byId('product-dialog').open)byId('product-dialog').close();
       thumbnails.disconnect();listLife.abort();
     }

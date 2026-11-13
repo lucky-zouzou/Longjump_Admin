@@ -1,3 +1,4 @@
+import {storeInsert} from '../lib/distributor-accounts.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {fixture} from './fixtures.mjs';
@@ -11,6 +12,7 @@ import {indonesiaDate} from '../lib/wholesale.mjs';
 const day=indonesiaDate(),month=day.slice(0,7),origin='https://mitra.example.test';
 async function partner(f,seller=f.users.sales){
  const customerId=(await f.call(seller,'customerCreate',{name:'Toko '+seller.id,contact:'Rani',phone:'0812345678',city:'Bandung',address:'Jl. Contoh 1'})).id;
+ await storeInsert(f.db,customerId,f.users.admin,{approved:true}).run();
  const {path}=await manageDistributorLink(f.db,seller,{action:'issue',version:0,customerId});
  return {customerId,auth:'Bearer '+path.split('#')[1]};
 }

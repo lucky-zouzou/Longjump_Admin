@@ -31,3 +31,7 @@
 #service-form button { align-self:end; }
 #service-history article { padding:.6rem 0; border-top:1px solid #e1e7eb; overflow-wrap:anywhere; }
 #service-history p { margin:.25rem 0; }
+
+#portal-access{max-width:620px;margin:2rem auto}#store-login{display:grid;gap:16px}#store-login label{display:grid;gap:4px}#activation-note{margin-top:18px;line-height:1.7}#portal-access a{color:#245a92}
+#payment-desk{background:white;border:1px solid #d6e1e9;border-radius:12px;padding:1rem 1.2rem;margin:1rem 0}#payment-desk summary{font-weight:700;color:#1a4560}#payment-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));gap:14px;margin:18px 0}#payment-form label{display:grid;gap:5px;min-width:0}#payment-form input,#payment-form select{font:inherit;width:100%;max-width:100%;padding:.55rem;border:1px solid #b7c6c6;border-radius:7px}#payment-form button{align-self:end}#payment-history article{display:block}#payment-history p{overflow-wrap:anywhere}
+@media(max-width:700px){header{flex-wrap:wrap;gap:12px}header b{font-size:.85rem;letter-spacing:.1em}#logout{margin-left:auto}.apply-link{font-size:.85rem}#payment-desk,#service-desk{padding:16px}#portal-access{margin:1rem auto}}
