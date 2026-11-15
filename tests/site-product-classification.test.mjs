@@ -23,7 +23,7 @@ test('五国使用独立参数，同一SKU合并双平台销量、预留和可�
 });
 test('7天与28天独立分级，持续爆款、近期起量和放缓有清晰区别',()=>{
  const s=sample('印尼',0);s.sales.forEach(r=>r.qty=r.business_date>=days[21]?10:0);let p=result(s);assert.equal(p.period7.category,'hero');assert.equal(p.period28.category,'hot');assert.equal(p.category,'hot');assert.equal(p.momentum,'近期起量');
- s.sales.forEach(r=>r.qty=r.business_date>=days[21]?0:14);p=result(s);assert.equal(p.period28.category,'hero');assert.equal(p.period7.category,'steady');assert.equal(p.category,'slow');assert.equal(p.momentum,'近期放缓');
+ s.sales.forEach(r=>r.qty=r.business_date>=days[21]?0:14);p=result(s);assert.equal(p.period28.category,'hero');assert.equal(p.period7.category,'steady');assert.equal(p.category,'hero');assert.equal(p.momentum,'近期放缓');
  s.sales.forEach(r=>r.qty=r.business_date>=days[21]?1:14);p=result(s);assert.equal(p.category,'hero');assert.equal(p.period7.category,'steady');
  assert.equal(result(sample()).momentum,'持续爆款');
 });
@@ -38,7 +38,7 @@ test('库存不明、负数、预留超限不被另一平台抵消或默认为�
  for(const change of [s=>s.stocks.pop(),s=>s.stocks[0].qty=-1,s=>s.stocks[0].reserved_qty=101]){const s=sample();change(s);const p=result(s);assert.equal(p.available,null);assert.equal(p.cover,null);assert.equal(p.category,null);assert.equal(p.period28.category,'hero');}
 });
 test('站点连续有货须有证据；一平台有货即可，两个平台都无证据不可判滞销',()=>{
- const s=sample('印尼',0);s.availability.pop();assert.equal(result(s).category,'slow');s.observations=days.slice(-7).map(day=>({site:'印尼',channel:'TikTok',sku:'BAG-A',day,min_available:0}));assert.equal(result(s).category,null);
+ const s=sample('印尼',0);s.availability.pop();assert.equal(result(s).category,null);for(const offset of [-28,-29])for(const channel of ['TikTok','Shopee'])s.imports.push({site:'印尼',channel,business_date:shiftDay(cutoff,offset),report_kind:'complete'});assert.equal(result(s).category,'slow');s.observations=days.slice(-7).map(day=>({site:'印尼',channel:'TikTok',sku:'BAG-A',day,min_available:0}));assert.equal(result(s).category,null);
  s.availability=[];assert.equal(result(s).age,null);assert.equal(result(s).category,null);
 });
 test('同一时刻不同国家按当地昨日截止，销量不串到今天',()=>{

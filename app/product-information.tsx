@@ -34,9 +34,9 @@ async function upload(sku: string, file: File) {
 }
 const display = (value: unknown) => value == null || value === '' ? '待补录' : typeof value === 'number' ? value.toLocaleString('zh-CN', { maximumFractionDigits: 8 }) : String(value);
 const money = (value: unknown) => value == null ? '待核实' : Number(value).toLocaleString('zh-CN', { maximumFractionDigits: 4 });
-export default function ProductInformation() {
+export default function ProductInformation({initialSku=''}:{initialSku?:string}={}) {
     const [catalog, setCatalog] = useState<Row | null>(null), [error, setError] = useState(''), [message, setMessage] = useState(''), [busy, setBusy] = useState(false);
-    const [query, setQuery] = useState(''), [missingOnly, setMissingOnly] = useState(false), [page, setPage] = useState(0);
+    const [query, setQuery] = useState(initialSku), [missingOnly, setMissingOnly] = useState(false), [page, setPage] = useState(0);
     const [workbook, setWorkbook] = useState<Workbook | null>(null), [preview, setPreview] = useState<Row | null>(null), [units, setUnits] = useState(false), [mode, setMode] = useState('fill'), [syncPlanning, setSyncPlanning] = useState(true), [ack, setAck] = useState(false);
     const [selected, setSelected] = useState<Row | null>(null), [detail, setDetail] = useState<Row | null>(null), [form, setForm] = useState<Row>({}), [reason, setReason] = useState(''), [editing, setEditing] = useState(false), [manualPreview, setManualPreview] = useState<Row | null>(null), [quantity, setQuantity] = useState('');
     const [importPending, setImportPending] = useState(false);

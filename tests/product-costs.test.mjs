@@ -39,8 +39,8 @@ test('预览变更与并发不覆盖，生效日前不提前替换，维护锁�
  f.sqlite.prepare("UPDATE system_maintenance SET mode='backup',expires_at='2999-01-01' WHERE id='global'").run();if(!f.sqlite.prepare("SELECT id FROM system_maintenance WHERE id='global'").get())f.sqlite.prepare("INSERT INTO system_maintenance(id,mode,token_hash,actor_id,expires_at,updated_at) VALUES('global','backup','t','admin-1','2999-01-01','2026-10-28')").run();
  await assert.rejects(commit(f,{...p,effectiveDate:'2026-11-01'}),/备份|迁移/);
 }));
-const sample=(daily=5)=>{const cutoff='2026-11-04',dates=Array.from({length:28},(_,i)=>shiftDay(cutoff,i-27));return {stock:{sku:'BAG-A',site:'印尼',channel:'TikTok',qty:500,reserved_qty:0},sales:dates.map((d,i)=>({business_date:d,sku:'BAG-A',qty:daily,import_id:'i'+i})),completeDates:dates,availability:{listed_since:'2026-09-01',available_since:'2026-09-01',verified_through:cutoff},observations:[]};};
-test('四类阈值及边界、连续7天零销量与库存证据；销量不等于利润',()=>{
+const sample=(daily=5)=>{const cutoff='2026-11-04',dates=Array.from({length:30},(_,i)=>shiftDay(cutoff,i-29));return {stock:{sku:'BAG-A',site:'印尼',channel:'TikTok',qty:500,reserved_qty:0},sales:dates.map((d,i)=>({business_date:d,sku:'BAG-A',qty:daily,import_id:'i'+i})),completeDates:dates,availability:{listed_since:'2026-09-01',available_since:'2026-09-01',verified_through:cutoff},observations:[]};};
+test('四类阈值及边界、连续30天零销量与库存证据；销量不等于利润',()=>{
  for(const [daily,kind] of [[10,'hero'],[9.99,'hot'],[3,'hot'],[2.99,'steady'],[0,'slow']])assert.equal(classifyProduct(sample(daily),DEFAULT_RULES,now).category,kind);
  const declining=sample(10);declining.sales.slice(-7).forEach(s=>s.qty=1);assert.equal(classifyProduct(declining,DEFAULT_RULES,now).category,'hot');assert.equal(classifyProduct(declining,DEFAULT_RULES,now).trend,-.9);
  const slow=sample(0.4);assert.equal(classifyProduct(slow,DEFAULT_RULES,now).category,'slow');slow.stock.qty=1;assert.equal(classifyProduct(slow,DEFAULT_RULES,now).category,'steady');

@@ -1,3 +1,4 @@
+import {readStyleOperations} from '../lib/style-operations.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as X from 'xlsx';
@@ -238,8 +239,17 @@ test('通知按SKU保留签发时的标准箱规，兼容旧通知，实际装�
  const {id}=await f.issue(5);await f.approve(id);
  const view=async(noticeId=id)=> (await readFactoryDocuments(f.db,f.factory)).notices.find(n=>n.id===noticeId);
  assert.deepEqual((await view()).items[0].packingReference,spec);
- f.sqlite.prepare('UPDATE product_profiles SET data_json=? WHERE sku=?').run(JSON.stringify({...spec,cartonQty:8,notes:'private-test'}),sku);
+ f.sqlite.prepare('UPDATE product_profiles SET data_json=?,version=2 WHERE sku=?').run(JSON.stringify({...spec,cartonQty:8,notes:'private-test'}),sku);
  assert.deepEqual((await view()).items[0].packingReference,spec);
+ assert.equal((await view()).items[0].profileVersion,1);
+ f.sqlite.prepare("UPDATE sku_settings SET product_series='H001' WHERE sku=?").run(sku);
+ const archive=await readStyleOperations(f.db,f.users.admin,{series:'H001'});
+ assert.equal(archive.profiles.find(p=>p.sku===sku).version,2);
+ assert.equal(archive.notices.find(n=>n.sku===sku).profileVersion,1);
+ assert.equal(archive.production.length,1);
+ const financialView=await readStyleOperations(f.db,f.users.finance,{series:'H001'});
+ assert.deepEqual(financialView.notices,[]);assert.deepEqual(financialView.purchases,[]);
+ assert.equal(financialView.production[0].planned,archive.production[0].planned);
  await changeDispatch(f.db,f.factory,await f.pack(id,3));
  assert.equal((await view()).packing.rows[0].pcsPerCarton,3);
  assert.equal((await view()).packing.rows[0].width,39);

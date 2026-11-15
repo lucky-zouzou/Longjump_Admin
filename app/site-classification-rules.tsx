@@ -17,7 +17,7 @@ export default function SiteClassificationRules({data,onSave}:{data:Data;onSave:
    <article className="pc-rule pc-hero"><h3>爆款</h3><p>28天日均 ≥ {rules.heroDaily}；7天日均 ≥ {rules.heroRecentDaily}。两个周期独立判断，同时达到才标“持续爆款”。</p></article>
    <article className="pc-rule pc-hot"><h3>热卖款</h3><p>28天日均 ≥ {rules.hotDaily} 且低于 {rules.heroDaily}；7天日均 ≥ {rules.hotRecentDaily} 且低于 {rules.heroRecentDaily}。</p></article>
    <article className="pc-rule pc-steady"><h3>平销款</h3><p>健康证据完整，未达到28天爆款、热卖或滞销条件。近期起量、放缓另行显示。</p></article>
-   <article className="pc-rule pc-slow"><h3>滞销款</h3><p>可售库存大于0，上架至少{rules.minAge}天；连续有货7天零销售，或28天日均低于{rules.slowDaily}且库存覆盖至少{rules.slowCover}天。须有连续有货证据。</p></article>
+   <article className="pc-rule pc-slow"><h3>滞销款</h3><p>可售库存大于0，上架至少{rules.minAge}天；连续30个完整日有货且零销量，或近28天有销量、日均低于{rules.slowDaily}且库存覆盖至少{rules.slowCover}天。须有连续有货证据。</p></article>
   </div>
   <p className="notice info">销售分级按各周期完整日报判断；健康四类以28天为基础，另外核对上架和库存。缺报不计零，库存异常或观察期不足显示“待核实／观察”，销量不代表利润。</p>
   {error&&<p className="notice warn" role="alert">{error}</p>}{message&&<p className="notice info" role="status">{message}</p>}
