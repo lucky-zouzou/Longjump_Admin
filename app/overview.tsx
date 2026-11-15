@@ -1,21 +1,21 @@
 "use client";
 import {useState} from "react";
-import {navigationForRole} from "../lib/permissions.mjs";
 import Icon from "./workspace-icons";
+import StyleOperations from "./style-operations";
 import SupplyChain from "./supply-chain";
 import ZeroSalesNotifications from "./zero-sales-notifications";
 
 // These rows are already filtered by the server's role and site boundaries.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Row=Record<string,any>;
-type Props={data:{metrics:Row;actor:Row;currentMonth:string;myTasks:Row[];monthlyStatus:Row[];issues:Row[]};go:(tab:string,task?:Row)=>void};
+type Props={allowed:string[];data:{metrics:Row;actor:Row;currentMonth:string;myTasks:Row[];monthlyStatus:Row[];issues:Row[]};go:(tab:string,task?:Row)=>void};
 const number=(value:unknown)=>Number(value||0).toLocaleString("zh-CN");
 
 
-export default function Overview({data,go}:Props){
+export default function Overview({data,go,allowed}:Props){
   const [allTasks,setAllTasks]=useState(false),[allIssues,setAllIssues]=useState(false);
   const tasks=data.myTasks.filter(t=>t.kind!=='zero-sales-alert');
-  const m=data.metrics,allowed=navigationForRole(data.actor.role);
+  const m=data.metrics;
   const completeness=m.monthlyRequired?Math.min(100,100*m.monthlySubmitted/m.monthlyRequired):0;
   const sites=[...new Set(data.monthlyStatus.map(r=>String(r.site)))];
   const issues=[...data.issues].sort((a,b)=>Number(b.level==="critical")-Number(a.level==="critical"));
@@ -33,6 +33,7 @@ export default function Overview({data,go}:Props){
         {label:'建议启动生产',value:m.suggestedProductionQty,icon:'fulfillment',note:m.forecastPendingCount?`已核实部分；${m.forecastPendingCount}项待补数据`:'已扣库存、海运在途和生产中',tone:'production'},
       ].map(k=><article className={`overview-kpi ${k.tone}`} key={k.label}><div className="kpi-caption"><span>{k.label}</span><Icon name={k.icon}/></div><div className="kpi-number">{number(k.value)}<small>件</small></div><p>{k.note}{k.extra&&<small>{k.extra}</small>}</p></article>)}
     </section>
+    <StyleOperations role={data.actor.role} allowed={allowed} go={go}/>
     <ZeroSalesNotifications tasks={data.myTasks} actor={data.actor} go={go}/>
     <div className="overview-columns">
       <div className="overview-primary">

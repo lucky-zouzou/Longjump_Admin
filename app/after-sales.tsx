@@ -23,13 +23,13 @@ function exportCsv(records:Row[],month:string,quality=false){
  const escape=(x:any)=>`"${String(x??'').replace(/^[=+@-]/,"'$&").replaceAll('"','""')}"`;
  const u=URL.createObjectURL(new Blob(['\ufeff'+rows.map(r=>r.map(escape).join(',')).join('\r\n')],{type:'text/csv;charset=utf-8'}));const a=document.createElement('a');a.href=u;a.download=`${quality?'品质异常':'售后'}追溯-${month}.csv`;a.click();setTimeout(()=>URL.revokeObjectURL(u),1000);
 }
-export default function AfterSales({initialMonth="",kind="after_sale"}:{initialMonth?:string;kind?:string}){
+export default function AfterSales({initialMonth="",kind="after_sale",initialId=""}:{initialMonth?:string;kind?:string;initialId?:string}){
  const unified=kind==='all',quality=kind!=='after_sale',title=quality?'品质与交付异常':'售后反馈';
  const [createKind,setCreateKind]=useState('quality');
  async function exportMonthly(){setBusy(true);setError('');try{const fresh=await load();const XLSX=await import('xlsx');const report=qualityMonthlyReport(fresh.records,fresh.files,window.location.origin,fresh.denominators),book=XLSX.utils.book_new();for(const sheet of report.sheets){const ws=XLSX.utils.aoa_to_sheet(sheet.rows);ws['!cols']=sheet.rows[0].map(()=>({wch:22}));XLSX.utils.book_append_sheet(book,ws,sheet.name);}XLSX.writeFile(book,`品质售后月度追偿-${month}.xlsx`);}catch(e){setError(e instanceof Error?e.message:'导出失败')}finally{setBusy(false)}}
  const [stage,setStage]=useState(''),[channel,setChannel]=useState('');
  const [month,setMonth]=useState(initialMonth||today().slice(0,7)),[data,setData]=useState<Row|null>(null),[error,setError]=useState(''),[selected,setSelected]=useState(''),[creating,setCreating]=useState(false),[busy,setBusy]=useState(false),[filter,setFilter]=useState(''),[query,setQuery]=useState(''),[reason,setReason]=useState('');
- const detail=useRef<HTMLDivElement>(null),generation=useRef(0),pendingSelection=useRef('');
+ const detail=useRef<HTMLDivElement>(null),generation=useRef(0),pendingSelection=useRef(initialId);
  const load=useCallback(async()=>{const g=++generation.current,v=await request('/api/after-sales?month='+month+'&kind='+kind);if(g===generation.current)setData(v);return v;},[month,kind]);
  useEffect(()=>{setData(null);setCreating(false);setSelected(pendingSelection.current);pendingSelection.current='';void load().catch(e=>setError(e.message));const timer=setInterval(()=>{if(document.visibilityState==='visible')void load().catch(e=>setError(e.message))},15000);return()=>{generation.current++;clearInterval(timer)}},[load]);
  useEffect(()=>{if(selected||creating)detail.current?.scrollIntoView({behavior:'smooth',block:'start'})},[selected,creating]);

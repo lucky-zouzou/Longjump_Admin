@@ -1,0 +1,27 @@
+.style-operations{margin-block:16px;color:#19344c}
+.style-stages{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:12px;margin-top:16px}
+.style-stages>div{padding:4px 14px 6px;border-inline-start:2px solid #c2d6d9}
+.style-stages h3,.style-dossier h3{font-size:.96rem;margin:0 0 .55rem}
+.style-stages h3{display:flex;align-items:center;gap:6px}
+.style-stages svg{width:17px;height:17px;color:#426a7c}
+.style-stages button,.style-tabs button{background:transparent;border:0;color:#385c79;cursor:pointer;font:inherit}
+.style-stages button{display:block;padding:4px 0;font-size:.86rem;text-align:start}
+.style-stages button:hover,.style-operations .overview-link:hover{text-decoration:underline}
+.style-dossier{border-top:1px solid #d9e2e8;margin-top:17px;padding-top:16px;min-width:0}
+.style-picker,.style-picker label,.style-tabs{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.style-picker{justify-content:space-between}
+.style-picker select{width:auto;max-width:100%;min-height:36px}
+.style-tabs{margin:16px 0;border-bottom:1px solid #d9e2e8}
+.style-tabs button{padding:7px 5px;border-bottom:2px solid transparent}
+.style-tabs button[aria-pressed=true]{color:#173e5d;border-color:#336c87;font-weight:700}
+.style-dossier table{width:100%;font-size:.88rem}
+.style-dossier tr>th{text-align:start}
+.style-dossier td small,.style-dossier th small{display:block;font-weight:400;color:#587086;margin-top:4px}
+.style-dossier details,.style-dossier h3:not(:first-child){margin-top:16px}
+.style-dossier summary{cursor:pointer}
+.style-books{margin-top:14px;padding-top:10px;border-top:1px solid #e0e7ed}
+.style-finance dl{display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:16px}
+.style-finance dd{margin:4px 0;font-weight:700}
+.style-finance small{color:#576b80}
+.style-causes{padding-inline-start:24px}
+@media(max-width:620px){.style-stages{grid-template-columns:repeat(2,minmax(0,1fr))}.style-dossier .table-wrap{max-width:100%;overflow-x:auto}.style-dossier table{min-width:540px}}

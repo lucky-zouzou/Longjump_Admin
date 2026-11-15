@@ -246,13 +246,13 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
         {tab==="reviews" && <BusinessReviews initialView={route.view} initialDate={route.entity}/>}
         {tab==="content-center" && <ContentCenter/>}
         {tab==="creators" && <CreatorWorkspace initialId={route.entity}/>}
-        {tab==="cost-profit" && <CostProfit role={actor.role}/>}
+        {tab==="cost-profit" && <CostProfit key={route.view+route.entity} role={actor.role} initialView={route.view} initialSku={route.entity}/>}
         {tab==="sales-targets" && <SalesTargets initialMonth={route.month}/>}
         {tab==="business-actions" && <BusinessActions initialId={route.entity}/>}
         {tab==="clearance" && <Clearance initialMonth={route.month} initialId={route.entity} initialView={route.view}/>}
         {tab==="promotions" && <Promotions initialId={route.entity}/>}
-        {["after-sales","quality-incidents"].includes(tab) && <AfterSales key={tab} kind="all" initialMonth={route.month}/>}
-        {tab==="overview" && <Overview data={data} go={setTab}/>}
+        {["after-sales","quality-incidents"].includes(tab) && <AfterSales key={tab+route.month+route.entity} kind="all" initialMonth={route.month} initialId={route.entity}/>}
+        {tab==="overview" && <Overview data={data} go={setTab} allowed={roleNav}/>}
         {tab==="suggestions" && <Suggestions data={data} act={act} busy={busy}/>}
         {tab==="new-products" && <NewProducts data={data} act={act} busy={busy}/>}
         {["sales","suggestions"].includes(tab)&&["管理员","供应链","运营","运营主管"].includes(actor.role)&&<div className="notice info"><span>五站 TikTok／Shopee：查看近30天零销量、有库存的商品及日报缺口</span> <button className="btn" onClick={()=>setTab("promotions")}>零销量预警与优惠申请 →</button></div>}
