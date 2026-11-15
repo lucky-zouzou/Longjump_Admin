@@ -110,11 +110,10 @@ const isKnownRole = (role:string) => Object.prototype.hasOwnProperty.call(ROLE_P
 const parseResponse= parseWorkspaceResponse;
 
 const actorScope=(actor:Row)=>JSON.stringify([actor.id,actor.role,actor.site,actor.channel,actor.responsibility_unit]);
-async function readWorkspace(page:string,signal:AbortSignal,shell=false){
-  const url=new URLSearchParams({module:page});
-  if(shell&&(page==="home"||hasIndependentLedger(page)))url.set("navigation","shell");
+async function readWorkspace(page:string,signal:AbortSignal,mode:"page"|"tasks"="page"){
+  const url=new URLSearchParams({module:page,navigation:mode});
   const response=await fetch("/api/system?"+url,{cache:"no-store",signal:AbortSignal.any([signal,AbortSignal.timeout(20000)])});
-  try{return await parseResponse(response,{snapshot:true});}
+  try{return await parseResponse(response,{snapshot:mode==="page",tasksModule:mode==="tasks"?page:""});}
   catch(error){throw Object.assign(error as Error,{status:response.status});}
 }
 
@@ -131,9 +130,9 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
   useEffect(()=>{if(!more)return;const close=(event:KeyboardEvent)=>{if(event.key==="Escape")setMore(false);};window.addEventListener("keydown",close);return()=>window.removeEventListener("keydown",close);},[more]);
   const setTab=(page:string,task:Row={})=>{if(navigate({page,entity:task.entity||"",view:task.view||"",month:task.month||"",search:"",status:"all"})){setMore(false);setNavQuery("");}};
   const loader=useRef<ReturnType<typeof createWorkspaceLoader>|null>(null);
-  if(!loader.current)loader.current=createWorkspaceLoader((page:string,signal:AbortSignal)=>readWorkspace(page,signal,true));
+  if(!loader.current)loader.current=createWorkspaceLoader(readWorkspace);
   const taskLoader=useRef<ReturnType<typeof createWorkspaceLoader>|null>(null);
-  if(!taskLoader.current)taskLoader.current=createWorkspaceLoader(readWorkspace);
+  if(!taskLoader.current)taskLoader.current=createWorkspaceLoader((page:string,signal:AbortSignal)=>readWorkspace(page,signal,"tasks"));
   const lastTasks=useRef<{scope:string;tasks:Row[];at:number}|null>(null);
   const resolvedHome=useRef("");
   const requestGeneration=useRef(0);
@@ -182,15 +181,18 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
     let current=true;
     taskLoader.current!.load(selectedTab).then((result:Snapshot|undefined)=>{
       if(!current||!result||generation!==requestGeneration.current)return;
+      if(actorScope(result.actor)!==actorScope(data.actor)){
+        lastTasks.current=null;setData(null);setLoading(true);void refresh(true).catch(()=>{});return;
+      }
       lastTasks.current={scope:actorScope(result.actor),tasks:result.myTasks,at:Date.now()};
-      setData(result);setLastSync(new Date().toLocaleTimeString("zh-CN"));setConnectionError("");
+      setData(previous=>previous===data?{...previous,myTasks:result.myTasks,tasksDeferred:false}:previous);setLastSync(new Date().toLocaleTimeString("zh-CN"));setConnectionError("");
     }).catch((error:Error & {status:number})=>{
       if(!current||generation!==requestGeneration.current)return;
       if([401,403].includes(error.status)){lastTasks.current=null;setData(null);}
       setConnectionError(error.message);
     });
     return()=>{current=false;taskLoader.current!.cancel();};
-  },[data,selectedTab]);
+  },[data,selectedTab,refresh]);
   useVisibleRefresh(refresh,30000,!busy,true);
   useEffect(()=>{
     if(!route.entity||data?.module!==route.page||route.page==="wholesale")return;
@@ -341,8 +343,9 @@ function BrandWelcome() {
 function PageHead({title,desc,children}:{title:string;desc:string;children?:React.ReactNode}) {
   return <div className="page-head"><div><h3>{title}</h3><p>{desc}</p></div>{children}</div>;
 }
-function Panel({title,desc,children,action,collapsible=false}:{title:string;desc?:string;children:React.ReactNode;action?:React.ReactNode;collapsible?:boolean}) {
-  if(collapsible)return <details className="panel disclosure-panel"><summary><span><strong>{title}</strong>{desc&&<small>{desc}</small>}</span><span className="disclosure-hint" aria-hidden="true">展开 / 收起</span></summary><div className="disclosure-body">{action}{children}</div></details>;
+function Panel({title,desc,children,action,collapsible=false,lazyBody=false}:{title:string;desc?:string;children:React.ReactNode;action?:React.ReactNode;collapsible?:boolean;lazyBody?:boolean}) {
+  const [opened,setOpened]=useState(false);
+  if(collapsible)return <details className="panel disclosure-panel" onToggle={lazyBody?event=>{if(event.currentTarget.open)setOpened(true);}:undefined}><summary><span><strong>{title}</strong>{desc&&<small>{desc}</small>}</span><span className="disclosure-hint" aria-hidden="true">展开 / 收起</span></summary>{(!lazyBody||opened)&&<div className="disclosure-body">{action}{children}</div>}</details>;
   return <section className="panel"><div className="panel-head"><div><h4>{title}</h4>{desc&&<p>{desc}</p>}</div>{action}</div>{children}</section>;
 }
 function Pill({children,tone="blue"}:{children:React.ReactNode;tone?:string}) { return <span className={`pill ${tone}`}>{children}</span>; }
@@ -351,6 +354,22 @@ function Empty({children}:{children:React.ReactNode}) { return <div className="e
 
 function supplyKey(row:Row) { return `${row.site}|${row.channel}|${row.sku}`; }
 
+// Limit mounted table rows and thumbnail requests; filtering always searches the full authorized snapshot.
+function SkuTablePage({rows,children}:{rows:Row[];children:(visible:Row[])=>React.ReactNode}){
+  const [query,setQuery]=useState(""),[page,setPage]=useState(0);
+  const term=query.trim().toLowerCase();
+  const matches=term?rows.filter(row=>[row.sku,row.name,row.site,row.channel].some(value=>String(value??"").toLowerCase().includes(term))):rows;
+  const pageSize=50,pages=Math.max(1,Math.ceil(matches.length/pageSize)),current=Math.min(page,pages-1);
+  return <>
+    {(rows.length>pageSize||query)&&<div className="maintenance-actions">
+      <input aria-label="筛选清单" type="search" placeholder="搜索 SKU、商品、站点或渠道" value={query} onChange={event=>{setQuery(event.target.value);setPage(0);}}/>
+      <span aria-live="polite">共 {matches.length} 条 · 第 {current+1} / {pages} 页</span>
+      <button className="btn" disabled={current===0} onClick={()=>setPage(current-1)}>上一页</button>
+      <button className="btn" disabled={current+1>=pages} onClick={()=>setPage(current+1)}>下一页</button>
+    </div>}
+    {term&&!matches.length?<Empty>没有符合筛选条件的 SKU</Empty>:children(matches.slice(current*pageSize,(current+1)*pageSize))}
+  </>;
+}
 function SalesTrendChart({row}:{row:Row}) {
   const series:Array<{date:string;qty:number|null;observedQty?:number}> = row?.dailySeries||[];
   if(!series.length) return <Empty>暂无连续销售数据</Empty>;
@@ -402,8 +421,9 @@ function Suggestions({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
   const skuCatalog=[...data.skuSettings,...createdSkus.filter(s=>!data.skuSettings.some(r=>r.sku===s.sku))];
   const selected=data.suggestions.find(row=>supplyKey(row)===selectedKey)||data.suggestions[0];
   const effectiveSelectedKey=selected?supplyKey(selected):"";
+  const hasInitialTrend=Array.isArray(selected?.dailySeries);
   const [trend,setTrend]=useState<Row|null>(null),[trendError,setTrendError]=useState("");
-  useEffect(()=>{if(!effectiveSelectedKey)return;const abort=new AbortController();setTrend(null);setTrendError("");fetch(`/api/system?forecastTrend=${encodeURIComponent(effectiveSelectedKey)}`,{cache:"no-store",signal:abort.signal}).then(parseResponse).then(v=>setTrend({...v,key:effectiveSelectedKey})).catch(e=>{if(e.name!=="AbortError")setTrendError(e.message)});return()=>abort.abort();},[effectiveSelectedKey,data.generatedAt]);
+  useEffect(()=>{setTrendError("");if(!effectiveSelectedKey||hasInitialTrend)return;const abort=new AbortController();setTrend(null);fetch(`/api/system?forecastTrend=${encodeURIComponent(effectiveSelectedKey)}`,{cache:"no-store",signal:abort.signal}).then(parseResponse).then(v=>setTrend({...v,key:effectiveSelectedKey})).catch(e=>{if(e.name!=="AbortError")setTrendError(e.message)});return()=>abort.abort();},[effectiveSelectedKey,data.generatedAt,hasInitialTrend]);
   const loadSetting=(row:Row)=>{
     setSetting({sku:row.sku,name:row.name||"",productSeries:row.product_series==="待归类"?"":row.product_series||"",supplierName:row.supplier_name||"",factoryName:row.factory_name||"",productType:row.product_type||"老款",unitPrice:String(row.unit_price??0),productionLeadDays:String(row.production_lead_days??21),seaLeadDays:String(row.sea_lead_days??35),reviewCycleDays:String(row.review_cycle_days??7),serviceLevel:String(row.service_level??.95),minOrderQty:String(row.min_order_qty??1),orderMultiple:String(row.order_multiple??1),cartonQty:String(row.carton_qty??1),unitVolumeCbm:String(row.unit_volume_cbm??0)});
   };
@@ -431,11 +451,11 @@ function Suggestions({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
       <SupplyCoverage rows={data.suggestions}/>
     </Panel>
     <Panel title="56天销量趋势" desc={selected?`${selected.site} · ${selected.channel} · ${selected.sku}｜数据可信度：${selected.confidence}（已导入${selected.dataDays}天）`:"先录入销售数据"} action={data.suggestions.length?<select className="compact-select" aria-label="选择趋势SKU" value={effectiveSelectedKey} onChange={event=>setSelectedKey(event.target.value)}>{data.suggestions.map(row=><option key={supplyKey(row)} value={supplyKey(row)}>{row.site} · {row.channel} · {row.sku}</option>)}</select>:undefined}>
-      {trendError?<p role="alert">{trendError}</p>:selected?trend?.key===effectiveSelectedKey?<SalesTrendChart row={{...selected,...trend}}/>:<p role="status">正在读取所选SKU趋势…</p>:<Empty>请先录入库存和每日销售数据</Empty>}
+      {hasInitialTrend?<SalesTrendChart row={selected}/>:trendError?<p role="alert">{trendError}</p>:selected?trend?.key===effectiveSelectedKey?<SalesTrendChart row={{...selected,...trend}}/>:<p role="status">正在读取所选SKU趋势…</p>:<Empty>请先录入库存和每日销售数据</Empty>}
     </Panel>
     <Panel title="动态建议清单" desc="海运补货量解决运输周期缺口；启动生产量覆盖生产＋海运全周期">
-      <div className="table-wrap"><table className="supply-table"><thead><tr><th>状态</th><th>站点/渠道</th><th>SKU</th><th className="num">7日日均</th><th className="num">趋势</th><th className="num">库存/可售天数</th><th className="num">海运/ETA</th><th className="num">生产中</th><th className="num">建议海运补货</th><th className="num">建议启动生产</th></tr></thead>
-      <tbody>{data.suggestions.length===0?<tr><td colSpan={10}><Empty>请先录入库存和销售数据，系统将自动形成动态建议</Empty></td></tr>:data.suggestions.map((r)=><tr key={supplyKey(r)}><td><Pill tone={ALERT_TONE[r.alertLevel]||"blue"}>{r.alertLabel}</Pill><div className="cell-note">{r.alertReason}</div></td><td>{r.site}<br/><span className="cell-note">{r.channel}</span></td><td><strong><SkuLabel sku={r.sku}/></strong><br/><span className="cell-note">{r.name||"—"}</span></td><td className="num">{Number(r.avg7).toFixed(1)}</td><td className="num" style={{color:r.trendRate>=.2?"var(--blue)":r.trendRate<0?"var(--green)":undefined}}>{r.previous7>0?`${r.trendRate>=0?"+":""}${pct(r.trendRate)}`:"—"}</td><td className="num" style={{color:r.qty<0?"var(--red)":undefined}}>{fmt(r.qty)}<div className="cell-note">{days(r.stockCoverDays)}</div></td><td className="num">{fmt(r.seaInTransit)}<div className="cell-note">{r.nextSeaEta||"未填写ETA"}</div></td><td className="num">{fmt(r.productionInProgress)}</td><td className="num">{r.suggestedReplenishment==null?"待核实":fmt(r.suggestedReplenishment)}</td><td className="num"><strong>{r.suggestedProduction==null?"待核实":fmt(r.suggestedProduction)}</strong><div className="cell-note">目标 {r.targetQty==null?"待核实":fmt(r.targetQty)}</div></td></tr>)}</tbody></table></div>
+      <SkuTablePage rows={data.suggestions}>{visible=><div className="table-wrap"><table className="supply-table"><thead><tr><th>状态</th><th>站点/渠道</th><th>SKU</th><th className="num">7日日均</th><th className="num">趋势</th><th className="num">库存/可售天数</th><th className="num">海运/ETA</th><th className="num">生产中</th><th className="num">建议海运补货</th><th className="num">建议启动生产</th></tr></thead>
+      <tbody>{data.suggestions.length===0?<tr><td colSpan={10}><Empty>请先录入库存和销售数据，系统将自动形成动态建议</Empty></td></tr>:visible.map((r)=><tr key={supplyKey(r)}><td><Pill tone={ALERT_TONE[r.alertLevel]||"blue"}>{r.alertLabel}</Pill><div className="cell-note">{r.alertReason}</div></td><td>{r.site}<br/><span className="cell-note">{r.channel}</span></td><td><strong><SkuLabel sku={r.sku}/></strong><br/><span className="cell-note">{r.name||"—"}</span></td><td className="num">{Number(r.avg7).toFixed(1)}</td><td className="num" style={{color:r.trendRate>=.2?"var(--blue)":r.trendRate<0?"var(--green)":undefined}}>{r.previous7>0?`${r.trendRate>=0?"+":""}${pct(r.trendRate)}`:"—"}</td><td className="num" style={{color:r.qty<0?"var(--red)":undefined}}>{fmt(r.qty)}<div className="cell-note">{days(r.stockCoverDays)}</div></td><td className="num">{fmt(r.seaInTransit)}<div className="cell-note">{r.nextSeaEta||"未填写ETA"}</div></td><td className="num">{fmt(r.productionInProgress)}</td><td className="num">{r.suggestedReplenishment==null?"待核实":fmt(r.suggestedReplenishment)}</td><td className="num"><strong>{r.suggestedProduction==null?"待核实":fmt(r.suggestedProduction)}</strong><div className="cell-note">目标 {r.targetQty==null?"待核实":fmt(r.targetQty)}</div></td></tr>)}</tbody></table></div>}</SkuTablePage>
     </Panel>
     {hasPermission(actor.role,"sku.manage")&&<Panel collapsible title="SKU系列与供应参数" desc="产品系列是供应链合并下单、工厂合并生产的必要依据">
       <div className="sku-catalog-toolbar"><div><strong>商品建档与供应资料</strong><p>首次入系统先新增 SKU，已有商品选择后维护参数。</p></div><button type="button" className="btn primary" disabled={busy||creatingSku} onClick={()=>{setCreatingSku(true);setSkuNotice('');}}>＋ 新增 SKU</button></div>
@@ -662,7 +682,7 @@ function SalesImport({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
     <PageHead title={canImport?"每日销售数据导入":"销售数据监控"} desc={canImport?`${actor.site} · ${actor.channel}｜由当前站点运营每日批量导入，系统自动扣减库存并更新补货建议`:"销售数据仅由各站点运营每日导入；可在此查看销售和投产比，并按岗位权限维护错误批次"}>
       <Pill tone={updated===data.salesScopeStatus.length?"green":"red"}>昨日报完整 {updated}/{data.salesScopeStatus.length}</Pill>
     </PageHead>
-    {!canImport&&<SalesDashboard actor={actor} refreshToken={data}/>}
+    {!canImport&&<SalesDashboard actor={actor} refreshToken={data.generatedAt}/>}
     <Panel title="每日销售更新状态" desc="完整日报或零销售确认后才完成；部分销售和费用补录仍显示待核对">
       <div className="sales-scope-grid">{data.salesScopeStatus.map(row=><div className={classNames("sales-scope-card",row.updatedExpected?"updated":"pending")} key={`${row.site}-${row.channel}`}><div><strong>{row.site}</strong><span>{row.channel}</span></div><Pill tone={row.updatedExpected?"green":"red"}>{row.updatedExpected?"日报已完整":row.importedExpected?"已导入 · 待核对":"昨日待导入"}</Pill><b>{row.expectedDate} · {fmt(row.salesExpected)}件</b><small>7天 {fmt(row.sales7Qty)}件｜最近 {row.lastSaleDate||"无记录"}</small></div>)}</div>
     </Panel>
@@ -701,9 +721,9 @@ function SalesImport({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
     </Panel>
     </>}
     <SalesAdSpend data={data} act={act} busy={busy}/>
-    <details className="panel"><summary>查询历史销售明细</summary><HistoryBrowser kind="sales" actor={actor} refreshToken={data.generatedAt}/></details>
+    <Panel collapsible lazyBody title="查询历史销售明细"><HistoryBrowser kind="sales" actor={actor} refreshToken={data.generatedAt}/></Panel>
     <SalesImportHistory data={data} act={act} busy={busy}/>
-    {canImport&&<Panel collapsible title="销售经营看板" desc="展开查看趋势、SKU排名和投产比；日常导入优先展示"><SalesDashboard actor={actor} refreshToken={data}/></Panel>}
+    {canImport&&<Panel collapsible lazyBody title="销售经营看板" desc="展开查看趋势、SKU排名和投产比；日常导入优先展示"><SalesDashboard actor={actor} refreshToken={data.generatedAt}/></Panel>}
 
   </>;
 }
@@ -727,7 +747,7 @@ function Inventory({data,act,busy,scope,clearScope}:{data:Snapshot;act:Act;busy:
       }}/>
     </Panel>}
     <Panel title="库存余额" desc="运输到仓先进入待上架或隔离；退货经质检放行后恢复原渠道可售库存">
-      <div className="table-wrap"><table><thead><tr><th>站点</th><th>渠道</th><th>SKU</th><th>商品</th><th className="num">账面可售 / 可用</th><th className="num">待上架</th><th className="num">已预留</th><th className="num">隔离</th><th>更新时间</th><th></th></tr></thead><tbody>{visibleInventory.length===0?<tr><td colSpan={10}><Empty>暂无库存，请通过到仓单或管理员建立期初库存</Empty></td></tr>:visibleInventory.map(r=><tr key={`${r.site}-${r.channel}-${r.sku}`}><td>{r.site}</td><td>{r.channel}</td><td><strong><SkuLabel sku={r.sku}/></strong></td><td>{r.name||"—"}</td><td className="num"><strong>{fmt(r.qty)} / {fmt(Number(r.qty)-Number(r.reserved_qty||0))}</strong></td><td className="num">{fmt(r.pending_shelf_qty)}</td><td className="num">{fmt(r.reserved_qty)}</td><td className="num" style={{color:r.quarantine_qty>0?"var(--amber)":undefined}}>{fmt(r.quarantine_qty)}</td><td>{readableDate(r.updated_at)}</td><td><div style={{display:"flex",gap:5,flexWrap:"wrap"}}>{canSubmit&&<button className="btn" onClick={()=>select(r)}>盘点</button>}{r.quarantine_qty>0&&hasPermission(actor.role,"inventory.hold.resolve")&&<><button className="btn" onClick={()=>resolve(r,"release")}>质检放行</button><button className="btn danger" onClick={()=>resolve(r,"writeoff")}>报损</button></>}</div></td></tr>)}</tbody></table></div>
+      <SkuTablePage key={scope?supplyKey(scope):"all"} rows={visibleInventory}>{visible=><div className="table-wrap"><table><thead><tr><th>站点</th><th>渠道</th><th>SKU</th><th>商品</th><th className="num">账面可售 / 可用</th><th className="num">待上架</th><th className="num">已预留</th><th className="num">隔离</th><th>更新时间</th><th></th></tr></thead><tbody>{visibleInventory.length===0?<tr><td colSpan={10}><Empty>暂无库存，请通过到仓单或管理员建立期初库存</Empty></td></tr>:visible.map(r=><tr key={`${r.site}-${r.channel}-${r.sku}`}><td>{r.site}</td><td>{r.channel}</td><td><strong><SkuLabel sku={r.sku}/></strong></td><td>{r.name||"—"}</td><td className="num"><strong>{fmt(r.qty)} / {fmt(Number(r.qty)-Number(r.reserved_qty||0))}</strong></td><td className="num">{fmt(r.pending_shelf_qty)}</td><td className="num">{fmt(r.reserved_qty)}</td><td className="num" style={{color:r.quarantine_qty>0?"var(--amber)":undefined}}>{fmt(r.quarantine_qty)}</td><td>{readableDate(r.updated_at)}</td><td><div style={{display:"flex",gap:5,flexWrap:"wrap"}}>{canSubmit&&<button className="btn" onClick={()=>select(r)}>盘点</button>}{r.quarantine_qty>0&&hasPermission(actor.role,"inventory.hold.resolve")&&<><button className="btn" onClick={()=>resolve(r,"release")}>质检放行</button><button className="btn danger" onClick={()=>resolve(r,"writeoff")}>报损</button></>}</div></td></tr>)}</tbody></table></div>}</SkuTablePage>
     </Panel>
     {canSubmit&&<Panel title={actor.role==="管理员"?"管理员库存修正":"提交盘点差异"} desc={actor.role==="管理员"?"用于期初库存或经过核实的例外修正；全程记录审计":"运营只提交实盘数，供应链复核通过后才改变可售库存"}>
       <div className="form-grid">

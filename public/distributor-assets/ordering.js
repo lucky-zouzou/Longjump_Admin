@@ -26,6 +26,7 @@
   }
   if(!validToken(token)){
     if(location.hash.startsWith('#activate=')){notice('Selamat datang. Buat kata sandi untuk mengaktifkan toko Anda.');loginView();return;}
+    if(document.body.dataset.guest==='true'){loginView();return;}
     const session=await fetch(endpoint,{credentials:'same-origin',cache:'no-store'}).catch(()=>null);
     if(session?.ok)initialWorkspace=await session.json();
     if(!session?.ok){notice(session?.status===403?'Tautan ini bukan milik akun Anda. Masuk dengan akun yang sesuai.':'');loginView();return;}

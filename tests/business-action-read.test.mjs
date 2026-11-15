@@ -61,3 +61,20 @@ test('站点清单与原全站筛选排序一致，跨站任务链接和运营�
  await assert.rejects(read(f.users.indonesia,'泰国'),e=>e.status===403);
  await assert.rejects(read(f.users.admin,'无效站点'),e=>e.status===400);
 });
+
+test('导航查询能直接从索引读取未结行动，兼容运营站点过滤',async t=>{
+ const f=setup(t);
+ const prepare=f.db.prepare;
+ for(const actor of [f.users.admin,f.users.indonesia]){
+   let plan;
+   f.db.prepare=sql=>{
+     if(sql.includes('json_extract(snapshot_json')&&sql.includes("status<>'resolved'")){
+       const params=actor.role==='运营'?[actor.site,actor.channel]:[];
+       plan=f.sqlite.prepare('EXPLAIN QUERY PLAN '+sql).all(...params).map(row=>row.detail).join(' ');
+     }
+     return prepare(sql);
+   };
+   await businessActionTasks(f.db,actor);
+   assert.match(plan,/USING COVERING INDEX idx_business_action_open_tasks/);
+ }
+});

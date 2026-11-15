@@ -172,3 +172,10 @@ test('WhatsApp 号码与版本校验，禁用负责人和维护期不能错误�
  await assert.rejects(mutateDistribution(f.db,f.users.admin,{...save,version:1,whatsapp:''}));
  assert.equal(f.sqlite.prepare('SELECT whatsapp FROM distributor_sales_contacts').get().whatsapp,'+6281234567890');
 });
+
+test('公开登录页可直接展示表单，有会话的商家仍由接口核验且页面不携带密钥',async()=>{
+ const get=cookie=>handleDistributor(new Request('https://example.test/distributor',{headers:{cookie}}),null);
+ const token='a'.repeat(64),guest=await get('lj_session=internal'),present=await get('lj_distributor='+token);
+ assert.match(await guest.text(),/data-guest="true"/);
+ const html=await present.text();assert.match(html,/data-guest="false"/);assert.ok(!html.includes(token));assert.match(present.headers.get('cache-control'),/no-store/);
+});

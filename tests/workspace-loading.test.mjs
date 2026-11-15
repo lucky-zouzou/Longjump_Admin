@@ -107,3 +107,43 @@ test('独立台账首屏可先校验身份，导航待办随后独立更新，�
   assert.equal((await svc.GET(request('business-actions'))).status,403);
  }finally{f.sqlite.close();}
 });
+
+test('库存首屏跳过各类无关单据，导航补读只返回待办且与原结果一致',async t=>{
+  const f=systemFixture();t.after(()=>f.sqlite.close());
+  const read=(module,nav='')=>svc.GET(new Request('http://localhost/api/system?module='+module+(nav?'&navigation='+nav:'')));
+  for(const actor of [f.users.admin,f.users.indonesia]){
+    svc.setActor(actor);
+    const full=await(await read('inventory')).json();
+    const prepare=f.db.prepare,queries=[];
+    f.db.prepare=query=>{queries.push(query);return prepare(query);};
+    try {
+      const first=await parseWorkspaceResponse(await read('inventory','page'),{snapshot:true});
+      assert.equal(first.tasksDeferred,true);
+      assert.ok(!queries.some(q=>/FROM (sales_records|business_actions|transport_batches|series_purchase_orders|new_product_projects)\b/i.test(q)));
+      for(const key of ['actor','inventory','skuSettings','countRequests'])assert.deepEqual(first[key],full[key]);
+      const tasks=await parseWorkspaceResponse(await read('inventory','tasks'),{tasksModule:'inventory'});
+      assert.deepEqual(tasks.myTasks,full.myTasks);
+      assert.deepEqual(Object.keys(tasks).sort(),['actor','module','generatedAt','myTasks'].sort());
+    }finally{f.db.prepare=prepare;}
+  }
+  svc.setActor(f.users.admin);
+  for(const module of ['overview','approval']){
+    const first=await(await read(module,'page')).json(),full=await(await read(module)).json();
+    assert.deepEqual(first.myTasks,full.myTasks);assert.equal(first.tasksDeferred,undefined);
+  }
+  svc.setActor({...f.users.admin,role:'工厂'});
+  assert.equal((await read('business-actions','tasks')).status,403);
+});
+
+test('补货首屏携带首个 SKU 曲线，按 SKU 读取结果与完整预测相同',async t=>{
+  const f=systemFixture();t.after(()=>f.sqlite.close());svc.setActor(f.users.admin);
+  const read=async query=>await(await svc.GET(new Request('http://localhost/api/system?'+query))).json();
+  const page=await read('module=suggestions&navigation=page'),full=await read('');
+  const first=page.suggestions[0];assert.ok(first.dailySeries.length>0);
+  assert.deepEqual(first.dailySeries,full.suggestions[0].dailySeries);
+  assert.ok(page.suggestions.slice(1).every(r=>!r.dailySeries));
+  for(const row of full.suggestions.slice(0,2)){
+    const trend=await read('forecastTrend='+encodeURIComponent([row.site,row.channel,row.sku].join('|')));
+    assert.deepEqual(trend.dailySeries,row.dailySeries);
+  }
+});
