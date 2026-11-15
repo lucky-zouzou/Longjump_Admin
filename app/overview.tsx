@@ -33,7 +33,6 @@ export default function Overview({data,go,allowed}:Props){
         {label:'建议启动生产',value:m.suggestedProductionQty,icon:'fulfillment',note:m.forecastPendingCount?`已核实部分；${m.forecastPendingCount}项待补数据`:'已扣库存、海运在途和生产中',tone:'production'},
       ].map(k=><article className={`overview-kpi ${k.tone}`} key={k.label}><div className="kpi-caption"><span>{k.label}</span><Icon name={k.icon}/></div><div className="kpi-number">{number(k.value)}<small>件</small></div><p>{k.note}{k.extra&&<small>{k.extra}</small>}</p></article>)}
     </section>
-    <StyleOperations role={data.actor.role} allowed={allowed} go={go}/>
     <ZeroSalesNotifications tasks={data.myTasks} actor={data.actor} go={go}/>
     <div className="overview-columns">
       <div className="overview-primary">
@@ -54,6 +53,7 @@ export default function Overview({data,go,allowed}:Props){
         {data.issues.length?<><div className="overview-risk-list">{(allIssues?issues:issues.slice(0,4)).map((issue,i)=><article className={issue.level==='critical'?'critical':'warning'} key={`${issue.type}-${i}`}><div><span className="risk-dot"/><strong>{issue.type}</strong><small>{issue.level==='critical'?'优先':'关注'}</small></div><p>{issue.detail}</p></article>)}</div><footer>{data.issues.length>4&&<button className="overview-link" aria-expanded={allIssues} onClick={()=>setAllIssues(!allIssues)}>{allIssues?'收起预警':`展开本页 ${data.issues.length} 条预警`}</button>}{actionLink('suggestions','进入驾驶舱')}</footer></>:<div className="overview-empty"><Icon name="approval"/><strong>暂无高优先级供应风险</strong><span>持续关注销售与库存变化。</span></div>}
       </section>
     </div>
+    <StyleOperations role={data.actor.role} allowed={allowed} go={go}/>
     <SupplyChain metrics={m} allowed={allowed} go={go}/>
   </div>;
 }

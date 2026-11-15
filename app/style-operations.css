@@ -25,3 +25,9 @@
 .style-finance small{color:#576b80}
 .style-causes{padding-inline-start:24px}
 @media(max-width:620px){.style-stages{grid-template-columns:repeat(2,minmax(0,1fr))}.style-dossier .table-wrap{max-width:100%;overflow-x:auto}.style-dossier table{min-width:540px}}
+.style-history,.style-variants{margin-block:14px;min-width:0}
+.style-history select{width:auto}
+.style-history .table-wrap{overflow-x:auto}
+.style-history table{width:100%;text-align:start}
+.style-history td small{display:block;color:#587086}
+.style-history details,.style-finance details{overflow-wrap:anywhere;font-size:.86rem}

@@ -33,16 +33,29 @@ function useRead(url:string){
  },[url,revision]);
  return {...(answer?.url===url?answer:{}),retry:()=>{setAnswer(null);setRevision(n=>n+1);}};
 }
+function ClosedBooks(){
+ const [month,setMonth]=useState('');
+ const {data,error,retry}=useRead('/api/style-operations?view=finance-history'+(month?'&month='+encodeURIComponent(month):''));
+ if(!data)return <p role="status">{error||'正在读取月结记录…'} {error&&<button onClick={retry}>重试</button>}</p>;
+ if(!data.month)return <p>暂无已关账月份。</p>;
+ return <div className="style-history"><label>已关账月份 <select value={data.month} onChange={e=>setMonth(e.target.value)}>{data.months.map((m:string)=><option key={m}>{m}</option>)}</select></label>
+  {data.books===null?<p>该月关账时未保存系列归属，请在财务月结账核对原始记录。</p>:data.books.length===0?<p>该月关账时没有已归类的 SKU。</p>:<div className="table-wrap"><table><thead><tr><th>月结时系列 / SKU</th><th>已核贡献 · CNY</th><th>期末应收 · IDR</th><th>当月净回款 · IDR</th><th>混款订单</th></tr></thead><tbody>
+   {data.books.map((b:Row)=><tr key={b.series}><th>{b.series}<details><summary>{b.skus.length} 个 SKU</summary>{b.skus.join('、')}</details></th><td>{num(b.confirmedCny)}<small>{b.covered} 条已核 · {b.pending} 条待对账</small></td><td>{num(b.receivableIdr)}</td><td>{num(b.netReceiptsIdr)}</td><td>{b.mixed?<details><summary>{b.mixed} 笔待分摊</summary>{b.mixedRefs.join('、')}</details>:'—'}</td></tr>)}
+  </tbody></table></div>}</div>;
+}
 function Finance({series}:{series:string}){
  const {data,error,retry}=useRead('/api/style-operations?view=finance&series='+encodeURIComponent(series));
  if(!data)return <p role="status">{error||'正在核对财务账…'} {error&&<button onClick={retry}>重新读取</button>}</p>;
+ if(data.unavailable)return <p>该月关账时没有保存本系列的财务归属，请核对原始账单。</p>;
  return <div className="style-finance"><dl>
   <div><dt>本月已核贡献利润</dt><dd>{money(data.confirmedCny,'CNY')}</dd><small>{data.covered} 条已核 · {data.pending} 条待对账</small></div>
   <div><dt>印尼批发期末应收</dt><dd>{money(data.receivableIdr,'IDR')}</dd><small>截至 {data.asOf} 已实现销售与净回款之差，按单核算</small></div>
   <div><dt>印尼批发本月净回款</dt><dd>{money(data.netReceiptsIdr,'IDR')}</dd><small>{data.from} 至 {data.asOf} · 已核销收款扣除退款</small></div>
- </dl><small>应收与回款归入 {data.orders} 笔纯本系列订单，另有 {data.mixed} 笔混款订单待分摊。</small></div>;
+ </dl><small>应收与回款归入 {data.orders} 笔纯本系列订单，另有 {data.mixed} 笔混款订单待分摊。</small>{data.mixed>0&&<details><summary>查看待分摊订单号</summary>{data.mixedRefs.join('、')}</details>}</div>;
 }
 function Sales({sites,offline}:{sites:Row[];offline:Row}){
+ const [site,setSite]=useState('');
+ const selected=sites.find(s=>s.site===site);
  const period=(row:Row)=>row.qty===null?'待核实':num(row.qty)+' 件';
  const combined=(channels:Row[],field:string)=>{
   const periods=channels.map(c=>c[field]),covered=periods.reduce((s,p)=>s+p.completeDays,0);
@@ -50,8 +63,11 @@ function Sales({sites,offline}:{sites:Row[];offline:Row}){
  };
  return <><p>线上销量取截至各站当地昨日的 TikTok、Shopee 完整日报。可售库存已扣预留，货值取已确认的站点到仓成本。</p>
   <div className="table-wrap"><table><thead><tr><th>站点 / 截至</th><th>近7天销量</th><th>近28天销量</th><th>当前可售</th><th>海运在途</th><th>可售库存货值</th></tr></thead><tbody>
-  {sites.map(s=><tr key={s.site}><th>{s.site}<small>{s.cutoff}</small></th><td>{combined(s.channels,'week')}</td><td>{combined(s.channels,'fourWeeks')}</td><td>{num(s.available)}{s.available!=null&&' 件'}{s.missingStock>0&&<small>{s.missingStock} 项库存待核</small>}</td><td>{num(s.transit)} 件</td><td>{money(s.inventoryValueCny,'CNY')}{(s.missingStock>0||s.missingCost>0)&&<small>已知部分 · {s.missingCost} 项缺完整成本</small>}</td></tr>)}
-  </tbody></table></div><details><summary>按平台核对销量</summary><div className="table-wrap"><table><thead><tr><th>站点 / 平台</th><th>近7天已核销量</th><th>近28天已核销量</th></tr></thead><tbody>{sites.flatMap(s=>s.channels.map((c:Row)=><tr key={s.site+c.channel}><td>{s.site} · {c.channel}</td><td>{period(c.week)} · {c.week.completeDays}/7 天</td><td>{period(c.fourWeeks)} · {c.fourWeeks.completeDays}/28 天</td></tr>))}</tbody></table></div></details><p>印尼线下批发与分销 · 截至 {offline.cutoff}，近7天净售 {num(offline.week)} 件，近28天净售 {num(offline.fourWeeks)} 件。现销按发货，寄售按确认售出，均扣已登退货。</p></>;
+  {sites.map(s=><tr key={s.site}><th><button className="overview-link" aria-expanded={site===s.site} onClick={()=>setSite(site===s.site?'':s.site)}>{s.site} · SKU 明细</button><small>{s.cutoff}</small></th><td>{combined(s.channels,'week')}</td><td>{combined(s.channels,'fourWeeks')}</td><td>{num(s.available)}{s.available!=null&&' 件'}{s.missingStock>0&&<small>{s.missingStock} 项库存待核</small>}</td><td>{num(s.transit)} 件</td><td>{money(s.inventoryValueCny,'CNY')}{(s.missingStock>0||s.missingCost>0)&&<small>已知部分 · {s.missingCost} 项缺完整成本</small>}</td></tr>)}
+  </tbody></table></div>
+  {selected&&<section className="style-variants"><h3>{site} · SKU 销量与库存</h3><p>近 7 天 / 28 天只累计完整日报中的销量。已收日报 {selected.channels.reduce((n:number,c:Row)=>n+c.week.completeDays,0)}/14、{selected.channels.reduce((n:number,c:Row)=>n+c.fourWeeks.completeDays,0)}/56 份。</p>
+   {selected.variants.length?<div className="table-wrap"><table><thead><tr><th>SKU</th><th>近7天已核销量</th><th>近28天已核销量</th><th>当前可售</th><th>海运在途</th><th>库存货值 · CNY</th></tr></thead><tbody>{selected.variants.map((r:Row)=><tr key={r.sku}><th><SkuLabel sku={r.sku}/></th><td>{num(r.week)}</td><td>{num(r.fourWeeks)}</td><td>{num(r.available)}{r.missingStock>0&&<small>{r.missingStock} 项库存待核</small>}</td><td>{num(r.transit)}</td><td>{num(r.inventoryValueCny)}{(r.missingCost>0||r.missingStock>0)&&<small>货值待核齐</small>}</td></tr>)}</tbody></table></div>:<p>该站点暂无本系列的销售、库存或在途记录。</p>}
+  </section>}<details><summary>按平台核对销量</summary><div className="table-wrap"><table><thead><tr><th>站点 / 平台</th><th>近7天已核销量</th><th>近28天已核销量</th></tr></thead><tbody>{sites.flatMap(s=>s.channels.map((c:Row)=><tr key={s.site+c.channel}><td>{s.site} · {c.channel}</td><td>{period(c.week)} · {c.week.completeDays}/7 天</td><td>{period(c.fourWeeks)} · {c.fourWeeks.completeDays}/28 天</td></tr>))}</tbody></table></div></details><p>印尼线下批发与分销 · 截至 {offline.cutoff}，近7天净售 {num(offline.week)} 件，近28天净售 {num(offline.fourWeeks)} 件。现销按发货，寄售按确认售出，均扣已登退货。</p></>;
 }
 function Dossier({go,allowed}:{go:Go;allowed:string[]}){
  const [series,setSeries]=useState(''),[tab,setTab]=useState(0),[finance,setFinance]=useState(false);
@@ -67,14 +83,14 @@ function Dossier({go,allowed}:{go:Go;allowed:string[]}){
   {tab===1&&data.manufacturing&&<><h3>关联采购单</h3>{data.purchases.length?<div className="table-wrap"><table><thead><tr><th>采购单</th><th>供应商 / 生产负责人</th><th>本系列件数</th><th>承诺交期 / 质检</th></tr></thead><tbody>{data.purchases.map((p:Row)=><tr key={p.id}><td>{link('fulfillment',p.order_ref||p.id,{entity:p.id,month:p.month})}</td><td>{p.supplier_name||'待登记'}<small>{p.owner||'待分配'}</small></td><td>{num(p.qty)}</td><td>{p.promised_completion_date||'待确认'}<small>{p.qc_status==='passed'?'质检通过':p.qc_status==='rejected'?'质检未通过':'待质检'}</small></td></tr>)}</tbody></table></div>:<p>尚无关联采购单。</p>}
   <h3>发货通知与装箱</h3>{data.notices.length?<div className="table-wrap"><table><thead><tr><th>发货通知 / SKU</th><th>目的地 / 件数</th><th>发单时资料版本</th><th>装箱单 / 主批次</th><th>供应链跟进</th></tr></thead><tbody>{data.notices.map((n:Row,i:number)=><tr key={n.notice_no+i}><td>{link('fulfillment',n.notice_no,{entity:n.purchase_order_id})}<small><SkuLabel sku={n.sku}/></small></td><td>{n.site} · {n.channel}<small>{n.qty} 件 · {n.status==='cancelled'?'已取消':n.approval_status==='pending'?'待审核':'已登记'}</small></td><td>{n.profileVersion?'V'+n.profileVersion:'当时未登记'}</td><td>{n.packing_no||'待装箱'}<small>{n.batch_no||'待关联海运'}</small></td><td>{n.owner||'待分配'}</td></tr>)}</tbody></table></div>:<p>尚无本系列的发货通知。</p>}
   <h3>目的地运输分批</h3>{data.legs.length?<div className="table-wrap"><table><thead><tr><th>运输分批</th><th>目的地</th><th>节点 / 负责人</th><th>发运 / 实收</th><th>预计到仓</th></tr></thead><tbody>{data.legs.map((r:Row)=><tr key={r.id}><td>{link('batches',r.leg_no,{entity:r.id})}</td><td>{r.site} · {r.channel}</td><td>{stageName(r.stage)}<small>{r.owner||r.stage_owner}</small></td><td>{r.qty} / {r.received} 件</td><td>{r.eta||'待补'}</td></tr>)}</tbody></table></div>:<p>尚无关联目的地分批。</p>}</>}
-  {tab===2&&<Sales sites={data.sites} offline={data.offline}/>}
+  {tab===2&&<Sales key={data.series} sites={data.sites} offline={data.offline}/>}
   {tab===3&&<><h3>近28天品质原因</h3>{data.ranking.length?<ol className="style-causes">{data.ranking.map((r:Row)=><li key={r.reason}>{r.reason} · {r.qty} 件 / {r.count} 条</li>)}</ol>:<p>这段时间没有已提交的品质反馈。</p>}
   {data.cases.length>0&&<div className="table-wrap"><table><thead><tr><th>反馈单 / SKU</th><th>原因 / 责任</th><th>跟进人 / 复查批次</th><th>工厂应赔 / 已登记赔付</th></tr></thead><tbody>{data.cases.map((r:Row)=><tr key={r.id}><td>{link('quality-incidents',r.case_no,{entity:r.id,month:r.business_date.slice(0,7)})}<small><SkuLabel sku={r.sku}/> · {r.site}</small></td><td>{r.reason}<small>{r.factory||''} · {r.responsibility||'待定责'}</small></td><td>{r.owner||'待分配'}<small>{r.validationBatch||'复查批次待补'}{r.reviewDate&&' · '+r.reviewDate}{r.outcome==='failed'?' · 复查未通过':r.outcome==='effective'?' · 复查通过':''}</small></td><td>{r.claim==null?'待核定':money(r.claim/100,r.currency)} / {r.paid==null?'—':money(r.paid/100,r.currency)}</td></tr>)}</tbody></table></div>}</>}
   <div className="style-books"><button className="overview-link" aria-expanded={finance} onClick={()=>setFinance(!finance)}>{finance?'收起财务核算':'查看本系列贡献、应收与回款'}<Icon name="chevron"/></button>{finance&&<Finance key={data.series} series={data.series}/>}</div>
  </div>;
 }
 export default function StyleOperations({role,allowed,go}:{role:string;allowed:string[];go:Go}){
- const [open,setOpen]=useState(false);
+ const [open,setOpen]=useState(false),[history,setHistory]=useState(false);
  const manager=['管理员','财务'].includes(role);
  return <section className="overview-card style-operations"><header><div><h2>全链路经营</h2><p>从商品资料到售后复查，按业务环节进入工作。</p></div>{manager&&<button className="overview-link" aria-expanded={open} onClick={()=>setOpen(!open)}>{open?'收起款式档案':'按款式查看'}<Icon name="chevron"/></button>}</header>
  <div className="style-stages">{stages.map(s=>{
@@ -82,5 +98,5 @@ export default function StyleOperations({role,allowed,go}:{role:string;allowed:s
   if(!entries.length)return null;
   return <div key={s.name}><h3><Icon name={s.icon}/>{s.name}</h3>{entries.map(([page,label,view])=><button key={page+view} onClick={()=>go(page,{view})}>{label}</button>)}</div>;
  })}</div>
- {manager&&open&&<Dossier allowed={allowed} go={go}/>}</section>;
+ {manager&&open&&<><Dossier allowed={allowed} go={go}/><div className="style-books"><button className="overview-link" aria-expanded={history} onClick={()=>setHistory(!history)}>历史月结 · 按系列对账<Icon name="chevron"/></button>{history&&<ClosedBooks/>}</div></>}</section>;
 }
