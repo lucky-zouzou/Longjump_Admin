@@ -6,7 +6,7 @@ import {workspaceTasks} from "../../../lib/workspace-tasks.mjs";
 import {purchaseDocumentsForSubmission,FactoryDocumentError,keyOf} from "../../../lib/purchase-documents.mjs";
 import {packingTransportContext} from "../../../lib/factory-documents.mjs";
 import {cardSummaries} from "../../../lib/best-tracking-auto.mjs";
-import {moduleSnapshot,MODULE_FIELDS,mobileModules} from "../../../lib/workspace-model.mjs";
+import {moduleSnapshot,MODULE_FIELDS,mobileModules,hasIndependentLedger} from "../../../lib/workspace-model.mjs";
 import {readHistory,historyCsv,HistoryError} from "../../../lib/history-query.mjs";
 import {previewInbound,submitInbound,readInboundDocuments,InboundError} from "../../../lib/inbound.mjs";
 import {createCatalogSku,SkuCatalogError} from "../../../lib/sku-catalog.mjs";
@@ -144,6 +144,9 @@ export async function GET(request:Request) {
       const forecast=await loadForecast(database(),actor),row=forecast.suggestions.find(r=>`${r.site}|${r.channel}|${r.sku}`===forecastTrend);
       if(!row)throw new HttpError(404,"当前权限内未找到该SKU趋势");
       return Response.json({dailySeries:row.dailySeries,generatedAt:nowIso()});
+    }
+    if(requestUrl.searchParams.get("navigation")==="shell" && hasIndependentLedger(module)){
+      return Response.json(publicSystemSnapshot({module,actor,currentMonth:monthKey(),generatedAt:nowIso(),metrics:{},myTasks:[],tasksDeferred:true},actor.role),{headers:{"Cache-Control":"private, no-store"}});
     }
     // Independent workspaces fetch their own ledgers; avoid constructing the global forecast.
     if(["clearance","content-center","creators","cost-profit","sales-targets","wholesale","distribution","reviews","after-sales","quality-incidents","promotions","business-actions","audit","users","permissions","production-tracking"].includes(module)){

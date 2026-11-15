@@ -7,7 +7,7 @@ const HistoryBrowser=lazy(()=>import("./history-browser"));
 import Overview from "./overview";
 import WorkspaceIcon from "./workspace-icons";
 import {WorkspaceGuard,useWorkspaceRoute,useVisibleRefresh} from "./workspace-hooks";
-import {NAV_GROUPS,mobileModules} from "../lib/workspace-model.mjs";
+import {NAV_GROUPS,mobileModules,hasIndependentLedger} from "../lib/workspace-model.mjs";
 import {createWorkspaceLoader} from "../lib/workspace-loader.mjs";
 import {parseWorkspaceResponse} from "../lib/workspace-response.mjs";
 const InboundReceipts=lazy(()=>import("./inbound-receipts"));
@@ -79,7 +79,7 @@ type Identity = { userId:string; displayName:string; email:string; fullName:stri
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Row = Record<string,any>;
 type Snapshot = {
-  module?:string; productionTracking:Row[]; generatedAt:string; actor:Row; currentMonth:string; metrics:Row; inventory:Row[]; movements:Row[]; sales:Row[]; imports:Row[];
+  module?:string; tasksDeferred?:boolean; productionTracking:Row[]; generatedAt:string; actor:Row; currentMonth:string; metrics:Row; inventory:Row[]; movements:Row[]; sales:Row[]; imports:Row[];
   supplyPolicies:Row[]; forecastHistory:Row[]; planChanges:Row[]; receipts:Row[]; submissions:Row[]; approvals:Row[]; batches:Row[]; skuSettings:Row[]; audit:Row[];
   users:ManagedUser[]; suggestions:Row[]; monthlyStatus:Row[]; issues:Row[]; newProductProjects:Row[];
   salesScopeStatus:Row[]; salesTopSkus:Row[]; purchaseOrders:Row[]; productionOrders:Row[];
@@ -109,6 +109,15 @@ const isKnownRole = (role:string) => Object.prototype.hasOwnProperty.call(ROLE_P
 
 const parseResponse= parseWorkspaceResponse;
 
+const actorScope=(actor:Row)=>JSON.stringify([actor.id,actor.role,actor.site,actor.channel,actor.responsibility_unit]);
+async function readWorkspace(page:string,signal:AbortSignal,shell=false){
+  const url=new URLSearchParams({module:page});
+  if(shell&&(page==="home"||hasIndependentLedger(page)))url.set("navigation","shell");
+  const response=await fetch("/api/system?"+url,{cache:"no-store",signal:AbortSignal.any([signal,AbortSignal.timeout(20000)])});
+  try{return await parseResponse(response,{snapshot:true});}
+  catch(error){throw Object.assign(error as Error,{status:response.status});}
+}
+
 export default function ControlTower({identity}:{identity:Identity}) {return <WorkspaceGuard><ControlTowerWorkspace identity={identity}/></WorkspaceGuard>;}
 function ControlTowerWorkspace({ identity }: { identity:Identity }) {
   const wholesaleLocale=useWholesalePreference(identity.userId);
@@ -122,7 +131,10 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
   useEffect(()=>{if(!more)return;const close=(event:KeyboardEvent)=>{if(event.key==="Escape")setMore(false);};window.addEventListener("keydown",close);return()=>window.removeEventListener("keydown",close);},[more]);
   const setTab=(page:string,task:Row={})=>{if(navigate({page,entity:task.entity||"",view:task.view||"",month:task.month||"",search:"",status:"all"})){setMore(false);setNavQuery("");}};
   const loader=useRef<ReturnType<typeof createWorkspaceLoader>|null>(null);
-  if(!loader.current)loader.current=createWorkspaceLoader(async (page:string,signal:AbortSignal)=>parseResponse(await fetch(`/api/system?module=${encodeURIComponent(page)}`,{cache:"no-store",signal:AbortSignal.any([signal,AbortSignal.timeout(20000)])}),{snapshot:true}));
+  if(!loader.current)loader.current=createWorkspaceLoader((page:string,signal:AbortSignal)=>readWorkspace(page,signal,true));
+  const taskLoader=useRef<ReturnType<typeof createWorkspaceLoader>|null>(null);
+  if(!taskLoader.current)taskLoader.current=createWorkspaceLoader(readWorkspace);
+  const lastTasks=useRef<{scope:string;tasks:Row[];at:number}|null>(null);
   const resolvedHome=useRef("");
   const requestGeneration=useRef(0);
   const [data,setData] = useState<Snapshot|null>(null);
@@ -137,10 +149,22 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
     try {
       const result=await loader.current!.load(selectedTab,{force});
       if(!result||generation!==requestGeneration.current)return;
-      setData(result);setConnectionError("");setLastSync(new Date().toLocaleTimeString("zh-CN"));setLoading(false);
+      const scope=actorScope(result.actor);
+      const previous=lastTasks.current?.scope===scope?lastTasks.current:null;
+      if(result.tasksDeferred){
+        if(!previous)setLastSync("");
+        const recent=previous&&!force&&Date.now()-previous.at<30000;
+        setData({...result,myTasks:previous?.tasks||[],tasksDeferred:!recent});
+      }else{
+        lastTasks.current={scope,tasks:result.myTasks,at:Date.now()};
+        setLastSync(new Date().toLocaleTimeString("zh-CN"));
+        setData(result);
+      }
+      setConnectionError("");setLoading(false);
       if(selectedTab==="home"){resolvedHome.current=result.module;navigate({page:result.module},true);}
     } catch(error) {
       if(generation!==requestGeneration.current)return;
+      if([401,403].includes((error as Row)?.status)){lastTasks.current=null;setData(null);}
       setConnectionError(error instanceof Error?error.message:"更新失败");setLoading(false);throw error;
     }
   },[selectedTab,navigate]);
@@ -150,6 +174,23 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
     else {resolvedHome.current="";void refresh().catch(()=>{});}
     return()=>{requestGeneration.current++;loader.current!.cancel();};
   },[refresh,selectedTab]);
+  // Start navigation counts after the authorized page has mounted. Switching
+  // back within the polling interval reuses only counts for this exact actor.
+  useEffect(()=>{
+    if(!data?.tasksDeferred||data.module!==selectedTab)return;
+    const generation=requestGeneration.current;
+    let current=true;
+    taskLoader.current!.load(selectedTab).then((result:Snapshot|undefined)=>{
+      if(!current||!result||generation!==requestGeneration.current)return;
+      lastTasks.current={scope:actorScope(result.actor),tasks:result.myTasks,at:Date.now()};
+      setData(result);setLastSync(new Date().toLocaleTimeString("zh-CN"));setConnectionError("");
+    }).catch((error:Error & {status:number})=>{
+      if(!current||generation!==requestGeneration.current)return;
+      if([401,403].includes(error.status)){lastTasks.current=null;setData(null);}
+      setConnectionError(error.message);
+    });
+    return()=>{current=false;taskLoader.current!.cancel();};
+  },[data,selectedTab]);
   useVisibleRefresh(refresh,30000,!busy,true);
   useEffect(()=>{
     if(!route.entity||data?.module!==route.page||route.page==="wholesale")return;
@@ -236,10 +277,10 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
         <div className="workspace-breadcrumb"><span className="breadcrumb-section">{shellT(activeGroup?.label||"工作台")}</span><WorkspaceIcon name="chevron"/><h2>{activeItem?navLabel(activeItem[0],activeItem[1]):shellT("全链路可视化协同")}</h2></div>
         <div className="workspace-top-actions">
           {hasPermission(actor.role,"backup.export")&&<button className="btn" onClick={exportBackup}>{shellT("导出备份")}</button>}
-          <span className={`status-pill ${connectionError?"connection-failed":""}`} role="status">{connectionError?shellT("更新失败 · 数据可能已过时"):`${shellT(["wholesale","reviews","after-sales","quality-incidents"].includes(selectedTab)?"导航已更新":"工作区已更新")} ${lastSync||"—"}`}</span>{connectionError&&<button className="btn danger" onClick={()=>void refresh().catch(()=>{})}>{shellT("重新连接")}</button>}
+          <span className={`status-pill ${connectionError?"connection-failed":""}`} role="status">{connectionError?shellT("更新失败 · 数据可能已过时"):data.tasksDeferred?shellT("正在更新导航待办"):`${shellT(hasIndependentLedger(selectedTab)?"导航已更新":"工作区已更新")} ${lastSync||"—"}`}</span>{connectionError&&<button className="btn danger" onClick={()=>void refresh().catch(()=>{})}>{shellT("重新连接")}</button>}
         </div>
       </header>
-      <div className="content"><Suspense fallback={<div className="panel" role="status">正在打开工作区…</div>}>{data.module&&data.module!==tab?<div className="panel" role="status">正在读取当前工作区…{connectionError&&<p>{connectionError}</p>}</div>:<>
+      <div className="content"><Suspense fallback={<div className="panel" role="status">正在打开工作区…</div>}>{data.module&&data.module!==tab&&!(tab===selectedTab&&hasIndependentLedger(tab))?<div className="panel" role="status">正在读取当前工作区…{connectionError&&<p>{connectionError}</p>}</div>:<>
         {actor.role==="运营" && (!actor.site || !actor.channel) && <div className="notice warn">当前账号尚未绑定站点和渠道，请联系管理员在“用户管理”中完成分配后再录入业务数据。</div>}
         {tab==="distribution" && <WholesaleLanguageContext.Provider value={wholesaleLocale}><Distribution route={route} navigate={navigate} onChanged={()=>refresh(true)}/></WholesaleLanguageContext.Provider>}
         {tab==="wholesale" && <WholesaleLanguageContext.Provider value={wholesaleLocale}><Wholesale onChanged={()=>refresh(true)} route={route} navigate={navigate}/></WholesaleLanguageContext.Provider>}
@@ -248,7 +289,7 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
         {tab==="creators" && <CreatorWorkspace initialId={route.entity}/>}
         {tab==="cost-profit" && <CostProfit key={route.view+route.entity} role={actor.role} initialView={route.view} initialSku={route.entity}/>}
         {tab==="sales-targets" && <SalesTargets initialMonth={route.month}/>}
-        {tab==="business-actions" && <BusinessActions initialId={route.entity}/>}
+        {tab==="business-actions" && <BusinessActions key={route.entity} initialId={route.entity} actor={actor}/>}
         {tab==="clearance" && <Clearance initialMonth={route.month} initialId={route.entity} initialView={route.view}/>}
         {tab==="promotions" && <Promotions initialId={route.entity}/>}
         {["after-sales","quality-incidents"].includes(tab) && <AfterSales key={tab+route.month+route.entity} kind="all" initialMonth={route.month} initialId={route.entity}/>}

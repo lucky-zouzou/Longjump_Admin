@@ -90,3 +90,20 @@ test('历史计划一次汇总保留月份、站点、平台、冲销和退货�
     assert.deepEqual(own.forecastHistory.map(r=>r.id),['nov','oct']);
   }finally{f.sqlite.close();}
 });
+
+test('独立台账首屏可先校验身份，导航待办随后独立更新，依赖快照的页面仍返回业务数据',async()=>{
+ const f=systemFixture();try{
+  svc.setActor(f.users.admin);
+  const request=module=>new Request('http://localhost/api/system?navigation=shell&module='+module);
+  const prepare=f.db.prepare,sql=[];f.db.prepare=query=>{sql.push(query);return prepare(query);};
+  const first=await parseWorkspaceResponse(await svc.GET(request('business-actions')),{snapshot:true});
+  assert.equal(first.tasksDeferred,true);assert.deepEqual(first.myTasks,[]);assert.equal(first.actor.id,f.users.admin.id);
+  assert.equal(sql.length,0);
+  const complete=await parseWorkspaceResponse(await svc.GET(new Request('http://localhost/api/system?module=business-actions')),{snapshot:true});
+  assert.ok(sql.length>0);assert.ok(complete.myTasks.length>0);
+  const inventory=await parseWorkspaceResponse(await svc.GET(request('inventory')),{snapshot:true});
+  assert.equal(inventory.tasksDeferred,undefined);assert.ok(inventory.inventory.length>0);
+  svc.setActor({...f.users.admin,role:'工厂'});
+  assert.equal((await svc.GET(request('business-actions'))).status,403);
+ }finally{f.sqlite.close();}
+});

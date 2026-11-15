@@ -44,3 +44,20 @@ test('lightweight navigation badge keeps ownership, verification scopes and over
  const admin=await businessActionTasks(f.db,f.users.admin,now);assert.match(admin[0].detail,/1条经营行动/);assert.match(admin[0].detail,/1个站点渠道/);assert.match(admin[0].detail,/1条已到期/);
  const ops=await businessActionTasks(f.db,f.users.indonesia,now);assert.match(ops[0].detail,/1条经营行动/);assert.match(ops[0].detail,/1条证据待核实/);assert.match(ops[0].detail,/1条已到期/);
 });
+
+test('站点清单与原全站筛选排序一致，跨站任务链接和运营范围独立核验',async t=>{
+ const f=setup(t);
+ f.add('id-tiktok');f.add('id-shopee',{channel:'Shopee'});f.add('th-tiktok',{site:'泰国'});
+ const read=(actor,site,focus='')=>readBusinessActions(f.db,actor,new Date(),{site,focus});
+ const all=await read(f.users.admin,'');
+ const id=await read(f.users.admin,'印尼');
+ assert.deepEqual(id.records,all.records.filter(r=>r.site==='印尼'));
+ const deep=await read(f.users.finance,'印尼','th-tiktok');
+ assert.equal(deep.readSite,'泰国');assert.equal(deep.focusChannel,'TikTok');
+ assert.deepEqual(deep.records.map(r=>r.id),['th-tiktok']);
+ assert.equal((await read(f.users.admin,'越南')).latestEvidenceAt,null);
+ const hidden=await read(f.users.indonesia,'印尼','th-tiktok');
+ assert.equal(hidden.focusChannel,'');assert.deepEqual(hidden.records.map(r=>r.id),['id-tiktok']);
+ await assert.rejects(read(f.users.indonesia,'泰国'),e=>e.status===403);
+ await assert.rejects(read(f.users.admin,'无效站点'),e=>e.status===400);
+});
