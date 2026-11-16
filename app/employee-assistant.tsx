@@ -6,7 +6,7 @@ import {assistantName,wakeQuestion} from '../lib/employee-wake.mjs';
 type Entry={id:string;title:string};
 type Topic={scope:'internal'|'public';key:string;title:string};
 type Mode='auto'|'internal'|'public';
-type Home={role:string;intro:string;guides:Entry[];recent:Topic[]};
+type Home={edition?:string;revision?:string;role:string;intro:string;guides:Entry[];recent:Topic[]};
 type Citation={start:number;end:number;url:string;title:string};
 type Answer={topic?:Topic;saved?:boolean;verifiedAt?:string;citations?:Citation[];answer:string;notice:string;source:string;intent:string;guide:(Entry & {steps:string[];next:string;page:string})|null};
 type Turn={question:string;reply:Answer};
@@ -89,18 +89,30 @@ export default function EmployeeAssistant({initialQuestion,page,close,go}:{initi
   },[initialQuestion,submit,homeAttempt]);
   useEffect(()=>{const el=transcript.current;if(el)el.scrollTop=el.scrollHeight;},[turns,busy]);
   const last=turns.at(-1)?.reply.guide?.id||'';
+  const [file,setFile]=useState<File|null>(null),[uploading,setUploading]=useState(false),[receipt,setReceipt]=useState('');
+  async function uploadHandbook(){
+    if(!file||uploading||home?.role!=='管理员')return;
+    setUploading(true);setError('');setReceipt('');
+    try {
+      if(file.size>256000)throw new Error('手册文件超过 256 KB');
+      const r=await fetch('/api/employee-assistant?handbook=1',{method:'POST',headers:{'Content-Type':'application/json','X-Handbook-Revision':home.revision||''},body:file,signal:AbortSignal.timeout(30000)});
+      const result=await r.json();if(!r.ok)throw new Error(result.error||'手册导入失败');
+      setReceipt('员工手册 '+result.edition+' 已生效，已载入 '+result.count+' 项补充指引。');setTurns([]);setFile(null);setHomeAttempt(n=>n+1);
+    } catch(e){setError(e instanceof Error?e.message:'无法导入手册');}finally{setUploading(false);}
+  }
   function ask() {
     const q=(wakeQuestion(draft)??draft).trim()|| (wakeQuestion(draft)===''?'新员工从哪里开始？':'');
     void submit(q,last,'',mode);
   }
   return <dialog className="employee-dialog" ref={dialog} aria-labelledby="employee-title" onCancel={e=>{e.preventDefault();close();}}>
-    <header><div><h2 id="employee-title">{assistantName}</h2><p>{home ? home.role+' · 岗位操作指引' : '岗位操作指引'}</p></div><button type="button" className="btn" onClick={close}>关闭</button></header>
+    <header><div><h2 id="employee-title">{assistantName}</h2><p>{home ? home.role+' · '+(home.edition?'员工使用手册 '+home.edition:'岗位操作指引') : '岗位操作指引'}</p></div><button type="button" className="btn" onClick={close}>关闭</button></header>
     <div className="employee-transcript" ref={transcript}>
       {home && <><p>{home.intro}</p><div className="employee-picks">
         <button disabled={busy} onClick={()=>void submit('我刚入职，应该从哪里开始？')}>我刚入职，从哪里开始？</button>
         {home.guides.slice(0,2).map(g=><button key={g.id} disabled={busy} onClick={()=>void submit(g.title,'',g.id)}>{g.title}</button>)}
       </div><details><summary>查看全部岗位指引（{home.guides.length}）</summary><div className="employee-picks">{home.guides.map(g=><button key={g.id} disabled={busy} onClick={()=>void submit(g.title,'',g.id)}>{g.title}</button>)}</div></details>{!!home.recent?.length&&<details><summary>岗位知识库 · 最近解答</summary><div className="employee-picks">{home.recent.map(t=><button key={t.key} disabled={busy} onClick={()=>void submit(t.title,'','',t.scope,t.key)}>{t.title}</button>)}</div></details>}</>}
       {!home&&!error&&<p role="status">正在读取岗位手册…</p>}
+      {home?.role==='管理员'&&<details><summary>维护员工手册</summary><label>选择员工手册知识包（JSON）<input type="file" accept=".json,application/json" onChange={e=>{setFile(e.target.files?.[0]||null);setReceipt('');}}/></label><button className="btn" disabled={!file||uploading||busy} onClick={()=>void uploadHandbook()}>{uploading?'正在导入…':'导入并启用手册'}</button>{receipt&&<p role="status">{receipt}</p>}</details>}
       {turns.map((t,i)=><article key={i}><h3>{t.question}</h3><small>{({'knowledge':'公司知识库','openai':'模型匹配 · 岗位手册','public-data':'公开数据源','public-web':'公开网页检索','public-unavailable':'外部资料查询'} as Record<string,string>)[t.reply.source]||'岗位手册'}{t.reply.saved?' · 已存入知识库':''}{t.reply.verifiedAt?' · '+new Date(t.reply.verifiedAt).toLocaleDateString('zh-CN'):''}</small>
         {t.reply.notice&&<p className="employee-note">{t.reply.notice}</p>}<CitedAnswer reply={t.reply}/>
         {t.reply.guide && <><strong>{t.reply.guide.title}</strong><ol>{t.reply.guide.steps.map(s=><li key={s}>{s}</li>)}</ol>
