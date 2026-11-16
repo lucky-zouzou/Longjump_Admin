@@ -2,7 +2,7 @@ import { requireActor } from '../../../lib/auth';
 import { database } from '../../../lib/database';
 import {env} from 'cloudflare:workers';
 import {readContentCompass} from '../../../lib/content-compass.mjs';
-import { readCenter, mutateCenter, referenceLimit } from '../../../lib/content-center.mjs';
+import { readPlatformReports, readCenter, mutateCenter, referenceLimit } from '../../../lib/content-center.mjs';
 
 const headers={'Cache-Control':'private, no-store'};
 function failure(e:any){
@@ -14,6 +14,7 @@ export async function GET(request:Request){
     const actor=await requireActor(request),query=new URL(request.url).searchParams;
     const data=query.get('view')==='compass'
       ?await readContentCompass(database(),actor,query.get('period')||'month')
+      :query.get('view')==='platform-report'?await readPlatformReports(database(),actor,query.get('site'),Number(query.get('offset')||0))
       :await readCenter(database(),actor);
     return Response.json(data,{headers});
   }

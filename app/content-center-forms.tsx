@@ -1,5 +1,6 @@
 "use client";
 import {useRef,useState} from 'react';
+import {Tags,defaultOptions} from './content-material-fields';
 import {useDirtyGuard} from './workspace-hooks';
 export type Row=Record<string,any>;
 type Choice=string|[string,string];
@@ -33,7 +34,7 @@ function fields(input:Row,d:Row):Field[]{
   case 'create':return [select('source','内容来源',Object.entries(sourceLabels).filter(([key])=>!input.parentId||key!=='creator')),
     ...(input.source==='creator'?[select('sourceContentId','已验收的达人原视频',d.sources.filter((r:Row)=>!scripts.some(s=>s.source_content_id===r.id)).map((r:Row)=>[r.id,r.site+' · '+r.shop+' · @'+r.platform_id+' · '+r.sku]))]:
      [select('site','需求站点',sites),select('sku','指定产品 SKU',d.skus.map((r:Row)=>[r.sku,r.sku+' · '+r.name]))]),
-    f('title','需求标题'),f('brief','补充要求（可选）','textarea',true),
+    f('brief','补充要求','textarea',true),
     ...(input.source==='studio'?[f('originalCount','需要几条原创','number'),f('colors','拍摄颜色','text',true),select('scene','拍摄场景',scenes),f('directions','内容方向','text',true),f('referenceUrl','参考拍摄视频链接','url',true)]:[]),f('due','期望交付日期','date')];
   case 'schedule':return [f('shoot','拍摄日期','date'),f('delivery','交付日期','date'),
     select('jointWith','与同款需求合拍',scripts.filter(r=>r.id!==s?.id&&r.sku===s?.sku&&r.source==='studio'&&r.shoot_date&&r.shoot_date===input.shoot&&!r.joint_with).map(r=>[r.id,r.site+' · '+r.title]),true)];
@@ -63,7 +64,8 @@ export function ContentForm({initial,data,onClose,onSave,busy,error}:{initial:Ro
    e.preventDefault();const payload={...value};
    const submitted=new FormData(e.currentTarget);
    for(const item of fields(value,data)){
-     if(item.type==='multi')payload[item.key]=submitted.getAll(item.key);
+     if(['colors','directions'].includes(item.key))payload[item.key]=(value[item.key]||[]).join('、');
+     else if(item.type==='multi')payload[item.key]=submitted.getAll(item.key);
      else if(item.type==='checkbox')payload[item.key]=submitted.has(item.key);
      else payload[item.key]=submitted.get(item.key)??'';
    }
@@ -72,7 +74,7 @@ export function ContentForm({initial,data,onClose,onSave,busy,error}:{initial:Ro
  }}>
   <header><h3>{actions[value.action]}</h3><button type="button" className="btn" disabled={busy} onClick={()=>{if(!dirty||confirm())onClose();}}>关闭</button></header>
   {value.context&&<p className="cc-note">{value.context}</p>}
-  <div className="cc-fields">{fields(value,data).map(item=>item.key==='sku'?<SkuSearch key={item.key} options={item.options||[]} value={value.sku||''} onChange={v=>update('sku',v)}/>:<label key={item.key} className={item.type==='textarea'||item.type==='multi'?'wide':''}>
+  <div className="cc-fields">{fields(value,data).map(item=>item.key==='colors'||item.key==='directions'?<Tags key={item.key} label={item.label} value={value[item.key]||[]} onChange={v=>update(item.key,v)} options={item.key==='colors'?defaultOptions.colors:['新品种草','多场景展示','产品展示','卖点展示','容量展示','五金和拉链细节','活动大促','口播','暴力测试','开箱展示']}/>:item.key==='sku'?<SkuSearch key={item.key} options={item.options||[]} value={value.sku||''} onChange={v=>update('sku',v)}/>:<label key={item.key} className={item.type==='textarea'||item.type==='multi'?'wide':''}>
     <span>{item.label}{item.optional&&'（选填）'}</span>
     {item.type==='multi'?<span className="cc-checks">{item.options?.map(op=>{const v=String(op);return <span key={v}><input type="checkbox" name={item.key} value={v} checked={(value[item.key]||[]).includes(v)} onChange={e=>update(item.key,e.target.checked?[...(value[item.key]||[]),v]:(value[item.key]||[]).filter((x:string)=>x!==v))}/>{v}</span>;})}</span>:
     item.options?<select name={item.key} aria-label={item.label} required={!item.optional} value={value[item.key]||''} onChange={e=>update(item.key,e.target.value)}><option value="">{item.optional?'不指定':'请选择'}</option>{item.options.map(option=>{const [k,v]=Array.isArray(option)?option:[option,option];return <option key={k} value={k}>{v}</option>;})}</select>:
