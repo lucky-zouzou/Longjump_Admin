@@ -1,5 +1,5 @@
 "use client";
-import {useState} from "react";
+import {createElement,useState} from "react";
 import Icon from "./workspace-icons";
 import StyleOperations from "./style-operations";
 import SupplyChain from "./supply-chain";
@@ -22,7 +22,7 @@ export default function Overview({data,go,allowed}:Props){
   const actionLink=(page:string,label:string)=>allowed.includes(page)?<button className="overview-link" onClick={()=>go(page)}>{label}<Icon name="arrow"/></button>:null;
   return <div className="overview-workspace">
     <div className="overview-heading">
-      <div><div className="overview-eyebrow">经营工作台 <span> / </span> OVERVIEW</div><h1>经营协同总览</h1><p>看清经营现状，让每一步协作有序推进。</p></div>
+      <div><div className="overview-eyebrow">经营工作台 <span> / </span> OVERVIEW</div><h1>经营协同总览</h1>{createElement('workplace-welcome',{'employee-name':data.actor.name||''},'很高兴见到你！')}<script async type="module" src="/workplace-welcome.js"/></div>
       <div className="overview-period"><Icon name="monthly"/><span>经营月份<strong>{data.currentMonth}</strong></span></div>
     </div>
     <section className="overview-kpis" aria-label="经营关键数据">
