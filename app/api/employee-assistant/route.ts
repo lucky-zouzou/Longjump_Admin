@@ -21,7 +21,8 @@ export async function GET(request:Request) {
       if(!canReadActions(actor)) throw new HttpError(403,'此岗位无权查看经营行动单');
       return Response.json(await employeeActionCounts(database(),actor),{headers});
     }
-    return Response.json({...assistantHome(actor),...(actor.role==='管理员'?{revision:actor.handbook?.revision||''}:{}),recent:await recentKnowledge(database(),actor,new Date().toISOString())},{headers});
+    const page=new URL(request.url).searchParams.get('page')||'';
+    return Response.json({...assistantHome(actor,page),...(actor.role==='管理员'?{revision:actor.handbook?.revision||''}:{}),recent:await recentKnowledge(database(),actor,new Date().toISOString())},{headers});
   }
   catch(e) {return problem(e);}
 }
@@ -64,7 +65,8 @@ export async function POST(request:Request) {
     if(!input || typeof input.question!=='string' || !input.question.trim() || input.question.length>600 ||
       ['guideId','previous','page'].some(k=>input[k]!==undefined && (typeof input[k]!=='string'||input[k].length>80)))
       throw new HttpError(400,'请输入 1 至 600 字的问题');
-    if((input.mode!==undefined&&!['auto','internal','public'].includes(input.mode))||
+    if((input.previousStep!==undefined&&(!Number.isInteger(input.previousStep)||input.previousStep<0||input.previousStep>4))||
+      (input.mode!==undefined&&!['auto','internal','public'].includes(input.mode))||
       (input.knowledgeId!==undefined&&(typeof input.knowledgeId!=='string'||!/^[0-9a-f]{64}$/.test(input.knowledgeId))))throw new HttpError(400,'无效的知识查询');
     const configured=typeof env.readEmployeeAssistantKey==='function'?env.readEmployeeAssistantKey():env.OPENAI_API_KEY;
     const key=typeof configured==='string'?configured.trim():'';

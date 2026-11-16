@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {fixture} from './fixtures.mjs';
-import {answerWithKnowledge} from '../lib/employee-assistant.mjs';
+import {answerWithKnowledge,assistantHome} from '../lib/employee-assistant.mjs';
 import {recentKnowledge} from '../lib/employee-knowledge.mjs';
 
 const time='2026-11-16T04:00:00.000Z';
@@ -87,4 +87,34 @@ test('公开术语读取官方页面，退出备份锁后才记录为可复用',
   assert.equal(response.source,'public-data');assert.match(response.notice,/暂未写入/);
   sqlite.prepare("DELETE FROM system_maintenance WHERE id='global'").run();
   assert.equal((await ask(users.admin,'什么是 CTR',{},options)).saved,true);
+});
+
+test('欢迎语与系统用途分别展示；当前页的操作受岗位限制，同一句页面问题按页面回答',async t=>{
+  const {users,ask}=setup(t);
+  const home=assistantHome(users.admin,'batches');
+  assert.equal(home.intro,'是什么风把你给吹来了，有什么问题尽管问吧。');
+  assert.deepEqual(home.suggestions.map(g=>g.id),['shipping']);
+  assert.deepEqual(assistantHome({role:'工厂'},'approval').suggestions,[]);
+  assert.match((await ask(users.admin,'系统是做什么的？')).answer,/每日销售/);
+  const q='这个页面怎么用？';
+  assert.equal((await ask(users.admin,q,{page:'batches'})).guide.id,'shipping');
+  assert.equal((await ask(users.admin,q,{page:'sales'})).guide.id,'sales-check');
+  const multiple=await ask(users.admin,q,{page:'cost-profit'});
+  assert.ok(multiple.choices.some(g=>g.id==='finance-close'));
+  assert.equal(multiple.guide,null);
+  assert.deepEqual((await ask(users.admin,q,{page:'no-such-page'})).choices,[]);
+});
+
+test('按手册逐步追问直到交接；缓存区分步骤，明确换题不沿用上一项',async t=>{
+  const {users,ask}=setup(t);
+  const a=users.admin,previous='sales-check',q='下一步怎么做？';
+  const next=n=>ask(a,q,{previous,previousStep:n});
+  const one=await next(0),two=await next(1);
+  assert.equal(one.step,1);assert.equal(one.answer,one.guide.steps[0]);
+  assert.equal(two.step,2);assert.equal(two.answer,two.guide.steps[1]);
+  const replay=await next(1);assert.equal(replay.source,'knowledge');assert.equal(replay.step,2);
+  const end=await next(one.guide.steps.length);assert.equal(end.intent,'handoff');assert.equal(end.answer,one.guide.next);
+  assert.equal((await ask(a,'这个月的海运轨迹怎么查？',{previous})).guide.id,'shipping');
+  assert.equal((await ask(a,'谁来接手？',{previous})).answer,one.guide.next);
+  assert.equal((await ask(a,q,{previous:'no-such-guide'})).guide,null);
 });
