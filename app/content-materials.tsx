@@ -1,7 +1,7 @@
 "use client";
 import SkuLabel from './sku-label';
 
-import {useCallback,useEffect,useState} from 'react';
+import {useCallback,useEffect,useRef,useState} from 'react';
 import {parseWorkspaceResponse} from '../lib/workspace-response.mjs';
 import {useVisibleRefresh} from './workspace-hooks';
 import {MaterialUpload,SiteChoices,materialApi} from './content-material-upload';
@@ -26,6 +26,21 @@ function browserSave(blob:Blob,name:string){
   const url=URL.createObjectURL(blob),anchor=document.createElement('a');
   anchor.href=url;anchor.download=name;document.body.append(anchor);anchor.click();anchor.remove();
   window.setTimeout(()=>URL.revokeObjectURL(url),60000);
+}
+function MaterialPreview({item,onClose}:{item:Material;onClose:()=>void}){
+  const dialog=useRef<HTMLDialogElement>(null),[attempt,retry]=useState(0),[error,setError]=useState('');
+  useEffect(()=>{const el=dialog.current;el?.showModal();return()=>el?.close();},[]);
+  return <dialog ref={dialog} className="cc-preview-dialog" aria-label={'预览 '+item.title} onCancel={onClose}>
+    <header className="cc-row"><h3>{item.title}</h3><button type="button" className="btn" autoFocus onClick={onClose}>关闭预览</button></header>
+    <video key={attempt} src={fileUrl(item.id)} controls autoPlay playsInline preload="metadata" onError={e=>{
+      const code=e.currentTarget.error?.code;
+      setError(code===3||code===4?'浏览器无法解码此视频。可打开原片，或下载后用本机播放器查看。':'视频读取中断，请重试。');
+    }}/>
+    <small>{item.original_name} · {(item.size/1048576).toFixed(1)} MB</small>
+    {error&&<p className="cc-error" role="alert">{error}</p>}
+    <footer className="cc-actions"><a href={fileUrl(item.id)} target="_blank" rel="noreferrer">新窗口查看原片 ↗</a>
+    {error&&<button type="button" className="btn" onClick={()=>{setError('');retry(n=>n+1);}}>重新预览</button>}</footer>
+  </dialog>;
 }
 export function ContentMaterials({data,onDirty,refreshKey}:{data:Row;onDirty:(value:boolean)=>void;refreshKey:number}){
   const manage=['管理员','运营主管','拍摄剪辑'].includes(data.actor.role);
@@ -106,7 +121,7 @@ export function ContentMaterials({data,onDirty,refreshKey}:{data:Row;onDirty:(va
         {!archived&&site&&data.writeSites.includes(site)&&<button className="btn" disabled={busy} onClick={()=>void mutate({action:'downloaded',ids:selected,site},'已登记本站下载结果')}>确认本站已下载</button>}
         {manage&&!archived&&<><button className="btn" disabled={busy} onClick={()=>setAssign(!assign)}>追加分发站点</button><button className="btn" disabled={busy} onClick={()=>{if(window.confirm('归档后运营将看不到所选成片，下载记录会保留。确认归档？'))void mutate({action:'archive',ids:selected},'成片已归档');}}>批量归档</button></>}</div>}</div>
     {assign&&selected.length>0&&<div className="cc-card"><SiteChoices options={siteOptions} value={targets} onChange={setTargets}/><button className="btn primary" disabled={busy||!targets.length} onClick={()=>void mutate({action:'assign',ids:selected,sites:targets},'已分发到所选站点')}>确认追加分发</button></div>}
-    {preview&&<div className="cc-player"><div className="cc-row"><strong>{preview.title}</strong><button className="btn" onClick={()=>setPreview(null)}>关闭预览</button></div><video key={preview.id} src={fileUrl(preview.id)} controls autoPlay playsInline preload="metadata" onError={()=>setError('当前视频无法预览。请重试下载；若文件能正常下载，请上传 MP4（H.264/AAC）版本以兼容浏览器。')}/><small>{preview.original_name}</small></div>}
+    {preview&&<MaterialPreview item={preview} onClose={()=>setPreview(null)}/>}
     {list&&(!rows.length?<p className="cc-empty">{q||site||status||by||from||to||archived?'当前条件下没有成片。':'暂无已分发成片。'}</p>:<div className="cc-table-scroll"><table className="cc-material-table"><thead><tr><th><input type="checkbox" aria-label="选择本页全部素材" checked={selected.length===rows.length} onChange={e=>setSelected(e.target.checked?rows.map(r=>r.id):[])}/></th><th>成片 / 产品编码</th><th>拍摄周期 / 上传批次</th><th>站点下载记录</th><th>操作</th></tr></thead>
       <tbody>{rows.map(row=><tr key={row.id}><td><input type="checkbox" aria-label={'选择 '+row.title} checked={selected.includes(row.id)} onChange={()=>toggle(row.id)}/></td>
         <td><div className="cc-film"><button className="cc-thumb" aria-label={'预览 '+row.title} onClick={()=>setPreview(row)}><video muted playsInline preload="none" src={fileUrl(row.id)+'#t=0.1'}/><span aria-hidden="true">▶</span></button><div><strong>{row.title}</strong><small><SkuLabel sku={row.sku}/> · {row.metadata.productName} · {(row.size/1048576).toFixed(1)} MB</small>{row.original_name!==row.title&&<small>{row.original_name}</small>}{row.script_id&&<small>关联需求 · {data.scripts.find((s:Row)=>s.id===row.script_id)?.title}</small>}{[...(row.metadata.colors||[]),...(row.metadata.directions||[]),...(row.metadata.sellingPoints||[])].length>0&&<small>{[...(row.metadata.colors||[]),...(row.metadata.directions||[]),...(row.metadata.sellingPoints||[])].join(' · ')}</small>}{row.note&&<small>{row.note}</small>}</div></div></td>
@@ -114,7 +129,7 @@ export function ContentMaterials({data,onDirty,refreshKey}:{data:Row;onDirty:(va
         <td>{row.sites.map(r=><div className="cc-receipt" key={r.site}><span>{r.site}</span><span className={'cc-state '+r.status}>{states[r.status]}</span>
           {!archived&&r.status!=='downloaded'&&data.writeSites.includes(r.site)&&<button disabled={busy} className="cc-text-action" onClick={()=>void mutate({action:'downloaded',ids:[row.id],site:r.site},'已登记'+r.site+'下载结果')}>确认已下载</button>}
           {r.handled_at&&<small>{r.handled_by} · {timestamp(r.handled_at)}</small>}</div>)}</td>
-        <td><div className="cc-actions"><button className="btn" disabled={busy} onClick={()=>void download([row])}>下载原片</button>{manage&&!archived&&<><button className="btn" disabled={busy||upload} onClick={()=>{setEditing(row);onDirty(true);}}>编辑</button><button className="btn" disabled={busy||upload} onClick={()=>{setReplacement(row);setUpload(true);}}>替换</button><button className="btn" disabled={busy} onClick={()=>{if(window.confirm('确认删除此成片？运营将不再看到该视频，历史下载记录仍会保留。'))void mutate({action:'delete',ids:[row.id]},'成片已删除，历史记录保留');}}>删除</button></>}</div></td></tr>)}</tbody></table></div>)}
+        <td><div className="cc-actions"><button type="button" className="btn" onClick={()=>setPreview(row)}>预览</button><button className="btn" disabled={busy} onClick={()=>void download([row])}>下载原片</button>{manage&&!archived&&<><button className="btn" disabled={busy||upload} onClick={()=>{setEditing(row);onDirty(true);}}>编辑</button><button className="btn" disabled={busy||upload} onClick={()=>{setReplacement(row);setUpload(true);}}>替换</button><button className="btn" disabled={busy} onClick={()=>{if(window.confirm('确认删除此成片？运营将不再看到该视频，历史下载记录仍会保留。'))void mutate({action:'delete',ids:[row.id]},'成片已删除，历史记录保留');}}>删除</button></>}</div></td></tr>)}</tbody></table></div>)}
     {list&&list.total>24&&<div className="cc-pager"><button className="btn" disabled={list.page===1} onClick={()=>{setSelected([]);setPage(list.page-1);}}>上一页</button> {list.page} / {Math.ceil(list.total/24)} <button className="btn" disabled={list.page*24>=list.total} onClick={()=>{setSelected([]);setPage(list.page+1);}}>下一页</button></div>}
   </div>;
 }

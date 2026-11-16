@@ -1,6 +1,7 @@
 import {env} from 'cloudflare:workers';
 import {requireActor} from '../../../../lib/auth';
 import {database} from '../../../../lib/database';
+import {readReference} from '../../../../lib/content-center.mjs';
 import {listMaterials,materialResponse,updateMaterials,uploadMaterialPart} from '../../../../lib/content-materials.mjs';
 
 const headers={'Cache-Control':'private, no-store'};
@@ -11,10 +12,12 @@ function failure(error:any){
 export async function GET(request:Request){
   try{
     const actor=await requireActor(request),query=new URL(request.url).searchParams;
-    if(query.has('id'))return await materialResponse(database(),env.WHOLESALE_FILES,actor,query.get('id'),request.headers.get('range'),query.get('download')==='1');
+    if(query.has('reference'))return await readReference(database(),env.WHOLESALE_FILES,actor,query.get('reference'),request.headers.get('range'),request.method==='HEAD');
+    if(query.has('id'))return await materialResponse(database(),env.WHOLESALE_FILES,actor,query.get('id'),request.headers.get('range'),query.get('download')==='1',request.method==='HEAD');
     return Response.json(await listMaterials(database(),actor,Object.fromEntries(query)),{headers});
   }catch(error){return failure(error);}
 }
+export const HEAD=GET;
 export async function POST(request:Request){
   try{
     if(request.headers.get('origin')!==new URL(request.url).origin)return Response.json({error:'请求来源无效'},{status:403,headers});

@@ -4,7 +4,8 @@ import {fixture} from './fixtures.mjs';
 import {mutateCreator,readCreators,creatorWorkspaceTasks} from '../lib/creators.mjs';
 import {mapIntakeRow,normalizeIntake,collaborationStage} from '../lib/creator-intake-model.mjs';
 import {creatorMetrics} from '../lib/creator-model.mjs';
-import {mkdtempSync,readFileSync,rmSync} from 'node:fs';
+import {DatabaseSync} from 'node:sqlite';
+import {mkdtempSync,readFileSync,readdirSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createBackup,restoreBackup} from '../server/backup.mjs';
@@ -183,17 +184,18 @@ test('structured 12-field handoff preserves native GMV, qualification and failed
  assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM creator_profiles').get().n,1);
 });
 
-test('standalone maintenance experience supports lead review, self-review block and immutable revisions',async()=>{
+test('authors publish confirmed shareable practices immediately and revisions remain immutable',async()=>{
  const f=await setup();await f.act(f.users.admin,'leadAssignment',{userId:f.users.bd.id,active:true,note:'指定组长'});
  const input={scopeId:f.scope,title:'维护方法示例',category:'maintenance',scene:'已合作达人复合作',method:'约定排期并逐周核对',effect:'自报结果，需后续验证',limits:'小样本',evidence:proof,shareConfirmed:true};
  const id=(await f.act(f.users.indonesia,'practiceCreate',input)).id;
- await assert.rejects(()=>f.act(f.users.other,'practiceReview',{practiceId:id,version:1,decision:'approve',note:'越权'}),/组长/);
- await f.act(f.users.bd,'practiceReview',{practiceId:id,version:1,decision:'return',note:'补充具体跟进内容'});
- await f.act(f.users.indonesia,'practiceRevise',{...input,practiceId:id,version:2,method:'按周核对排期、拍摄困难并记录是否准时交付'});
- await f.act(f.users.bd,'practiceReview',{practiceId:id,version:3,decision:'approve',note:'保留小样本边界，允许五国复用'});
- assert.equal((await readCreators(f.db,f.users.other)).practices[0].status,'approved');assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM creator_practice_history').get().n,4);
+ assert.equal((await readCreators(f.db,f.users.other)).practices[0].status,'approved');
+ await assert.rejects(()=>f.act(f.users.other,'practiceRevise',{...input,practiceId:id,version:1}),/权限|作者/);
+ await assert.rejects(()=>f.act(f.users.indonesia,'practiceRevise',{...input,shareConfirmed:false,practiceId:id,version:1}),/可共享/);
+ await f.act(f.users.indonesia,'practiceRevise',{...input,practiceId:id,version:1,method:'逐周核对达人档期及交付'});
+ assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM creator_practice_history').get().n,2);
  assert.throws(()=>f.sqlite.prepare('UPDATE creator_practice_history SET action=?').run('overwrite'),/immutable/);
- const own=(await f.act(f.users.bd,'practiceCreate',input)).id;await assert.rejects(()=>f.act(f.users.bd,'practiceReview',{practiceId:own,version:1,decision:'approve',note:'自审'}),/本人经验/);
+ await f.act(f.users.bd,'practiceArchive',{practiceId:id,version:2,note:'方法已过期'});
+ assert.equal((await readCreators(f.db,f.users.other)).practices.length,0);
 });
 
 test('completed round result is revisioned, missing amounts stay null and never book financial profit',async()=>{
@@ -306,17 +308,15 @@ test('经验附件随版本保留，跨站复用按地区留痕，修订重新�
  let row=(await readCreators(f.db,ops)).practices[0];
  const fileId=row.data.attachment.id;
  assert.equal(row.data.effect,'');assert.equal(row.data.evidence,'');
- await assert.rejects(()=>readPracticeFile(f.db,f.users.malaysia,fileId),/尚未开放/);
- await f.act(admin,'practiceReview',{practiceId:id,version:1,decision:'approve',note:'同意共享'});
  assert.equal((await readPracticeFile(f.db,f.users.malaysia,fileId)).payload,file.base64);
  const scope=(await f.act(admin,'scope',{site:'马来西亚',platform:'TikTok',shop:'TEST MY',operatorId:f.users.malaysia.id,bdId:f.users.other.id})).id;
- const use={scopeId:scope,practiceId:id,version:2};
+ const use={scopeId:scope,practiceId:id,version:1};
  for(const kind of ['read','used','read'])await f.act(f.users.malaysia,'practiceUse',{...use,kind});
  let snapshot=await readCreators(f.db,ops);assert.deepEqual(snapshot.practiceUses.map(x=>[x.site,x.kind]),[['马来西亚','used']]);
- await f.act(ops,'practiceRevise',{...input,practiceId:id,version:2,method:'修改示例'});
- snapshot=await readCreators(f.db,ops);row=snapshot.practices[0];assert.equal(row.status,'pending');assert.equal(row.data.attachment.id,fileId);
+ await f.act(ops,'practiceRevise',{...input,practiceId:id,version:1,method:'修改示例'});
+ snapshot=await readCreators(f.db,ops);row=snapshot.practices[0];assert.equal(row.status,'approved');assert.equal(row.data.attachment.id,fileId);
  assert.equal(snapshot.practiceHistory.find(h=>h.revision===1).snapshot.data.method,input.method);
- await assert.rejects(()=>f.act(f.users.malaysia,'practiceUse',{...use,kind:'used'}),/已审核/);
+ await assert.rejects(()=>f.act(f.users.malaysia,'practiceUse',{...use,kind:'used'}),/已入库/);
  await f.act(admin,'bdName',{userId:f.users.bd.id,displayName:'测试商务姓名'});
  assert.equal((await readCreators(f.db,ops)).users.find(u=>u.id===f.users.bd.id).name,'测试商务姓名');
 });
@@ -394,4 +394,87 @@ test('寄样与视频时间按表单秒精度核对，确认同一秒允许而�
  const content={sku:'BAG-A',kind:'video',url:'https://example.test/second-precision',note:'通过',evidence:proof,linkValid:true,skuCorrect:true,accurate:true,agreed:true};
  await assert.rejects(change('content',{...content,at:new Date(second-1000).toISOString()}),/寄样之后/);
  await change('content',{...content,at:new Date(second).toISOString()});f.sqlite.close();
+});
+
+
+test('confirmed repeat delivery closes its work, independent rounds remain and recording a note alone creates no task',async()=>{
+ const f=await setup(),row=await f.submit(),id=row.creator_id,bd=f.users.bd;
+ try{
+  await f.review(row);
+  const proposal={creatorId:id,dueAt:future(),items:[{sku:'BAG-A',sampleQty:0}],method:'commission',commission:'10',videos:1,lives:0};
+  for(const requestId of ['round-a','round-b']){
+   await f.act(bd,'requestCreate',{...proposal,requestId});
+   await f.act(bd,'requestConfirm',{requestId,version:1,confirmed:true});
+  }
+  const rounds=f.sqlite.prepare('SELECT id FROM creator_rounds ORDER BY created_at').all();
+  const tasks=async()=>(await readCreators(f.db,bd)).tasks.filter(t=>t.id===id);
+  const open=await tasks();assert.equal(open.length,2);assert.equal(new Set(open.map(t=>t.taskKey)).size,2);
+  await assert.rejects(()=>f.change(bd,id,'deleteProfile',{confirmed:true}),/尚未结束/);
+  for(const [index,r] of rounds.entries()){
+   if(index===1)await f.change(bd,id,'follow',{note:'已联系达人',nextOwner:bd.id,nextAction:'检查视频完成情况'});
+   await f.change(bd,id,'content',{roundId:r.id,kind:'video',sku:'BAG-A',url:'https://example.test/repeat/'+index,at:now(),linkValid:true,skuCorrect:true,accurate:true,agreed:true,note:'视频验收通过',evidence:proof});
+   await f.change(bd,id,'complete',{roundId:r.id,evidence:proof});
+   assert.equal((await tasks()).length,1-index);
+   assert.equal((await creatorWorkspaceTasks(f.db,bd)).length,1-index);
+  }
+  await f.change(bd,id,'follow',{note:'已告知结案',nextOwner:bd.id,hours:33,nextAt:future()});
+  assert.equal((await tasks()).length,0);
+  const event=(await readCreators(f.db,bd)).events.find(e=>e.action==='follow');assert.equal(event.detail.hours,undefined);assert.equal(event.detail.next_at,null);
+  await f.change(bd,id,'follow',{note:'讨论下一次选品',nextOwner:bd.id,nextAction:'提供新品图册'});
+  assert.equal((await tasks())[0].title,'提供新品图册');
+  await f.change(bd,id,'deleteProfile',{confirmed:true});
+  const archive=await readCreators(f.db,f.users.finance);
+  assert.equal(archive.rounds.filter(r=>r.creator_id===id&&r.status==='completed').length,2);
+  assert.equal(archive.profiles.length,0);
+ }finally{f.sqlite.close();}
+});
+
+test('deleting a task is confirmed, scoped and stage-specific; deleting a shop profile keeps its audit history',async()=>{
+ const f=await setup(),bd=f.users.bd,row=await f.submit(),id=row.creator_id;
+ try{
+  const first=(await readCreators(f.db,bd)).tasks[0];
+  const del=(actor,confirmed)=>f.act(actor,'deleteTask',{creatorId:id,taskKey:first.taskKey,confirmed});
+  await assert.rejects(()=>del(bd,false),/确认/);
+  await assert.rejects(()=>del(f.users.other,true),/已变化/);
+  await del(bd,true);
+  assert.equal((await creatorWorkspaceTasks(f.db,bd)).length,0);
+  assert.equal((await readCreators(f.db,bd)).submissions[0].status,'pending');
+  await f.review(row);
+  assert.equal((await readCreators(f.db,bd)).tasks.length,1);
+  await assert.rejects(()=>f.change(bd,id,'deleteProfile',{confirmed:false}),/确认/);
+  await assert.rejects(()=>f.change(f.users.indonesia,id,'deleteProfile',{confirmed:true}),/仅负责BD/);
+  await assert.rejects(()=>f.change(f.users.other,id,'deleteProfile',{confirmed:true}),/其他店铺/);
+  await f.change(bd,id,'deleteProfile',{confirmed:true});
+  const view=await readCreators(f.db,f.users.admin);
+  assert.equal(view.profiles.length,0);assert.equal(view.submissions.length,0);assert.equal(view.tasks.length,0);
+  assert.ok(view.events.some(e=>e.action==='deleteProfile'&&e.actor_id===bd.id));
+  assert.ok(view.events.some(e=>e.action==='deleteTask'&&e.detail.taskKey===first.taskKey));
+  await assert.rejects(()=>f.change(bd,id,'follow',{note:'重试',nextOwner:bd.id}),/已删除/);
+ }finally{f.sqlite.close();}
+});
+
+
+test('the worklist migration clears old delivery reminders, preserves later follow-ups and shares only confirmed practices',()=>{
+ const db=new DatabaseSync(':memory:'),folder=new URL('../drizzle/',import.meta.url),migration='0056_creator_worklist.sql';
+ try{
+  db.exec('PRAGMA foreign_keys=ON');
+  for(const file of readdirSync(folder).filter(n=>n.endsWith('.sql')&&n<migration).sort())db.exec(readFileSync(new URL(file,folder),'utf8'));
+  const at='2026-10-30T08:00:00.000Z',later='2026-10-31T08:00:00.000Z';
+  const user=db.prepare('INSERT INTO users(id,email,name,role,created_at,updated_at) VALUES(?,?,?,?,?,?)');
+  user.run('bd','xwx@loongjump.com','肖惋欣','达人BD',at,at);user.run('ops','ops@example.test','测试运营','运营',at,at);
+  db.prepare('INSERT INTO creator_scopes(id,site,platform,shop,operator_id,bd_id,updated_at) VALUES(?,?,?,?,?,?,?)').run('s','印尼','TikTok','TEST','ops','bd',at);
+  for(const [id,last] of [['closed',at],['new',later]]){
+   db.prepare("INSERT INTO creator_profiles(id,scope_id,platform_id,name,kind,data_json,source_user_id,state,bd_stage,last_follow_at,next_action,next_owner_id,created_at,updated_at) VALUES(?,'s',?,?,'video','{}','ops','maintaining','completed',?,'查看视频效果','bd',?,?)").run(id,id,id,last,at,last);
+   db.prepare("INSERT INTO creator_rounds(id,creator_id,round_no,status,terms_json,original_due_at,effective_due_at,author_id,completed_at,created_at,updated_at) VALUES(?,?,?,'completed','{}',?,?,'bd',?,?,?)").run(id,id,id,at,at,at,at,at);
+  }
+  db.prepare("INSERT INTO creator_events(id,creator_id,action,actor_id,actor_name,detail_json,created_at) VALUES('log','new','follow','bd','测试',?,?)").run(JSON.stringify({next_action:'查看视频效果'}),later);
+  const practice=db.prepare("INSERT INTO creator_practices(id,scope_id,title,category,data_json,author_id,created_at,updated_at) VALUES(?,'s','测试','maintenance',?,'bd',?,?)");
+  practice.run('shared','{"shareConfirmed":true}',at,at);practice.run('draft','{}',at,at);
+  db.exec(readFileSync(new URL(migration,folder),'utf8'));
+  assert.equal(db.prepare("SELECT next_action FROM creator_profiles WHERE id='closed'").get().next_action,'');
+  assert.equal(db.prepare("SELECT follow_task_id FROM creator_profiles WHERE id='new'").get().follow_task_id,'log');
+  assert.equal(db.prepare("SELECT status FROM creator_practices WHERE id='shared'").get().status,'approved');
+  assert.equal(db.prepare("SELECT status FROM creator_practices WHERE id='draft'").get().status,'returned');
+  assert.equal(db.prepare("SELECT display_name FROM creator_bd_names WHERE user_id='bd'").get().display_name,'肖婉欣');
+ }finally{db.close();}
 });

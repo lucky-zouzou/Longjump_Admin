@@ -7,7 +7,7 @@ import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 
 const release='a'.repeat(40),script=fileURLToPath(new URL('../scripts/activate-release.sh',import.meta.url));
-function activate(overrides={},withSync=false,withOverride=false,withBest=false){
+function activate(overrides={},withSync=false,withOverride=false,withBest=false,withEmployee=false){
  const dir=mkdtempSync(join(tmpdir(),'lj-deploy-'));
  try{
   writeFileSync(join(dir,'docker'),`#!/bin/bash
@@ -22,6 +22,10 @@ case "$1 $2" in
  *) echo 'Unexpected docker operation' >&2; exit 9 ;;
 esac
 `,{mode:0o755});
+  if(withEmployee){
+    mkdirSync(join(dir,'secrets/employee-assistant'),{recursive:true});
+    writeFileSync(join(dir,'secrets/employee-assistant/api_key'),'synthetic');
+  }
   if(withBest){
     mkdirSync(join(dir,'secrets/best-tracking'),{recursive:true});
     writeFileSync(join(dir,'secrets/best-tracking/credentials.json'),'{}');
@@ -55,4 +59,10 @@ test('版本不匹配、应用镜像配置不明确或原容器缺失时不覆�
 test('百世凭据通过独立文件挂载，可与既有询盘和业务服务配置同时使用',()=>{
  const r=activate({},true,true,true);assert.equal(r.status,0,r.stderr);
  assert.equal(r.calls.at(-1),'compose -f compose.yaml -f compose.override.yaml -f compose.inquiry-sync.yaml -f compose.best-tracking.yaml up -d --no-build --pull never app');
+});
+
+test('助手通过独立只读文件挂载，与已有业务密钥同时启用',()=>{
+ const r=activate({},true,true,true,true);
+ assert.equal(r.status,0,r.stderr);
+ assert.equal(r.calls.at(-1),'compose -f compose.yaml -f compose.override.yaml -f compose.inquiry-sync.yaml -f compose.employee-assistant.yaml -f compose.best-tracking.yaml up -d --no-build --pull never app');
 });

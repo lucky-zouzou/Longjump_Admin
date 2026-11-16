@@ -94,6 +94,13 @@ jobs:
           test -n "$BEST_TRACKING_CREDENTIALS" || { echo 'Missing BEST tracking configuration'; exit 1; }
           printf '%s' "$BEST_TRACKING_CREDENTIALS" | ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes root@47.238.71.113 'cd /root/loong-jump-v17 && python3 scripts/configure-best-tracking.py'
 
+      - name: Configure employee assistant secret
+        env:
+          EMPLOYEE_OPENAI_API_KEY: ${{ secrets.EMPLOYEE_OPENAI_API_KEY }}
+        run: |
+          test -n "$EMPLOYEE_OPENAI_API_KEY"
+          printf '%s' "$EMPLOYEE_OPENAI_API_KEY" | ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes root@47.238.71.113 'cd /root/loong-jump-v17 && python3 scripts/configure-employee-key.py'
+
       - name: Activate verified image without compiling on production
         timeout-minutes: 5
         run: |

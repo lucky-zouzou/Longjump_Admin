@@ -5,11 +5,11 @@ import {prorateAllocations} from './rules.mjs';
 type AnyRow=Record<string,any>;
 const parseJson=<T=any>(v:unknown,f:T):T=>{try{return JSON.parse(String(v))}catch{return f}};
 const cleanText=(v:unknown,n:number)=>String(v||'').slice(0,n);
-export async function loadForecast(db:any,actor:any,asOf?:string):Promise<{suggestions:AnyRow[];salesDaily:AnyRow[];policies:AnyRow[]}>{
+export async function loadForecast(db:any,actor:any,asOf?:string,focusKey?:string):Promise<{suggestions:AnyRow[];salesDaily:AnyRow[];policies:AnyRow[]}>{
  if(!asOf){
   const now=new Date(),sites=actor.role==='运营'?[actor.site]:['马来西亚','印尼','泰国','越南','菲律宾'];
   const days=[...new Set<string>(sites.map((site:string)=>localDay(now,site)))],parts=[];
-  for(const day of days){const part=await loadForecast(db,actor,day),matches=(r:AnyRow)=>localDay(now,r.site)===day;parts.push({...part,suggestions:part.suggestions.filter(matches),salesDaily:part.salesDaily.filter(matches)});}
+  for(const day of days){const part=await loadForecast(db,actor,day,focusKey),matches=(r:AnyRow)=>localDay(now,r.site)===day;parts.push({...part,suggestions:part.suggestions.filter(matches),salesDaily:part.salesDaily.filter(matches)});}
   return {suggestions:parts.flatMap(p=>p.suggestions),salesDaily:parts.flatMap(p=>p.salesDaily),policies:parts[0]?.policies||[]};
  }
  const all=async(sql:string,args:unknown[]=[]):Promise<AnyRow[]> => (await db.prepare(sql).bind(...args).all()).results||[];
@@ -105,7 +105,7 @@ export async function loadForecast(db:any,actor:any,asOf?:string):Promise<{sugge
     };
     const inventoryByKey=new Map<string,AnyRow>(inventory.map((row)=>[`${row.site}|${row.channel}|${row.sku}`,row]));
     const suggestionKeys=new Set<string>([...inventoryByKey.keys(),...dailySales.keys(),...offlineSales.keys(),...seaTransit.keys(),...productionPipeline.keys(),...warehousePending.keys()].filter(visibleKey));
-    const suggestions:AnyRow[] = [...suggestionKeys].map((key) => {
+    const suggestions:AnyRow[] = (focusKey?(suggestionKeys.has(focusKey)?[focusKey]:[]):[...suggestionKeys]).map((key) => {
       const [site,channel,sku]=key.split("|");
       const setting = settings.get(sku) ?? {};
       const row:AnyRow=inventoryByKey.get(key)??{site,channel,sku,name:setting.name??"",qty:0,updated_at:""};

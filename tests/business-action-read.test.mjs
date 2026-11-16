@@ -44,3 +44,37 @@ test('lightweight navigation badge keeps ownership, verification scopes and over
  const admin=await businessActionTasks(f.db,f.users.admin,now);assert.match(admin[0].detail,/1条经营行动/);assert.match(admin[0].detail,/1个站点渠道/);assert.match(admin[0].detail,/1条已到期/);
  const ops=await businessActionTasks(f.db,f.users.indonesia,now);assert.match(ops[0].detail,/1条经营行动/);assert.match(ops[0].detail,/1条证据待核实/);assert.match(ops[0].detail,/1条已到期/);
 });
+
+test('站点清单与原全站筛选排序一致，跨站任务链接和运营范围独立核验',async t=>{
+ const f=setup(t);
+ f.add('id-tiktok');f.add('id-shopee',{channel:'Shopee'});f.add('th-tiktok',{site:'泰国'});
+ const read=(actor,site,focus='')=>readBusinessActions(f.db,actor,new Date(),{site,focus});
+ const all=await read(f.users.admin,'');
+ const id=await read(f.users.admin,'印尼');
+ assert.deepEqual(id.records,all.records.filter(r=>r.site==='印尼'));
+ const deep=await read(f.users.finance,'印尼','th-tiktok');
+ assert.equal(deep.readSite,'泰国');assert.equal(deep.focusChannel,'TikTok');
+ assert.deepEqual(deep.records.map(r=>r.id),['th-tiktok']);
+ assert.equal((await read(f.users.admin,'越南')).latestEvidenceAt,null);
+ const hidden=await read(f.users.indonesia,'印尼','th-tiktok');
+ assert.equal(hidden.focusChannel,'');assert.deepEqual(hidden.records.map(r=>r.id),['id-tiktok']);
+ await assert.rejects(read(f.users.indonesia,'泰国'),e=>e.status===403);
+ await assert.rejects(read(f.users.admin,'无效站点'),e=>e.status===400);
+});
+
+test('导航查询能直接从索引读取未结行动，兼容运营站点过滤',async t=>{
+ const f=setup(t);
+ const prepare=f.db.prepare;
+ for(const actor of [f.users.admin,f.users.indonesia]){
+   let plan;
+   f.db.prepare=sql=>{
+     if(sql.includes('json_extract(snapshot_json')&&sql.includes("status<>'resolved'")){
+       const params=actor.role==='运营'?[actor.site,actor.channel]:[];
+       plan=f.sqlite.prepare('EXPLAIN QUERY PLAN '+sql).all(...params).map(row=>row.detail).join(' ');
+     }
+     return prepare(sql);
+   };
+   await businessActionTasks(f.db,actor);
+   assert.match(plan,/USING COVERING INDEX idx_business_action_open_tasks/);
+ }
+});

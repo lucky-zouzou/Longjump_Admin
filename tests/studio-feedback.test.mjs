@@ -1,0 +1,76 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {mutateCenter,readReference} from '../lib/content-center.mjs';
+import {createBackup,restoreBackup} from '../server/backup.mjs';
+import {openDatabase,fileBucket} from '../server/storage.mjs';
+import {mkdtempSync,rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {contentFixture,original,brief,ago,date} from './content-center-fixture.mjs';
+import * as XLSX from 'xlsx';
+import {metricColumns,metricSheetRows,parseMetricSheet} from '../lib/content-metrics-import.mjs';
+
+test('一次申请两条原创，修改版不抵另一条，全部验收后入库',async t=>{
+ const f=contentFixture();t.after(()=>f.sqlite.close());
+ const request={...brief,due:date(),originalCount:2,colors:'棕色、黑色',directions:'展示、容量',referenceUrl:'https://example.test/demo.mp4'};
+ for(const originalCount of [0,1.5,101])await assert.rejects(f.act(f.users.indonesia,'create',{...request,originalCount}),/原创条数/);
+ await assert.rejects(f.act(f.users.indonesia,'create',{...request,referenceUrl:'javascript:invalid'}),/HTTPS/);
+ const id=(await f.act(f.users.indonesia,'create',request)).id;
+ const script=()=>f.current('content_scripts',id);
+ assert.equal(script().original_count,2);assert.equal(script().reference_url,request.referenceUrl);
+ await f.act(f.camera,'schedule',{scriptId:id,version:1,shoot:date(),delivery:date()});
+ const deliver=async originalNo=>(await f.act(f.camera,'deliver',{scriptId:id,version:script().version,originalNo,label:'版本',storyboard:'实拍',master:'https://example.test/master'})).id;
+ const inspect=(v,action)=>f.act(f.users.indonesia,action,{versionId:v,version:1,feedback:'核对颜色'});
+ await assert.rejects(deliver(undefined),/原创序号/);await assert.rejects(deliver(3),/原创序号/);
+ await inspect(await deliver(1),'accept');assert.equal(script().status,'已排期');
+ await inspect(await deliver(1),'accept');assert.equal(script().status,'已排期');
+ await inspect(await deliver(2),'return');assert.equal(script().status,'待改拍');
+ await inspect(await deliver(2),'accept');assert.equal(script().status,'已入库');
+});
+
+test('表格预检、整批校验与修订：两窗口、保留空值、同表重传、越权',async t=>{
+ const f=contentFixture();t.after(()=>f.sqlite.close());
+ const {post}=await original(f),published=f.current('content_posts',post);
+ const header=metricColumns.map(([,label])=>label);
+ const cells=[published.url,1,ago(1),100,0,'',2,35,'效果导出','七日内累计'];
+ const matrix=[header,cells,[published.url,7,ago(0),200,1,2,3,37,'效果导出','七日累计']];
+ const sheet=XLSX.utils.aoa_to_sheet(matrix);
+ sheet.H2.v=0.35;sheet.H2.w='35%';assert.equal(metricSheetRows(XLSX,sheet)[1][7],35);
+ const rows=parseMetricSheet(matrix,[published]);
+ assert.equal(rows[0].clicks,0);assert.equal(rows[0].cartAdds,'');
+ assert.throws(()=>parseMetricSheet([header,cells,cells],[published]),/第 3 行.*重复/);
+ assert.throws(()=>parseMetricSheet(matrix,[]),/第 2 行/);
+ assert.throws(()=>parseMetricSheet([header,[published.url,1,'2026-02-31 08:00',...cells.slice(3)]],[published]),/日期/);
+ const changes=()=>f.sqlite.prepare('SELECT * FROM content_metrics WHERE post_id=? ORDER BY days,revision').all(post);
+ const op=f.users.malaysia,operationId=crypto.randomUUID();
+ const upload=(actor,rows,id=crypto.randomUUID())=>f.act(actor,'importMetrics',{operationId:id,rows});
+ await assert.rejects(upload(f.users.indonesia,rows),/可维护站点/);
+ await assert.rejects(upload(op,[rows[0],{...rows[1],views:-1}]),/第 3 行/);assert.equal(changes().length,0);
+ const result=await upload(op,rows,operationId);
+ assert.deepEqual(await upload(op,rows,operationId),result);
+ await assert.rejects(upload(op,[{...rows[0],views:88},rows[1]],operationId),{status:409});
+ await upload(op,rows);assert.equal(changes().length,2);
+ await assert.rejects(upload(op,[{...rows[0],views:110}]),{status:409});
+ await upload(op,[{...rows[0],version:f.current('content_posts',post).version,views:110}]);
+ assert.deepEqual(changes().map(m=>[m.days,m.revision,m.views,m.cart_adds]),[[1,1,100,null],[1,2,110,null],[7,1,200,2]]);
+});
+
+test('运营附参考视频与需求一起保存，可播放、重试并随完整备份恢复',async t=>{
+ const root=mkdtempSync(join(tmpdir(),'studio-ref-')),f=contentFixture(),bucket=fileBucket(join(root,'files'));
+ t.after(()=>{f.sqlite.close();rmSync(root,{recursive:true,force:true});});
+ const p={...brief,action:'create',operationId:crypto.randomUUID(),due:date()};
+ const raw=new TextEncoder().encode('\x00\x00\x00\x18ftypisom-demo'),file=new File([raw],'参考.mp4');
+ const act=(actor,file)=>mutateCenter(f.db,actor,p,{bucket,file});
+ await assert.rejects(act(f.camera,file),{status:403});
+ await assert.rejects(act(f.users.indonesia,new File(['not video'],'fake.mp4')),/无法识别视频/);
+ const created=await act(f.users.indonesia,file);assert.deepEqual(await act(f.users.indonesia,file),created);
+ await assert.rejects(act(f.users.indonesia,new File([raw,'different'],'参考.mp4')),{status:409});
+ await assert.rejects(readReference(f.db,bucket,f.users.finance,created.id,null,false),{status:403});
+ const range=await readReference(f.db,bucket,f.camera,created.id,'bytes=0-1',false);
+ assert.equal(range.status,206);assert.equal((await range.arrayBuffer()).byteLength,2);
+ const archive=join(root,'snapshot.tar'),restored=join(root,'restored');
+ await createBackup({DB:f.db,WHOLESALE_FILES:bucket},archive);await restoreBackup(archive,restored);
+ const db=openDatabase(join(restored,'business.sqlite'));t.after(()=>db.sqlite.close());
+ const body=await readReference(db,fileBucket(join(restored,'files')),f.camera,created.id,null,false);
+ assert.deepEqual(new Uint8Array(await body.arrayBuffer()),raw);
+});
