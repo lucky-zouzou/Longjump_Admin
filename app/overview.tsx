@@ -2,6 +2,7 @@
 import {createElement,useState} from "react";
 import Icon from "./workspace-icons";
 import StyleOperations from "./style-operations";
+import EvidenceSummary from "./evidence-summary";
 import SupplyChain from "./supply-chain";
 import ZeroSalesNotifications from "./zero-sales-notifications";
 
@@ -33,6 +34,7 @@ export default function Overview({data,go,allowed}:Props){
         {label:'建议启动生产',value:m.suggestedProductionQty,icon:'fulfillment',note:m.forecastPendingCount?`已核实部分；${m.forecastPendingCount}项待补数据`:'已扣库存、海运在途和生产中',tone:'production'},
       ].map(k=><article className={`overview-kpi ${k.tone}`} key={k.label}><div className="kpi-caption"><span>{k.label}</span><Icon name={k.icon}/></div><div className="kpi-number">{number(k.value)}<small>件</small></div><p>{k.note}{k.extra&&<small>{k.extra}</small>}</p></article>)}
     </section>
+    {allowed.includes('business-actions')&&<EvidenceSummary go={go}/>}
     <ZeroSalesNotifications tasks={data.myTasks} actor={data.actor} go={go}/>
     <div className="overview-columns">
       <div className="overview-primary">

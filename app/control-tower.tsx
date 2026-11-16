@@ -53,6 +53,7 @@ const ContentCenter=lazy(()=>import("./content-center"));
 const CreatorWorkspace=lazy(()=>import("./creator-workspace"));
 const CostProfit=lazy(()=>import("./cost-profit"));
 const SalesTargets=lazy(()=>import("./sales-targets"));
+const EvidenceWorkbench=lazy(()=>import("./evidence-workbench"));
 const BusinessActions=lazy(()=>import("./business-actions"));
 const Clearance=lazy(()=>import("./clearance"));
 const Promotions=lazy(()=>import("./promotions"));
@@ -177,6 +178,7 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
     else {resolvedHome.current="";void refresh().catch(()=>{});}
     return()=>{requestGeneration.current++;loader.current!.cancel();};
   },[refresh,selectedTab]);
+  useEffect(()=>{const update=()=>{void refresh(true).catch(()=>{});};window.addEventListener('workflow-tasks-changed',update);return()=>window.removeEventListener('workflow-tasks-changed',update);},[refresh]);
   // Start navigation counts after the authorized page has mounted. Switching
   // back within the polling interval reuses only counts for this exact actor.
   useEffect(()=>{
@@ -289,17 +291,18 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
           <span className={`status-pill ${connectionError?"connection-failed":""}`} role="status">{connectionError?shellT("更新失败 · 数据可能已过时"):data.tasksDeferred?shellT("正在更新导航待办"):`${shellT(hasIndependentLedger(selectedTab)?"导航已更新":"工作区已更新")} ${lastSync||"—"}`}</span>{connectionError&&<button className="btn danger" onClick={()=>void refresh().catch(()=>{})}>{shellT("重新连接")}</button>}
         </div>
       </header>
-      {assistant && assistant.scope===actorScope(actor) && <Suspense fallback={<p role="status">正在打开小品同学…</p>}><EmployeeAssistant key={tab} initialQuestion={assistant.question} page={tab} pageTitle={activeItem?navLabel(activeItem[0],activeItem[1]):''} close={()=>setAssistant(null)} go={page=>{if(roleNav.includes(page)){setAssistant(null);setTab(page);}}}/></Suspense>}
+      {assistant && assistant.scope===actorScope(actor) && <Suspense fallback={<p role="status">正在打开小品同学…</p>}><EmployeeAssistant key={tab} initialQuestion={assistant.question} page={tab} pageTitle={activeItem?navLabel(activeItem[0],activeItem[1]):''} close={()=>setAssistant(null)} go={(page,view)=>{if(roleNav.includes(page)){setAssistant(null);setTab(page,{view});}}}/></Suspense>}
       <div className="content"><Suspense fallback={<div className="panel" role="status">正在打开工作区…</div>}>{data.module&&data.module!==tab&&!(tab===selectedTab&&hasIndependentLedger(tab))?<div className="panel" role="status">正在读取当前工作区…{connectionError&&<p>{connectionError}</p>}</div>:<>
         {actor.role==="运营" && (!actor.site || !actor.channel) && <div className="notice warn">当前账号尚未绑定站点和渠道，请联系管理员在“用户管理”中完成分配后再录入业务数据。</div>}
         {tab==="distribution" && <WholesaleLanguageContext.Provider value={wholesaleLocale}><Distribution route={route} navigate={navigate} onChanged={()=>refresh(true)}/></WholesaleLanguageContext.Provider>}
         {tab==="wholesale" && <WholesaleLanguageContext.Provider value={wholesaleLocale}><Wholesale onChanged={()=>refresh(true)} route={route} navigate={navigate}/></WholesaleLanguageContext.Provider>}
         {tab==="reviews" && <BusinessReviews initialView={route.view} initialDate={route.entity}/>}
-        {tab==="content-center" && <ContentCenter/>}
+        {tab==="content-center" && <ContentCenter key={route.entity} initialId={route.entity} tasks={data.myTasks.filter(t=>t.tab===tab)}/>}
         {tab==="creators" && <CreatorWorkspace initialId={route.entity}/>}
         {tab==="cost-profit" && <CostProfit key={route.view+route.entity} role={actor.role} initialView={route.view} initialSku={route.entity}/>}
         {tab==="sales-targets" && <SalesTargets initialMonth={route.month}/>}
-        {tab==="business-actions" && <BusinessActions key={route.entity} initialId={route.entity} actor={actor}/>}
+        {tab==="business-actions" && route.view==='evidence' && <EvidenceWorkbench key={route.entity} initialKey={route.entity} site="" channel="" refresh="" standalone/>}
+        {tab==="business-actions" && route.view!=='evidence' && <BusinessActions key={route.entity} initialId={route.entity} actor={actor}/>}
         {tab==="clearance" && <Clearance initialMonth={route.month} initialId={route.entity} initialView={route.view}/>}
         {tab==="promotions" && <Promotions initialId={route.entity}/>}
         {["after-sales","quality-incidents"].includes(tab) && <AfterSales key={tab+route.month+route.entity} kind="all" initialMonth={route.month} initialId={route.entity}/>}
@@ -307,7 +310,8 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
         {tab==="suggestions" && <Suggestions data={data} act={act} busy={busy}/>}
         {tab==="new-products" && <NewProducts data={data} act={act} busy={busy}/>}
         {["sales","suggestions"].includes(tab)&&["管理员","供应链","运营","运营主管"].includes(actor.role)&&<div className="notice info"><span>五站 TikTok／Shopee：查看近30天零销量、有库存的商品及日报缺口</span> <button className="btn" onClick={()=>setTab("promotions")}>零销量预警与优惠申请 →</button></div>}
-        {tab==="sales" && <SalesImport data={data} act={act} busy={busy}/>}
+        {tab==="sales" && route.view==='imports' && <SalesImportHistory key={route.entity} initialSearch={route.entity} data={data} act={act} busy={busy}/>}
+        {tab==="sales" && route.view!=='imports' && <SalesImport data={data} act={act} busy={busy}/>}
         {tab==="inventory" && <Inventory data={data} act={act} busy={busy} scope={inventoryScope} clearScope={()=>setInventoryScope(null)}/>}
         {tab==="receipt" && <Receipt data={data} act={act} busy={busy}/>}
         {tab==="monthly" && <Monthly data={data} act={act} busy={busy}/>}

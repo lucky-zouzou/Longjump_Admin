@@ -10,10 +10,10 @@ type Topic={scope:'internal'|'public';key:string;title:string};
 type Mode='auto'|'internal'|'public';
 type Home={edition?:string;revision?:string;role:string;intro:string;dailyGuide?:string;suggestions?:Entry[];guides:Entry[];recent:Topic[]};
 type Citation={start:number;end:number;url:string;title:string};
-type Answer={topic?:Topic;saved?:boolean;verifiedAt?:string;citations?:Citation[];choices?:Entry[];step?:number;answer:string;notice:string;source:string;intent:string;guide:(Entry & {steps:string[];next:string;page:string})|null};
+type Answer={ledger?:{page:string;label:string;view?:string}|null;questions?:string[];topic?:Topic;saved?:boolean;verifiedAt?:string;citations?:Citation[];choices?:Entry[];step?:number;answer:string;notice:string;source:string;intent:string;guide:(Entry & {steps:string[];next:string;page:string})|null};
 type Turn={question:string;reply:Answer;encouragement:string};
 type AskOptions={previous?:string;previousStep?:number;guideId?:string;mode?:Mode;knowledgeId?:string};
-const sources:Record<string,string>={'conversation':'小品同学','unavailable':'小品同学','knowledge':'公司知识库','openai':'模型匹配 · 岗位手册','public-data':'公开数据源','public-web':'公开网页检索','public-unavailable':'外部资料查询'};
+const sources:Record<string,string>={'ledger':'业务台账','conversation':'小品同学','unavailable':'小品同学','knowledge':'公司知识库','openai':'模型匹配 · 岗位手册','public-data':'公开数据源','public-web':'公开网页检索','public-unavailable':'外部资料查询'};
 function currentStep(reply?:Answer){
   if(reply?.intent!=='step'||!reply.guide)return 0;
   return reply.step??reply.guide.steps.indexOf(reply.answer)+1;
@@ -53,7 +53,7 @@ function ActionCounts() {
   </div>;
 }
 
-export default function EmployeeAssistant({initialQuestion,page,pageTitle,close,go}:{initialQuestion:string;page:string;pageTitle:string;close:()=>void;go:(page:string)=>void}) {
+export default function EmployeeAssistant({initialQuestion,page,pageTitle,close,go}:{initialQuestion:string;page:string;pageTitle:string;close:()=>void;go:(page:string, view?:string)=>void}) {
   const dialog=useRef<HTMLDialogElement>(null);
   const input=useRef<HTMLTextAreaElement>(null);
   const pending=useRef<AbortController|null>(null);
@@ -137,7 +137,7 @@ export default function EmployeeAssistant({initialQuestion,page,pageTitle,close,
   return <dialog className="employee-dialog" ref={dialog} aria-labelledby="employee-title" onCancel={e=>{e.preventDefault();close();}}>
     <header className="employee-bar">
       <span className="employee-avatar" aria-hidden="true"><i><b/></i></span>
-      <div><h2 id="employee-title">{assistantName}</h2><p>{home ? [home.role,home.edition?'员工手册 '+home.edition:'岗位操作指引'].join(' · ') : '岗位操作指引'}</p></div>
+      <div><h2 id="employee-title">{assistantName}</h2><p>有我让你工作更加从容</p></div>
       <button className="employee-close" type="button" aria-label="关闭小品同学" onClick={close}><WorkspaceIcon name="close"/></button>
     </header>
     <div className="employee-transcript" ref={transcript}>
@@ -180,6 +180,8 @@ export default function EmployeeAssistant({initialQuestion,page,pageTitle,close,
         {reply.notice&&<p className="employee-note">{reply.notice}</p>}
         {reply.guide&&<h4>{reply.guide.title}{reply.intent==='step'&&currentStep(reply)>0&&<small>第 {currentStep(reply)} / {reply.guide.steps.length} 步</small>}{reply.intent==='handoff'&&<small>接下来谁接手</small>}</h4>}
         <CitedAnswer reply={reply}/>
+        {reply.ledger&&<button className="employee-link" onClick={()=>go(reply.ledger!.page,reply.ledger!.view)}>{reply.ledger.label} →</button>}
+        {!!reply.questions?.length&&<div className="employee-picks">{reply.questions.map(q=><button key={q} disabled={busy} onClick={()=>void submit(q,{mode:'internal'})}>{q}</button>)}</div>}
         {!!reply.choices?.length&&<div className="employee-picks">{reply.choices.map(g=><button key={g.id} disabled={busy} onClick={()=>openGuide(g)}>{guideQuestion(g.title)}</button>)}</div>}
         {reply.guide&&<>
           {reply.intent!=='step'&&reply.intent!=='handoff'&&<><ol>{reply.guide.steps.map((s,n)=><li key={n}>{s}</li>)}</ol>
@@ -203,7 +205,7 @@ export default function EmployeeAssistant({initialQuestion,page,pageTitle,close,
         <label className="employee-scope">去哪儿找 <select aria-label="去哪儿找（查询范围）" value={mode} disabled={busy} onChange={e=>setMode(e.target.value as Mode)}>
           <option value="auto">让小品选</option><option value="internal">系统操作</option><option value="public">外部公开资料</option></select></label>
       </div>
-      <div className="employee-input"><textarea ref={input} id="employee-question" maxLength={600} rows={2}
+      <div className="employee-input"><textarea ref={input} id="employee-question" maxLength={600} rows={1}
         placeholder={mode==='public'?'说个公开的话题就行，客户、订单和内部数据记得留在公司里。':'比如：'+(last?.guide?'下一步怎么做？':'我在这页先做什么？')} value={draft} disabled={busy} onChange={e=>setDraft(e.target.value)}
         onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing&&e.nativeEvent.keyCode!==229){e.preventDefault();if(home&&!busy)ask();}}}/>
         <button className="employee-send" disabled={!home||busy||!draft.trim()}>问小品<WorkspaceIcon name="arrow"/></button>

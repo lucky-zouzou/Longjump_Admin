@@ -33,8 +33,9 @@ function selectedMetric(data:Row,post:Row,script:Row,days:number){
 function windowStatus(at:string,days:number){
  return Date.now()<Date.parse(at)+days*86400000?'未成熟':'待补录';
 }
-export default function ContentCenter(){
- const [snapshot,setData]=useState<Row|null>(null),[chosenTab,setTab]=useState<number|null>(null),[filter,setFilter]=useState(''),[site,setSite]=useState(''),[source,setSource]=useState(''),[week,setWeek]=useState('');
+export default function ContentCenter({initialId='',tasks=[]}:{initialId?:string;tasks?:Row[]}){
+ const [focus,setFocus]=useState(initialId);
+ const [snapshot,setData]=useState<Row|null>(null),[chosenTab,setTab]=useState<number|null>(initialId?0:null),[filter,setFilter]=useState(''),[site,setSite]=useState(''),[source,setSource]=useState(''),[week,setWeek]=useState('');
  const [form,setForm]=useState<Row|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
  const [materialDirty,setMaterialDirty]=useState(false),[materialRefresh,setMaterialRefresh]=useState(0);
  const formBox=useRef<HTMLDivElement>(null),counter=useRef(0);
@@ -49,6 +50,13 @@ export default function ContentCenter(){
  };
  useVisibleRefresh(refreshCurrent,30000,!form&&!busy);
  useEffect(()=>{if(form)formBox.current?.scrollIntoView({block:'start',behavior:'smooth'});},[form]);
+ const scrolled=useRef('');
+ useEffect(()=>{
+   if(!focus){scrolled.current='';return;}
+   if(!snapshot||scrolled.current===focus)return;
+   const target=document.querySelector<HTMLElement>('[data-entity-id="'+CSS.escape(focus)+'"]');
+   if(target){scrolled.current=focus;target.scrollIntoView({block:'center'});target.focus({preventScroll:true});}
+ },[focus,snapshot,chosenTab]);
  const open=(action:string,initial:Row={})=>{setError('');setNotice('');setForm({action,operationId:crypto.randomUUID(),...initial});};
  async function save(value:Row,reference?:File){
    if(busy)return;setBusy(true);setError('');
@@ -56,7 +64,7 @@ export default function ContentCenter(){
      const upload=reference?new FormData():null;
      if(upload&&reference){upload.set('payload',JSON.stringify(value));upload.set('reference',reference);}
      await parseWorkspaceResponse(await fetch('/api/content-center',{method:'POST',headers:upload?undefined:{'Content-Type':'application/json'},body:upload||JSON.stringify(value)}));
-     setForm(null);setNotice('已保存');await refresh();
+     setForm(null);setNotice('已保存');await refresh();window.dispatchEvent(new Event('workflow-tasks-changed'));
    }catch(e){setError(e instanceof Error?e.message:'保存失败');}finally{setBusy(false);}
  }
  if(!snapshot)return <section className="cc"><h2>TikTok 内容中心</h2><p>{error||'正在读取内容中心…'}</p>{error&&<button className="btn" onClick={()=>void refresh()}>重新加载</button>}</section>;
@@ -73,14 +81,14 @@ export default function ContentCenter(){
  const visibleScripts=scripts.filter(s=>(!site||s.site===site)&&find(s,versions.filter(v=>v.script_id===s.id).map(v=>v.label+' '+v.storyboard).join(' ')));
  const visiblePosts=posts.filter(p=>(!site||site===p.site)&&find(sFor(p),p.account+' '+byVersion.get(p.version_id)?.label));
  const inWeek=(value:string)=>!week||value>=week&&Date.parse(value)<Date.parse(week)+7*86400000;
- const queue=visibleScripts.filter(s=>inWeek(s.shoot_date||s.due));
+ const queue=visibleScripts.filter(s=>inWeek(s.shoot_date||s.due)&&(!focus||s.id===focus||versions.some(v=>v.id===focus&&v.script_id===s.id)));
  const newValues={source:'studio',originalCount:1,site:data.writeSites[0]||'',scene:'公司静拍'};
  const canClaim=(s:Row)=>ops&&data.writeSites.some((site:string)=>s.source!=='creator'||s.allowedSites.includes(site));
  const go=(i:number)=>{if(form||materialDirty&&i!==tab)return;setTab(i);setNotice('');};
  function task(s:Row){
   const product=skuByCode.get(s.sku),accepted=new Set(versions.filter(v=>v.script_id===s.id&&v.status==='已验收').map(v=>v.original_no)).size;
   const tags=(text:string)=>text?text.split(/[、，,\n]+/).map(t=>t.trim()).filter(Boolean).map((t,i)=><span className="cc-task-tag" key={i}>{t}</span>):'未指定';
-  return <article className="cc-card cc-task" key={s.id}><header className="cc-row"><h4>{s.title}</h4><b className="cc-task-state">{s.status}</b></header>
+  return <article className="cc-card cc-task" key={s.id} tabIndex={-1} data-entity-id={s.id}><header className="cc-row"><h4>{s.title}</h4><b className="cc-task-state">{s.status}</b></header>
    <dl><div><dt>拍摄至交付</dt><dd>{s.shoot_date?s.shoot_date+' 至 '+s.delivery_date:'待排期'}</dd></div><div><dt>站点</dt><dd>{s.site}</dd></div>
    <div><dt>商品编码</dt><dd><SkuLabel sku={s.sku}/></dd></div><div><dt>商品名称 / 类型</dt><dd>{[product?.name,product?.product_type].filter(Boolean).join(' · ')||'待补充'}</dd></div>
    <div><dt>视频类型</dt><dd>{sourceLabels[s.source]}</dd></div><div><dt>拍摄场景</dt><dd>{s.scene}</dd></div>
@@ -94,12 +102,12 @@ export default function ContentCenter(){
    {versions.filter(v=>v.script_id===s.id).map(v=>asset(v,s))}</article>;
  }
  function actionsFor(s:Row){
-  return <div className="cc-actions">{s.source==='studio'&&camera&&['待排期','已排期'].includes(s.status)&&<button className="btn" onClick={()=>open('schedule',{scriptId:s.id,version:s.version,shoot:s.shoot_date||'',delivery:s.delivery_date||'',jointWith:s.joint_with||'',context:s.title})}>安排拍摄</button>}
+  return <div className="cc-actions">{s.source==='studio'&&camera&&['待排期','已排期'].includes(s.status)&&<button className="btn" onClick={()=>open('schedule',{scriptId:s.id,version:s.version,studioUserId:s.studio_user_id||'',shoot:s.shoot_date||'',delivery:s.delivery_date||'',jointWith:s.joint_with||'',context:s.title})}>安排拍摄</button>}
     {(s.source==='studio'&&camera&&s.shoot_date||s.source==='ai'&&ops&&ownsSite(s.site))&&<button className="btn" onClick={()=>open('deliver',{scriptId:s.id,version:s.version,context:s.title,storyboard:s.brief})}>交付新版本</button>}
     {s.source==='creator'&&manager&&<button className="btn" onClick={()=>open('rights',{scriptId:s.id,version:s.version,context:s.title,mode:s.rightsMode,sites:s.allowedSites,end:s.expires,evidence:s.rightsEvidence})}>素材授权</button>}</div>;
  }
  function asset(v:Row,s:Row){
-  return <div key={v.id} className="cc-version"><div className="cc-row"><strong>{s.original_count>1?'第 '+v.original_no+' 条原创 · ':''}{v.label}</strong><span>{v.status}</span></div><p>{v.storyboard}</p>
+  return <div key={v.id} tabIndex={-1} data-entity-id={v.id} className="cc-version"><div className="cc-row"><strong>{s.original_count>1?'第 '+v.original_no+' 条原创 · ':''}{v.label}</strong><span>{v.status}</span></div><p>{v.storyboard}</p>
    <div className="cc-actions"><Link href={v.master_url}>打开母版／原片</Link><Link href={v.raw_url}>原始镜头</Link><Link href={v.product_ref}>实物参考</Link></div>
    {v.prompt&&<details><summary>AI 提示词</summary><p>{v.prompt}</p></details>}{v.feedback&&<p>验收意见 · {v.feedback}</p>}
    <div className="cc-actions">{v.status==='待验收'&&ops&&ownsSite(s.site)&&['accept','return'].map(action=><button className="btn" key={action} onClick={()=>open(action,{versionId:v.id,version:v.version,context:s.title+' · '+v.label})}>{action==='accept'?'验收通过':'退回修改'}</button>)}
@@ -134,6 +142,8 @@ export default function ContentCenter(){
  return <section className="cc"><header className="cc-heading"><div><h2>TikTok 内容中心</h2></div>
   <div className="cc-actions"><button className="btn" disabled={busy||!!form} onClick={()=>{if(tab!==6)void refresh();setMaterialRefresh(n=>n+1);}}>刷新</button>{ops&&data.writeSites.length>0&&<button className="btn primary" disabled={!!form||materialDirty} onClick={()=>open('create',newValues)}>＋ 新建需求</button>}</div></header>
   <div className="cc-summary">{[['待排期',scripts.filter(s=>s.status==='待排期').length,0],['待验收版本',versions.filter(v=>v.status==='待验收').length,0],['待发布',posts.filter(p=>!p.published_at).length,3],['已发布',posts.filter(p=>p.published_at).length,3]].map(([l,n,i])=><button key={l} disabled={!!form||materialDirty} onClick={()=>{if(l==='待验收版本'){setWeek('');setFilter('');setSite('');setSource('');}go(Number(i));}}><span>{l}</span><b>{n}</b></button>)}</div>
+  {tasks.length>0&&<details className="cc-card"><summary>我的内容待办 · {tasks.length}</summary>{tasks.map(t=><button key={t.entity} className="btn" disabled={!!form||materialDirty} onClick={()=>{setFocus(t.entity);setFilter('');setSite('');setSource('');setWeek('');go(0);}}>{t.title} · {t.detail}</button>)}</details>}
+  {focus&&tab===0&&<p>正在查看指定任务 <button className="btn" onClick={()=>setFocus('')}>显示全部需求</button></p>}
   <nav aria-label="内容工作区">{tabOrder.map(i=><button key={i} aria-current={i===tab?'page':undefined} disabled={!!form||materialDirty} onClick={()=>go(i)}>{tabs[i]}</button>)}</nav>
   {notice&&<p role="status">{notice}</p>}{error&&!form&&<p className="cc-error" role="alert">{error}</p>}
   {form&&<div ref={formBox}><ContentForm key={form.operationId} initial={form} data={data} error={error} busy={busy} onClose={()=>{setForm(null);setError('');}} onSave={save}/></div>}

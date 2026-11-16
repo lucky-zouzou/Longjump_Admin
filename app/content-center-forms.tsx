@@ -36,7 +36,7 @@ function fields(input:Row,d:Row):Field[]{
      [select('site','需求站点',sites),select('sku','指定产品 SKU',d.skus.map((r:Row)=>[r.sku,r.sku+' · '+r.name]))]),
     f('brief','补充要求','textarea',true),
     ...(input.source==='studio'?[f('originalCount','需要几条原创','number'),f('colors','拍摄颜色','text',true),select('scene','拍摄场景',scenes),f('directions','内容方向','text',true),f('referenceUrl','参考拍摄视频链接','url',true)]:[]),f('due','期望交付日期','date')];
-  case 'schedule':return [f('shoot','拍摄日期','date'),f('delivery','交付日期','date'),
+  case 'schedule':return [...(['管理员','运营主管'].includes(d.actor.role)?[select('studioUserId','负责拍摄剪辑',d.people.filter((u:Row)=>u.role==='拍摄剪辑').map((u:Row)=>[u.id,u.name]),true)]:[]),f('shoot','拍摄日期','date'),f('delivery','交付日期','date'),
     select('jointWith','与同款需求合拍',scripts.filter(r=>r.id!==s?.id&&r.sku===s?.sku&&r.source==='studio'&&r.shoot_date&&r.shoot_date===input.shoot&&!r.joint_with).map(r=>[r.id,r.site+' · '+r.title]),true)];
   case 'deliver':return [...(s&&s.original_count>1?[select('originalNo','对应哪条原创',Array.from({length:s.original_count},(_,i)=>[String(i+1),'第 '+(i+1)+' 条原创'] as [string,string]))]:[]),f('label','版本名称'),f('storyboard','本版脚本和镜头顺序','textarea'),f('master','可访问的无字幕母版／成片链接','url'),f('raw','原始素材文件夹链接','url',true),
     ...(s?.source==='ai'?[f('prompt','完整 AI 提示词','textarea'),f('productRef','产品实物参考链接','url'),f('productChecked','已核对实物特征和发布标识要求','checkbox')]:[])];
