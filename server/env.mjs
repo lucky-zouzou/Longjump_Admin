@@ -3,6 +3,12 @@ import {openDatabase,fileBucket} from './storage.mjs';
 import {createCompanyAccount} from './create-account.mjs';
 const key=Symbol.for('loongjump.node.storage');
 export const env=globalThis[key]||(globalThis[key]={DB:openDatabase(),WHOLESALE_FILES:fileBucket()});
+// Keep private file access in Node. Worker deployments use an OPENAI_API_KEY secret.
+env.readEmployeeAssistantKey = () => {
+  if(process.env.OPENAI_API_KEY) return process.env.OPENAI_API_KEY;
+  try {return readFileSync(process.env.LOONGJUMP_OPENAI_KEY_FILE || 'secrets/openai_api_key.txt','utf8').trim();}
+  catch {return '';}
+};
 env.COMPANY_ACCOUNTS={create:(actor,input)=>createCompanyAccount(env.DB.sqlite,actor,input)};
 
 const bestConfigFile = process.env.LOONGJUMP_BEST_CREDENTIALS_FILE;

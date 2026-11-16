@@ -1,4 +1,6 @@
 "use client";
+import {assistantName,wakeQuestion} from '../lib/employee-wake.mjs';
+const EmployeeAssistant=lazy(()=>import('./employee-assistant'));
 import SkuLabel, {SkuImagesProvider} from './sku-label';
 
 const BestWaybillLookup=lazy(()=>import("./best-tracking").then(m=>({default:m.BestWaybillLookup})));
@@ -124,6 +126,7 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
   const {route,navigate}=useWorkspaceRoute();
   const selectedTab=route.page;
   const [more,setMore]=useState(false);
+  const [assistant,setAssistant]=useState<{question:string;scope:string}|null>(null);
   const [navQuery,setNavQuery]=useState("");
   const [collapsedGroups,setCollapsedGroups]=useState<Record<string,boolean>>({});
   useEffect(()=>{const group=NAV_GROUPS.find(g=>g.keys.includes(selectedTab));if(group)setCollapsedGroups(old=>({...old,[group.label]:false}));},[selectedTab]);
@@ -256,14 +259,16 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
   const activeItem=visibleNav.find(([key])=>key===tab);
   const activeGroup=NAV_GROUPS.find(group=>group.keys.includes(tab));
   const filteredNav=visibleNav.filter(([key,label])=>`${navLabel(key,label)} ${label} ${key}`.toLowerCase().includes(navQuery.trim().toLowerCase()));
+  const wake= wakeQuestion(navQuery);
+  const openAssistant=(question="")=>{setMore(false);setNavQuery("");setAssistant({question,scope:actorScope(actor)});};
   const navigation=(surface:string)=><>
-    <div className="nav-search"><WorkspaceIcon name="search"/><input aria-label={shellT("搜索工作区")} placeholder={shellT("搜索工作区")} value={navQuery} onChange={event=>setNavQuery(event.target.value)}/>{navQuery&&<button aria-label={shellT("清除搜索")} onClick={()=>setNavQuery("")}><WorkspaceIcon name="close"/></button>}</div>
+    <div className="nav-search"><WorkspaceIcon name="search"/><input aria-label={shellT("搜索工作区")} placeholder={shellT("搜索工作区")} value={navQuery} onChange={event=>setNavQuery(event.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&!e.nativeEvent.isComposing&&e.nativeEvent.keyCode!==229&&wake!==null){e.preventDefault();openAssistant(wake);}}}/>{navQuery&&<button aria-label={shellT("清除搜索")} onClick={()=>setNavQuery("")}><WorkspaceIcon name="close"/></button>}</div>
     <div className="nav-sections">{NAV_GROUPS.filter(group=>filteredNav.some(([key])=>group.keys.includes(key))).map((group,index)=>{
       const expanded=Boolean(navQuery.trim())||!collapsedGroups[group.label];
       const groupId=`nav-${surface}-${index}`;
       return <div className="nav-group" key={group.label}><button className="nav-group-toggle" aria-expanded={expanded} aria-controls={groupId} onClick={()=>setCollapsedGroups(old=>({...old,[group.label]:!old[group.label]}))} disabled={Boolean(navQuery.trim())}><span>{shellT(group.label)}</span><WorkspaceIcon name="chevron"/></button>
         <div id={groupId} hidden={!expanded}>{filteredNav.filter(([key])=>group.keys.includes(key)).map(([key,label])=><button key={key} className={classNames("nav-button",tab===key&&"active")} aria-current={tab===key?"page":undefined} onClick={()=>setTab(key)}><span className="nav-icon"><WorkspaceIcon name={key}/></span><span className="nav-label">{navLabel(key,label)}</span>{taskBadge(key)}</button>)}</div></div>;
-    })}{!filteredNav.length&&<div className="nav-no-results">{shellT("没有匹配的工作区")}<button onClick={()=>setNavQuery("")}>{shellT("清除搜索")}</button></div>}</div>
+    })}{wake!==null?<button className="nav-button" onClick={()=>openAssistant(wake)}>询问{assistantName} ↗</button>:!filteredNav.length&&<div className="nav-no-results">{shellT("没有匹配的工作区")}<button onClick={()=>setNavQuery("")}>{shellT("清除搜索")}</button></div>}</div>
   </>;
 
   return <SkuImagesProvider key={`${actor.id}|${actor.role}|${actor.site}|${actor.channel}`} role={actor.role}><div className="app-shell" lang={["wholesale","distribution"].includes(tab)&&wholesaleLocale.language==="id"?"id":"zh-CN"}>
@@ -278,10 +283,12 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
       <header className="topbar">
         <div className="workspace-breadcrumb"><span className="breadcrumb-section">{shellT(activeGroup?.label||"工作台")}</span><WorkspaceIcon name="chevron"/><h2>{activeItem?navLabel(activeItem[0],activeItem[1]):shellT("全链路可视化协同")}</h2></div>
         <div className="workspace-top-actions">
+          <button type="button" className="btn employee-launch" aria-haspopup="dialog" onClick={()=>openAssistant()}>{assistantName}</button>
           {hasPermission(actor.role,"backup.export")&&<button className="btn" onClick={exportBackup}>{shellT("导出备份")}</button>}
           <span className={`status-pill ${connectionError?"connection-failed":""}`} role="status">{connectionError?shellT("更新失败 · 数据可能已过时"):data.tasksDeferred?shellT("正在更新导航待办"):`${shellT(hasIndependentLedger(selectedTab)?"导航已更新":"工作区已更新")} ${lastSync||"—"}`}</span>{connectionError&&<button className="btn danger" onClick={()=>void refresh().catch(()=>{})}>{shellT("重新连接")}</button>}
         </div>
       </header>
+      {assistant && assistant.scope===actorScope(actor) && <Suspense fallback={<p role="status">正在打开小品同学…</p>}><EmployeeAssistant initialQuestion={assistant.question} page={tab} close={()=>setAssistant(null)} go={page=>{if(roleNav.includes(page)){setAssistant(null);setTab(page);}}}/></Suspense>}
       <div className="content"><Suspense fallback={<div className="panel" role="status">正在打开工作区…</div>}>{data.module&&data.module!==tab&&!(tab===selectedTab&&hasIndependentLedger(tab))?<div className="panel" role="status">正在读取当前工作区…{connectionError&&<p>{connectionError}</p>}</div>:<>
         {actor.role==="运营" && (!actor.site || !actor.channel) && <div className="notice warn">当前账号尚未绑定站点和渠道，请联系管理员在“用户管理”中完成分配后再录入业务数据。</div>}
         {tab==="distribution" && <WholesaleLanguageContext.Provider value={wholesaleLocale}><Distribution route={route} navigate={navigate} onChanged={()=>refresh(true)}/></WholesaleLanguageContext.Provider>}

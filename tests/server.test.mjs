@@ -36,9 +36,20 @@ test('独立服务器：公司登录、禁止伪造身份、岗位隔离、出�
  assert.equal((await fetch(origin+'/api/wholesale/distributor',{method:'POST',headers:{origin}})).status,401);
  const forged=await fetch(origin+'/api/system',{headers:{'oai-authenticated-user-id':'admin','oai-authenticated-user-email':'admin@example.test','x-local-test-user':'admin'}});assert.equal(forged.status,401);
  const login=async (who,remember=false)=>{const page=await fetch(origin+'/signin-with-chatgpt'),html=await page.text(),csrf=html.match(/name="csrf" value="([a-f0-9]+)"/)[1],pre=page.headers.getSetCookie()[0].split(';')[0];const r=await fetch(origin+'/signin-with-chatgpt',{method:'POST',redirect:'manual',headers:{origin,'content-type':'application/x-www-form-urlencoded',cookie:pre},body:new URLSearchParams({csrf,email:`${who}@example.test`,password,remember:remember?'1':'0'})});assert.equal(r.status,303,await r.text());const session=r.headers.getSetCookie().find(c=>c.startsWith('lj_session='));assert.match(session,new RegExp('Max-Age='+(remember?2592000:28800)));assert.match(session,/HttpOnly/);return session.split(';')[0]};
+ assert.equal((await fetch(origin+'/api/employee-assistant')).status,401);
  const health=await fetch(origin+'/healthz');assert.equal(health.status,200);assert.deepEqual(await health.json(),{ok:true,release:'local'});
  const cookies={};for(const who of ['admin','sales','supply','finance'])cookies[who]=await login(who,who==='sales');
  const request=async(who,path,payload)=>{const r=await fetch(origin+path,{method:payload?'POST':'GET',headers:{cookie:cookies[who],origin,...(payload?{'content-type':'application/json'}:{})},...(payload?{body:JSON.stringify({...payload,operationId:crypto.randomUUID()})}:{})});const text=await r.text();let body;try{body=JSON.parse(text)}catch{body=text}return {status:r.status,body}};
+
+ const assistantPath='/api/employee-assistant';
+ const guideHome=await request('finance',assistantPath);
+ assert.equal(guideHome.status,200);assert.ok(guideHome.body.guides.some(g=>g.id==='finance-day'));
+ const selected=await request('finance',assistantPath,{question:'每日成本',guideId:'finance-day'});
+ assert.equal(selected.status,200);assert.equal(selected.body.source,'handbook');
+ assert.equal((await request('sales',assistantPath,{question:'成本',role:'财务',guideId:'finance-day'})).body.guide,null);
+ assert.equal((await request('sales',assistantPath+'?actionCounts=1')).status,403);
+ assert.equal((await request('finance',assistantPath+'?actionCounts=1')).body.site,'印尼');
+ assert.equal((await fetch(origin+assistantPath,{method:'POST',headers:{cookie:cookies.finance,'content-type':'application/json',origin:'https://example.invalid'},body:'{}'})).status,403);
 
  {
  const path='/api/integrations/website-inquiries',secret='test-http-inquiry-secret-32-characters';

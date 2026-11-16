@@ -1,5 +1,5 @@
 "use client";
-import {useState} from 'react';
+import {useRef,useState} from 'react';
 import {useDirtyGuard} from './workspace-hooks';
 export type Row=Record<string,any>;
 type Choice=string|[string,string];
@@ -9,6 +9,19 @@ const scenes=['公司静拍','外景拍摄','室内＋外景'];
 type Field={key:string;label:string;type?:string;options?:Choice[];optional?:boolean;hint?:string};
 const f=(key:string,label:string,type='text',optional=false):Field=>({key,label,type,optional});
 const select=(key:string,label:string,options:Choice[],optional=false):Field=>({key,label,options,optional});
+function SkuSearch({options,value,onChange}:{options:Choice[];value:string;onChange:(v:string)=>void}){
+ const [query,setQuery]=useState('');const picker=useRef<HTMLSelectElement>(null);
+ const matches=options.map(o=>Array.isArray(o)?o:[o,o]).filter(([sku,label])=>sku===value||label.toLowerCase().includes(query.trim().toLowerCase()));
+ function chooseMatch(){
+  const found=matches.filter(([,label])=>label.toLowerCase().includes(query.trim().toLowerCase()));
+  if(query.trim()&&found.length===1)onChange(found[0][0]);
+  picker.current?.focus();
+ }
+ return <div className="cc-sku-search"><div><label>搜索商品<input type="search" value={query} placeholder="输入 SKU 或商品名称" onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();chooseMatch();}}} onChange={e=>setQuery(e.target.value)}/></label>
+  <button type="button" className="btn" onClick={chooseMatch}>搜索 SKU</button></div>
+  <label>指定产品 SKU<select ref={picker} name="sku" required value={value} onChange={e=>onChange(e.target.value)}><option value="">请选择商品</option>{matches.map(([k,v])=><option key={k} value={k}>{v}</option>)}</select></label>
+  {!matches.length&&<small role="status">没有匹配的商品，请调整关键词。</small>}</div>;
+}
 function fields(input:Row,d:Row):Field[]{
  const scripts=d.scripts as Row[],versions=d.versions as Row[],posts=d.posts as Row[];
  const post=posts.find(r=>r.id===input.postId),v=versions.find(r=>r.id===(input.versionId||post?.version_id));
@@ -21,10 +34,10 @@ function fields(input:Row,d:Row):Field[]{
     ...(input.source==='creator'?[select('sourceContentId','已验收的达人原视频',d.sources.filter((r:Row)=>!scripts.some(s=>s.source_content_id===r.id)).map((r:Row)=>[r.id,r.site+' · '+r.shop+' · @'+r.platform_id+' · '+r.sku]))]:
      [select('site','需求站点',sites),select('sku','指定产品 SKU',d.skus.map((r:Row)=>[r.sku,r.sku+' · '+r.name]))]),
     f('title','需求标题'),f('brief','补充要求（可选）','textarea',true),
-    ...(input.source==='studio'?[select('scene','拍摄场景',scenes)]:[]),f('due','期望交付日期','date')];
+    ...(input.source==='studio'?[f('originalCount','需要几条原创','number'),f('colors','拍摄颜色','text',true),select('scene','拍摄场景',scenes),f('directions','内容方向','text',true),f('referenceUrl','参考拍摄视频链接','url',true)]:[]),f('due','期望交付日期','date')];
   case 'schedule':return [f('shoot','拍摄日期','date'),f('delivery','交付日期','date'),
     select('jointWith','与同款需求合拍',scripts.filter(r=>r.id!==s?.id&&r.sku===s?.sku&&r.source==='studio'&&r.shoot_date&&r.shoot_date===input.shoot&&!r.joint_with).map(r=>[r.id,r.site+' · '+r.title]),true)];
-  case 'deliver':return [f('label','版本名称'),f('storyboard','本版脚本和镜头顺序','textarea'),f('master','可访问的无字幕母版／成片链接','url'),f('raw','原始素材文件夹链接','url',true),
+  case 'deliver':return [...(s&&s.original_count>1?[select('originalNo','对应哪条原创',Array.from({length:s.original_count},(_,i)=>[String(i+1),'第 '+(i+1)+' 条原创'] as [string,string]))]:[]),f('label','版本名称'),f('storyboard','本版脚本和镜头顺序','textarea'),f('master','可访问的无字幕母版／成片链接','url'),f('raw','原始素材文件夹链接','url',true),
     ...(s?.source==='ai'?[f('prompt','完整 AI 提示词','textarea'),f('productRef','产品实物参考链接','url'),f('productChecked','已核对实物特征和发布标识要求','checkbox')]:[])];
   case 'accept':case 'return':return [f('feedback',input.action==='return'?'需修改的镜头和原因':'验收意见','textarea',input.action==='accept')];
   case 'rights':return [select('mode','允许的使用方式',[['reference','仅参考创意'],['direct','可直接发布原版'],['edit','可二剪及发布']]),
@@ -41,10 +54,10 @@ function fields(input:Row,d:Row):Field[]{
   default:return [];
  }
 }
-export function ContentForm({initial,data,onClose,onSave,busy,error}:{initial:Row;data:Row;onClose:()=>void;onSave:(v:Row)=>Promise<void>;busy:boolean;error:string}){
- const [value,set]=useState(initial);const dirty=JSON.stringify(value)!==JSON.stringify(initial);const confirm=useDirtyGuard(dirty);
- const update=(key:string,v:any)=>set(old=>({...old,[key]:v,...(key==='site'?{ownerId:''}:{}),...(key==='shoot'?{jointWith:''}:{}),
-   ...(key==='decision'?{site:'',ownerId:''}:{}),...(key==='source'?{sourceContentId:''}:{})}));
+export function ContentForm({initial,data,onClose,onSave,busy,error}:{initial:Row;data:Row;onClose:()=>void;onSave:(v:Row,reference?:File)=>Promise<void>;busy:boolean;error:string}){
+ const [value,set]=useState(initial),[reference,setReference]=useState<File>();const dirty=!!reference||JSON.stringify(value)!==JSON.stringify(initial);const confirm=useDirtyGuard(dirty);
+ const update=(key:string,v:any)=>{if(key==='source')setReference(undefined);set(old=>({...old,[key]:v,...(key==='site'?{ownerId:''}:{}),...(key==='shoot'?{jointWith:''}:{}),
+   ...(key==='decision'?{site:'',ownerId:''}:{}),...(key==='source'?{sourceContentId:''}:{})}));};
  return <form className="cc-form" aria-label={actions[value.action]} onSubmit={e=>{
    e.preventDefault();const payload={...value};
    const submitted=new FormData(e.currentTarget);
@@ -54,19 +67,21 @@ export function ContentForm({initial,data,onClose,onSave,busy,error}:{initial:Ro
      else payload[item.key]=submitted.get(item.key)??'';
    }
    for(const k of ['observedAt','publishedAt'])if(payload[k])payload[k]=new Date(payload[k]).toISOString();
-   void onSave(payload);
+   void onSave(payload,payload.action==='create'&&payload.source==='studio'?reference:undefined);
  }}>
   <header><h3>{actions[value.action]}</h3><button type="button" className="btn" disabled={busy} onClick={()=>{if(!dirty||confirm())onClose();}}>关闭</button></header>
   {value.context&&<p className="cc-note">{value.context}</p>}
-  <div className="cc-fields">{fields(value,data).map(item=><label key={item.key} className={item.type==='textarea'||item.type==='multi'?'wide':''}>
+  <div className="cc-fields">{fields(value,data).map(item=>item.key==='sku'?<SkuSearch key={item.key} options={item.options||[]} value={value.sku||''} onChange={v=>update('sku',v)}/>:<label key={item.key} className={item.type==='textarea'||item.type==='multi'?'wide':''}>
     <span>{item.label}{item.optional&&'（选填）'}</span>
     {item.type==='multi'?<span className="cc-checks">{item.options?.map(op=>{const v=String(op);return <span key={v}><input type="checkbox" name={item.key} value={v} checked={(value[item.key]||[]).includes(v)} onChange={e=>update(item.key,e.target.checked?[...(value[item.key]||[]),v]:(value[item.key]||[]).filter((x:string)=>x!==v))}/>{v}</span>;})}</span>:
     item.options?<select name={item.key} aria-label={item.label} required={!item.optional} value={value[item.key]||''} onChange={e=>update(item.key,e.target.value)}><option value="">{item.optional?'不指定':'请选择'}</option>{item.options.map(option=>{const [k,v]=Array.isArray(option)?option:[option,option];return <option key={k} value={k}>{v}</option>;})}</select>:
     item.type==='checkbox'?<input type="checkbox" name={item.key} required checked={value[item.key]===true} onChange={e=>update(item.key,e.target.checked)}/>:
     item.type==='textarea'?<textarea name={item.key} aria-label={item.label} required={!item.optional} value={value[item.key]||''} rows={3} onChange={e=>update(item.key,e.target.value)}/>:
-    <input name={item.key} aria-label={item.label} onInput={e=>update(item.key,e.currentTarget.value)} type={item.type==='percent'?'number':item.type} min={['number','percent'].includes(item.type||'')?0:undefined} max={item.type==='percent'?100:undefined} step={item.type==='percent'?'any':undefined}
+    <input name={item.key} aria-label={item.label} onInput={e=>update(item.key,e.currentTarget.value)} type={item.type==='percent'?'number':item.type} min={item.key==='originalCount'?1:['number','percent'].includes(item.type||'')?0:undefined} max={item.key==='originalCount'||item.type==='percent'?100:undefined} step={item.type==='percent'?'any':undefined}
       required={!item.optional} value={value[item.key]??''} onChange={e=>update(item.key,e.target.value)}/>}
   </label>)}</div>
+  {value.action==='create'&&value.source==='studio'&&<label className="cc-reference-upload">上传参考视频（选填，16 MB 以内）
+    <input type="file" accept=".mp4,.mov,.webm,video/mp4,video/quicktime,video/webm" onChange={e=>{const file=e.target.files?.[0];e.target.setCustomValidity(file&&file.size>16*1024*1024?'视频超过 16 MB，可改填参考链接':'');setReference(file);}}/></label>}
   {error&&<p className="cc-error" role="alert">{error}</p>}
   <footer><button className="btn primary" disabled={busy}>{busy?'正在提交…':'保存'+(value.action==='return'?'退回意见':'')}</button></footer>
  </form>;

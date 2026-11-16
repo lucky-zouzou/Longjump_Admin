@@ -130,3 +130,16 @@ test('替换期间原片分发变化会阻止覆盖；选项维护限管理员�
  await assert.rejects(f.modify(f.users.admin,'options',{version:0,options}),{status:409});
  assert.deepEqual((await f.list(f.camera)).options,{version:1,values:options});
 });
+
+test('预览首字节、拖动和只读文件头按需读取，不登记下载',async t=>{
+  const f=setup(t);await f.upload();const id=f.users.indonesia,reads=[];
+  const bucket={get(key,options){reads.push(options.range);return f.bucket.get(key,options);}};
+  const response=(range,head=false)=>materialResponse(f.db,bucket,id,f.meta.id,range,false,head);
+  const head=await response(null,true);assert.equal(head.body,null);assert.equal(head.headers.get('content-length'),String(f.data.length));assert.equal(reads.length,0);
+  for(const [range,start,len] of [['bytes=0-1',0,2],['bytes=-4',f.data.length-4,4]]){
+    const r=await response(range);assert.equal(r.status,206);assert.match(r.headers.get('content-disposition'),/^inline/);
+    assert.deepEqual(new Uint8Array(await r.arrayBuffer()),f.data.slice(start,start+len));
+    assert.deepEqual(reads.at(-1),{offset:start,length:len});
+  }
+  assert.equal((await f.list(id)).items[0].sites[0].status,'pending');
+});

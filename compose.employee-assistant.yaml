@@ -1,0 +1,9 @@
+services:
+  app:
+    environment:
+      LOONGJUMP_OPENAI_KEY_FILE: /run/secrets/employee_openai
+    secrets:
+      - employee_openai
+secrets:
+  employee_openai:
+    file: ./secrets/employee-assistant/api_key
