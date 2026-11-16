@@ -26,7 +26,13 @@ test('独立服务器：公司登录、禁止伪造身份、岗位隔离、出�
  const application=await fetch(origin+'/distributor/apply',{redirect:'manual'});
  assert.equal(application.status,200);assert.equal(application.headers.get('referrer-policy'),'same-origin');assert.match(await application.text(),/Jadi partner kami/);
  assert.ok(portalHtml.includes('href="/distributor/apply"'));
- for(const path of ['/distributor-assets/application.css','/loong-jump-logo-black.png'])assert.equal((await fetch(origin+path,{redirect:'manual'})).status,200);
+ const welcome=await fetch(origin+'/signin-with-chatgpt');
+ assert.match(await welcome.text(),/<workplace-welcome>/);
+ assert.match(welcome.headers.get('content-security-policy'),/script-src 'self'; connect-src 'self'/);
+ const places=await fetch(origin+'/api/workplace-weather?q=Jakarta');
+ assert.equal(places.status,200);assert.equal((await places.json()).cities[0].name,'雅加达');
+ assert.equal((await fetch(origin+'/favicon.ico')).url,origin+'/favicon.png');
+ for(const path of ['/favicon.png','/workplace-welcome.js','/workplace-greeting.js','/distributor-assets/application.css','/loong-jump-logo-black.png'])assert.equal((await fetch(origin+path,{redirect:'manual'})).status,200);
  for(const image of ['partner-green.webp','partner-pink.webp']){
   const response=await fetch(origin+'/distributor-assets/'+image,{redirect:'manual'});
   assert.equal(response.status,200);assert.equal(response.headers.get('content-type'),'image/webp');

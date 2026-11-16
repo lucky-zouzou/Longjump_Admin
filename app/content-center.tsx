@@ -5,12 +5,14 @@ import {useCallback,useEffect,useRef,useState} from 'react';
 import {parseWorkspaceResponse} from '../lib/workspace-response.mjs';
 import {useVisibleRefresh} from './workspace-hooks';
 import {ContentForm,sourceLabels,type Row} from './content-center-forms';
+import {SITE_CURRENCIES} from '../lib/sales-data.mjs';
+import {ContentCompass} from './content-compass';
 import {ContentMetricsImport} from './content-metrics-import';
 import {ContentMaterials} from './content-materials';
 import './content-center.css';
 
-const tabs=['需求与排期','脚本与素材','','效果复盘','复拍与跨站测试','素材收发'];
-const tabOrder=[0,5,1,3];
+const tabs=['需求与排期','脚本与素材','','效果复盘','复拍与跨站测试','素材收发','数据罗盘'];
+const tabOrder=[0,5,1,3,6];
 const stamp=(s:string)=>new Date(s).toLocaleString('zh-CN',{hour12:false});
 const inputTime=()=>{const n=new Date();return new Date(n.getTime()-n.getTimezoneOffset()*60000).toISOString().slice(0,16);};
 function Link({href,children}:{href?:string;children:React.ReactNode}){return href&&/^https:\/\//.test(href)?<a href={href} target="_blank" rel="noreferrer">{children} ↗</a>:null;}
@@ -40,7 +42,11 @@ export default function ContentCenter(){
   catch(e){if(generation===counter.current)setError(e instanceof Error?e.message:'加载失败');}
  },[]);
  useEffect(()=>{void refresh();return()=>{counter.current++;};},[refresh]);
- useVisibleRefresh(refresh,30000,!form&&!busy);
+ const refreshCurrent=async()=>{
+   if(chosenTab===6){setMaterialRefresh(n=>n+1);return;}
+   await refresh();
+ };
+ useVisibleRefresh(refreshCurrent,30000,!form&&!busy);
  useEffect(()=>{if(form)formBox.current?.scrollIntoView({block:'start',behavior:'smooth'});},[form]);
  const open=(action:string,initial:Row={})=>{setError('');setNotice('');setForm({action,operationId:crypto.randomUUID(),...initial});};
  async function save(value:Row,reference?:File){
@@ -103,7 +109,7 @@ export default function ContentCenter(){
    return <div className="cc-windows">{days.map(days=>{
      const m=selectedMetric(data,p,s,days);
      return <div key={days}><strong>{days===1?'24 小时':days+' 天'}{p.original&&days>1?' · 达人模块':''}</strong>
-     {m?<><span>播放 {number(m.views)} · 点击 {number(m.clicks)} · 加购 {number(m.cart_adds)} · 订单 {number(m.orders)}</span><small>前 3 秒留存 {m.retention==null?'待补录':m.retention+'%'} · 取数 {stamp(m.observed_at)}</small>
+     {m?<><span>播放 {number(m.views)} · 点击 {number(m.clicks)} · 加购 {number(m.cart_adds)} · 订单 {number(m.orders)} · GMV {m.gmv_minor==null?'待补录':m.currency+' '+number(m.gmv_minor/100)}</span><small>前 3 秒留存 {m.retention==null?'待补录':m.retention+'%'} · 取数 {stamp(m.observed_at)}</small>
       {m.note&&<small>{m.note}{m.evidence?' · '+m.evidence:''}</small>}</>:<span>{windowStatus(p.published_at,days)}</span>}</div>;
    })}</div>;
  }
@@ -118,17 +124,17 @@ export default function ContentCenter(){
     <div className="cc-actions"><Link href={p.url}>发布链接</Link><Link href={p.local_url}>本地成片</Link></div>
     {analysis&&<>{metricsFor(p,s)}{typical&&<small>{typical}</small>}</>}
     <div className="cc-actions">{!p.published_at&&own&&(manager||actor.id===p.owner_id)&&<button className="btn" onClick={()=>open('publish',{postId:p.id,version:p.version,publishedAt:inputTime(),context:s.title+' · @'+p.account})}>登记已发布视频</button>}
-     {p.published_at&&own&&<button className="btn" onClick={()=>open('observe',{postId:p.id,version:p.version,days:'1',observedAt:inputTime(),context:s.title+' · @'+p.account})}>记录数据</button>}
+     {p.published_at&&own&&<button className="btn" onClick={()=>open('observe',{postId:p.id,version:p.version,days:'1',currency:(SITE_CURRENCIES as Row)[p.site],observedAt:inputTime(),context:s.title+' · @'+p.account})}>记录数据</button>}
 </div>
    </article>;
  }
  return <section className="cc"><header className="cc-heading"><div><h2>TikTok 内容中心</h2></div>
-  <div className="cc-actions"><button className="btn" disabled={busy||!!form} onClick={()=>{void refresh();setMaterialRefresh(n=>n+1);}}>刷新</button>{ops&&data.writeSites.length>0&&<button className="btn primary" disabled={!!form||materialDirty} onClick={()=>open('create',newValues)}>＋ 新建需求</button>}</div></header>
+  <div className="cc-actions"><button className="btn" disabled={busy||!!form} onClick={()=>{if(tab!==6)void refresh();setMaterialRefresh(n=>n+1);}}>刷新</button>{ops&&data.writeSites.length>0&&<button className="btn primary" disabled={!!form||materialDirty} onClick={()=>open('create',newValues)}>＋ 新建需求</button>}</div></header>
   <div className="cc-summary">{[['待排期',scripts.filter(s=>s.status==='待排期').length,0],['待验收版本',versions.filter(v=>v.status==='待验收').length,1],['待发布',posts.filter(p=>!p.published_at).length,3],['已发布',posts.filter(p=>p.published_at).length,3]].map(([l,n,i])=><button key={l} disabled={!!form||materialDirty} onClick={()=>go(Number(i))}><span>{l}</span><b>{n}</b></button>)}</div>
   <nav aria-label="内容工作区">{tabOrder.map(i=><button key={i} aria-current={i===tab?'page':undefined} disabled={!!form||materialDirty} onClick={()=>go(i)}>{tabs[i]}</button>)}</nav>
   {notice&&<p role="status">{notice}</p>}{error&&!form&&<p className="cc-error" role="alert">{error}</p>}
   {form&&<div ref={formBox}><ContentForm key={form.operationId} initial={form} data={data} error={error} busy={busy} onClose={()=>{setForm(null);setError('');}} onSave={save}/></div>}
-  <fieldset disabled={!!form} className="cc-body">{tab===5?<ContentMaterials data={data} onDirty={setMaterialDirty} refreshKey={materialRefresh}/>:<div className="cc-filters">
+  <fieldset disabled={!!form} className="cc-body">{tab===5?<ContentMaterials data={data} onDirty={setMaterialDirty} refreshKey={materialRefresh}/>:tab===6?<ContentCompass sites={data.sites} refreshKey={materialRefresh}/>:<div className="cc-filters">
     <input aria-label="搜索内容" placeholder="搜索 SKU、卖点、脚本或账号" value={filter} onChange={e=>setFilter(e.target.value)}/>
     <select aria-label="筛选站点" value={site} onChange={e=>setSite(e.target.value)}><option value="">全部站点</option>{data.sites.map((s:string)=><option key={s}>{s}</option>)}</select>
     <select aria-label="筛选来源" value={source} onChange={e=>setSource(e.target.value)}><option value="">全部来源</option>{Object.entries(sourceLabels).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select>
@@ -140,7 +146,7 @@ export default function ContentCenter(){
      {s.parent_version_id&&<small>源自 {byScript.get(byVersion.get(s.parent_version_id)?.script_id)?.title} / {byVersion.get(s.parent_version_id)?.label}</small>}
      {s.source==='creator'&&<small>素材使用 · {s.allowedSites.length?(s.rightsMode==='direct'?'原版发布':'可二剪发布')+' · '+s.allowedSites.join('、')+' · 截止 '+s.expires:'仅参考创意'}</small>}
      {actionsFor(s)}{versions.filter(v=>v.script_id===s.id).map(v=>asset(v,s))}</article>)}</>}
-  {tab===3&&<>{ops&&data.writeSites.length>0&&<ContentMetricsImport posts={posts.filter(p=>p.published_at&&ownsSite(p.site)&&p.url)} refresh={refresh}/>}
+  {tab===3&&<><button className="btn" onClick={()=>go(6)}>查看五站数据罗盘 →</button>{ops&&data.writeSites.length>0&&<ContentMetricsImport posts={posts.filter(p=>p.published_at&&ownsSite(p.site)&&p.url)} refresh={refresh}/>}
     {visiblePosts.some(p=>!p.published_at)&&<section><h3>待登记发布</h3><div className="cc-grid">{visiblePosts.filter(p=>!p.published_at).map(p=>postCard(p))}</div></section>}
     <h3>按脚本对照发布效果</h3>{!visiblePosts.some(p=>p.published_at)&&<Empty>发布后可按脚本对照各站版本，并记录 24 小时和 7 天表现。</Empty>}
     {scripts.map(s=>{const group=visiblePosts.filter(p=>p.published_at&&sFor(p).id===s.id);return group.length?<section key={s.id} className="cc-group"><h4>{s.title} <small><SkuLabel sku={s.sku}/> · {group.length} 条发布</small></h4><div className="cc-grid">{group.map(p=>postCard(p,true))}</div></section>:null;})}</>}

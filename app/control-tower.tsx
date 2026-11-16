@@ -1,4 +1,5 @@
 "use client";
+import {createElement} from 'react';
 import {assistantName,wakeQuestion} from '../lib/employee-wake.mjs';
 const EmployeeAssistant=lazy(()=>import('./employee-assistant'));
 import SkuLabel, {SkuImagesProvider} from './sku-label';
@@ -245,7 +246,7 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
   },[toast]);
 
   // Show the brand only while connecting, never hold ready data for an animation.
-  if (loading&&!data) return <BrandWelcome/>;
+  if (loading&&!data) return <BrandWelcome name={identity.fullName}/>;
   if (!data) return <div className="empty" style={{paddingTop:160}}><p>{connectionError||"系统暂时无法读取数据"}</p><button className="btn" onClick={()=>void refresh().catch(()=>{})}>重新连接</button></div>;
   const actor=data.actor;
   const roleNav=navigationForRole(actor.role).filter(key=>!["wholesale","distribution"].includes(key)||actor.role!=="运营"||actor.site==="印尼");
@@ -329,16 +330,16 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
   </div></SkuImagesProvider>;
 }
 
-function BrandWelcome() {
+function BrandWelcome({name}:{name:string|null}) {
   return <section className="welcome-screen" aria-busy="true" aria-labelledby="welcome-title">
     <div className="welcome-orbit orbit-one" aria-hidden="true"/>
     <div className="welcome-orbit orbit-two" aria-hidden="true"/>
     <div className="welcome-stars" aria-hidden="true"/>
     <div className="welcome-card">
       <div className="welcome-brand"><img className="welcome-logo" src="/loong-jump-logo-white.png" alt="LOONG JUMP"/></div>
-      <div className="welcome-rule"><i/><span>致敬</span><i/></div>
-      <h1 id="welcome-title">每一位奋斗者！</h1>
-      <p>以热爱奔赴山海，以行动抵达远方。<br/>让每一次努力，都被世界看见。</p>
+      <div className="welcome-rule"><i/><span>欢迎回来</span><i/></div>
+      <h1 id="welcome-title">{name&&!name.includes('@')?name+'，你好！':'很高兴见到你！'}</h1>
+      <p>{createElement('workplace-daily',null,'今天，也很高兴和你一起开工。')}</p><script async type="module" src="/workplace-welcome.js"/>
       <p className="welcome-enter">正在读取工作区，即将自动进入</p>
       <div className="welcome-state"><span/>正在载入运营数据</div>
       <div className="welcome-progress" aria-hidden="true"><i/></div>

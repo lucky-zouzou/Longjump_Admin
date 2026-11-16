@@ -1,4 +1,5 @@
 import http from 'node:http';
+import {readWorkplaceWeather} from '../lib/workplace-weather.mjs';
 import {handleDistributorApplication} from '../lib/distributor-application.mjs';
 import {handleDistributor} from '../lib/distributor-http.mjs';
 import {handleWebsiteInquiry} from '../lib/website-inquiry-handler.mjs';
@@ -22,7 +23,33 @@ if(!db.prepare('SELECT 1 FROM local_accounts LIMIT 1').get())throw Error('Create
 const built=await importServerEntryModule(resolve('dist-node/server/index.js')),handler=built.default;
 const cookie=(name,value,maxAge=0)=>`${name}=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}${origin.protocol==='https:'?'; Secure':''}`;
 const cookies=req=>Object.fromEntries(String(req.headers.cookie||'').split(';').map(p=>p.trim().split('=')).filter(p=>p.length===2));
-const loginPage=(token,message='')=>`<!doctype html><html lang="zh"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>LOONG JUMP 公司登录</title><style>body{font-family:system-ui;background:#f4f6f8;color:#162936;margin:0;display:grid;place-items:center;min-height:100vh}form{background:white;padding:36px;border-radius:16px;max-width:380px;width:80%;box-shadow:0 8px 40px #1231}input,button{box-sizing:border-box;width:100%;padding:12px;margin:8px 0 18px;border:1px solid #bbb;border-radius:7px}button{background:#163d38;color:white;border:0}p{line-height:1.5;color:#52666f}</style><form method="post" action="/signin-with-chatgpt"><h1>LOONG JUMP</h1><p>公司账号登录 · Masuk Akun Perusahaan</p><p>${message}</p><input type="hidden" name="csrf" value="${token}"><label>邮箱 / Email<input type="email" name="email" autocomplete="username" required></label><label>密码 / Kata Sandi<input type="password" name="password" autocomplete="current-password" required></label><label style="display:flex;align-items:center;gap:10px"><input style="width:auto;margin:0" type="checkbox" name="remember" value="1">在此私人设备保持登录30天 / Tetap masuk 30 hari</label><button>登录 / Masuk</button><p>账号由公司管理员开通。Akun dibuat oleh administrator perusahaan.</p></form></html>`;
+const loginPage=(token,message='')=>`<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOONG JUMP 公司登录</title><link rel="icon" href="/favicon.png">
+<style>
+*{box-sizing:border-box}body{margin:0;min-height:100vh;min-height:100svh;display:grid;place-items:center;padding:20px 0;
+  font-family:system-ui,sans-serif;color:#20394a;background-color:#f4f7f6;
+  background-image:radial-gradient(ellipse at 12% 12%,#fff1cf 0,transparent 48%),radial-gradient(ellipse at 96% 85%,#deeee8 0,transparent 52%)}
+main{width:min(92vw,462px);padding:clamp(22px,5vw,36px);background:#fff;border:1px solid #e2e8e3;border-radius:20px;box-shadow:0 14px 48px #233e3610}
+h1{margin:0;line-height:1}h1 img{width:106px;height:auto;display:block}
+.subtitle{color:#536c71;margin:13px 0 16px;font-size:14px}
+workplace-welcome{display:block;background:#fbf8ef;border-radius:12px;padding:12px 14px;margin:0 0 22px}
+form{font-size:14px}label{display:block;color:#2e4b51}input:not([type=checkbox]),button{display:block;width:100%;min-height:42px;font:inherit;padding:10px 12px;border-radius:8px}
+input:not([type=checkbox]){border:1px solid #bacbc8;margin:5px 0 16px}input:focus-visible,button:focus-visible{outline:2px solid #2d7971;outline-offset:2px}
+.remember{display:flex;align-items:center;gap:8px;font-size:12px}.remember input{margin:0}
+button{margin-top:14px;background:#174e49;color:#fff;border:0;font-weight:650;cursor:pointer}
+.help{color:#5c7074;font-size:12px;line-height:1.6;margin:16px 0 0}.error{color:#a2342c}
+</style><script type="module" src="/workplace-welcome.js"></script></head><body>
+<main><h1><img src="/loong-jump-logo-black.png" alt="LOONG JUMP" width="106" height="50"></h1>
+<p class="subtitle">公司账号登录 · Masuk Akun Perusahaan</p>
+<workplace-welcome>很高兴见到你！</workplace-welcome>
+<form method="post" action="/signin-with-chatgpt">${message?'<p role="alert" class="error">'+message+'</p>':''}
+<input type="hidden" name="csrf" value="${token}">
+<label>邮箱 / Email<input type="email" name="email" autocomplete="username" required></label>
+<label>密码 / Kata Sandi<input type="password" name="password" autocomplete="current-password" required></label>
+<label class="remember"><input type="checkbox" name="remember" value="1">在此私人设备保持登录30天 / Tetap masuk 30 hari</label>
+<button>登录 / Masuk</button><p class="help">账号由公司管理员开通。Akun dibuat oleh administrator perusahaan.</p>
+</form></main></body></html>`;
 async function smallBody(req){let chunks=[],size=0;for await(const b of req){size+=b.length;if(size>4096)throw Error('Login request too large');chunks.push(b)}return new URLSearchParams(Buffer.concat(chunks).toString())}
 const server=http.createServer(async(req,res)=>{try{
  res.setHeader('Permissions-Policy','camera=(), microphone=(), geolocation=(self)');res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('X-Frame-Options','DENY');res.setHeader('Referrer-Policy','same-origin');res.setHeader('Cache-Control','no-store');
@@ -32,7 +59,8 @@ const server=http.createServer(async(req,res)=>{try{
   const response=url.pathname==='/distributor/apply'?await handleDistributorApplication(request,env.DB):await handleDistributor(request,env.DB,env.WHOLESALE_FILES);
   await sendWebResponse(response,req,res,true);return;
  }
- if(['GET','HEAD'].includes(req.method)&&['/distributor-assets/brand.css','/distributor-assets/partner-green.webp','/distributor-assets/partner-pink.webp','/distributor-assets/payment.js','/distributor-assets/service.js','/distributor-assets/ordering.js','/distributor-assets/ordering.css','/distributor-assets/application.css','/loong-jump-logo-black.png'].includes(url.pathname)){
+ if(['GET','HEAD'].includes(req.method)&&url.pathname==='/favicon.ico'){res.writeHead(302,{location:'/favicon.png'});res.end();return;}
+ if(['GET','HEAD'].includes(req.method)&&['/favicon.png','/workplace-welcome.js','/workplace-greeting.js','/distributor-assets/brand.css','/distributor-assets/partner-green.webp','/distributor-assets/partner-pink.webp','/distributor-assets/payment.js','/distributor-assets/service.js','/distributor-assets/ordering.js','/distributor-assets/ordering.css','/distributor-assets/application.css','/loong-jump-logo-black.png'].includes(url.pathname)){
   if(!await tryServeStatic(req,res,resolve('dist-node/client'),url.pathname,true,undefined,{'Cache-Control':'public, no-cache'})){res.writeHead(404);res.end();}
   return;
  }
@@ -42,6 +70,11 @@ const server=http.createServer(async(req,res)=>{try{
  }
  if(!['GET','HEAD','POST'].includes(req.method)){res.writeHead(405);res.end();return}
  if(req.method==='POST'&&req.headers.origin!==origin.origin){res.writeHead(403);res.end('Invalid origin');return}
+ if(url.pathname==='/api/workplace-weather'){
+  if(req.method!=='GET'){res.writeHead(405,{allow:'GET'});res.end();return;}
+  const {status,body}=await readWorkplaceWeather(url.searchParams);
+  res.writeHead(status,{'content-type':'application/json; charset=utf-8'});res.end(JSON.stringify(body));return;
+ }
  if(url.pathname==='/healthz'&&req.method==='GET'){
   db.prepare('SELECT report_kind FROM sales_imports LIMIT 1').get();
   res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({ok:true,release:process.env.LOONGJUMP_RELEASE||'local'}));return;
@@ -59,7 +92,7 @@ const server=http.createServer(async(req,res)=>{try{
    const dummy='scrypt:00000000000000000000000000000000:'+('00'.repeat(64));
    if(verifyPassword(input.get('password')||'',account?.password_hash||dummy)&&account?.active===1){const token=randomBytes(32).toString('hex'),ttl=input.get('remember')==='1'?30*86400:28800;db.prepare('INSERT INTO local_sessions VALUES (?,?,?)').run(hashToken(token),account.user_id,now+ttl*1000);db.prepare('DELETE FROM local_login_attempts WHERE key=?').run(key);res.writeHead(303,{'location':'/','set-cookie':[cookie('lj_session',token,ttl),cookie('lj_login','',0)]});res.end();return}message='邮箱或密码不正确 / Email atau kata sandi salah';
   }
-  res.writeHead(req.method==='POST'?401:200,{'content-type':'text/html; charset=utf-8','content-security-policy':"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'",'set-cookie':cookie('lj_login',csrf,900)});res.end(loginPage(csrf,message));return;
+  res.writeHead(req.method==='POST'?401:200,{'content-type':'text/html; charset=utf-8','content-security-policy':"default-src 'none'; script-src 'self'; connect-src 'self'; img-src 'self'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'",'set-cookie':cookie('lj_login',csrf,900)});res.end(loginPage(csrf,message));return;
  }
  const user=c.lj_session?db.prepare('SELECT u.* FROM local_sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>? AND u.active=1').get(hashToken(c.lj_session),Date.now()):null;
  if(url.pathname==='/signout-with-chatgpt'){if(c.lj_session)db.prepare('DELETE FROM local_sessions WHERE token_hash=?').run(hashToken(c.lj_session));res.writeHead(303,{'location':'/signin-with-chatgpt','set-cookie':cookie('lj_session','',0)});res.end();return}

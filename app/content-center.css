@@ -61,3 +61,19 @@
 .cc-sku-search>div:first-child{display:flex;align-items:end;gap:6px}.cc-sku-search>div:first-child label{flex:1;min-width:0}.cc-sku-search>div:first-child button{white-space:nowrap}
 .cc-task>.cc-actions:empty{display:none}
 .cc-reference-upload{display:grid;gap:6px;margin:12px 0}.cc-reference{margin:8px 0}.cc-task dd .cc-text-action{margin-right:12px}
+
+.cc-compass {background:#fff;border:1px solid #dce4ee;border-radius:16px;padding:clamp(16px,2vw,30px)}
+.cc-compass>header,.cc-compass-filters {display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.cc-compass h3,.cc-compass h4 {margin:0}
+.cc-compass p,.cc-compass small,.cc-compass-empty {color:#506781}
+.cc-compass p {font-size:.875rem;line-height:1.65}
+.cc-compass-filters label {display:grid;gap:5px;font-size:.82rem}
+.cc-compass-cards {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:22px 0}
+.cc-compass-cards article {background:#f3f7fb;border-radius:12px;padding:18px;min-width:0;overflow-wrap:anywhere}
+.cc-compass-cards h4,.cc-compass th {font-size:.88rem}
+.cc-compass-cards article>strong {display:block;margin-top:7px;color:#183b61;font-size:clamp(1.3rem,2.1vw,2rem);font-variant-numeric:tabular-nums}
+.cc-compass td small,.cc-compass article>small {display:block;font-size:.75rem}
+.cc-compass table {width:100%;margin:12px 0;font-variant-numeric:tabular-nums}
+.cc-compass th,.cc-compass td {padding:10px;text-align:right;border-bottom:1px solid #e4eaf2}
+.cc-compass th:first-child {text-align:left}
+@media(max-width:640px){.cc-compass-cards{grid-template-columns:1fr}.cc-compass-cards article{padding:12px}.cc-compass-filters{gap:8px}}

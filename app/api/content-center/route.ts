@@ -1,6 +1,7 @@
 import { requireActor } from '../../../lib/auth';
 import { database } from '../../../lib/database';
 import {env} from 'cloudflare:workers';
+import {readContentCompass} from '../../../lib/content-compass.mjs';
 import { readCenter, mutateCenter, referenceLimit } from '../../../lib/content-center.mjs';
 
 const headers={'Cache-Control':'private, no-store'};
@@ -9,7 +10,13 @@ function failure(e:any){
   return Response.json({error:e.status?e.message:'内容中心操作失败，请刷新后核对记录。'},{status:e.status||500,headers});
 }
 export async function GET(request:Request){
-  try{return Response.json(await readCenter(database(),await requireActor(request)),{headers});}
+  try{
+    const actor=await requireActor(request),query=new URL(request.url).searchParams;
+    const data=query.get('view')==='compass'
+      ?await readContentCompass(database(),actor,query.get('period')||'month')
+      :await readCenter(database(),actor);
+    return Response.json(data,{headers});
+  }
   catch(e){return failure(e);}
 }
 export async function POST(request:Request){
