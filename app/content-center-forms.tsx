@@ -46,6 +46,7 @@ function fields(input:Row,d:Row):Field[]{
   case 'publish':return [f('url','TikTok 视频完整链接','url'),f('publishedAt','实际发布时间（本机时区）','datetime-local')];
   case 'observe':return [select('days','累计观察窗口',post?.original?[['1','24 小时']]:[['1','24 小时'],['7','7 天']]),f('observedAt','实际取数时间（本机时区）','datetime-local'),
     f('views','播放量','number',true),f('retention','前 3 秒留存率（%）','percent',true),f('clicks','商品点击数','number',true),f('cartAdds','加购次数','number',true),f('orders','视频归属订单数','number',true),
+    f('gmv','视频归属 GMV（未知留空）','number',true),select('currency','GMV 原币种', ['IDR','MYR','THB','VND','PHP','CNY','USD']),
     f('evidence','数据出处或凭据'),f('note','统计口径、修订或缺失原因','textarea')];
   case 'review':return [select('decision','复盘决定',['复拍','跨站测试','暂缓']),f('finding','观察到的实际表现','textarea'),f('hypothesis','可能原因','textarea'),f('change','下一次具体改什么／暂缓原因','textarea'),
     select('site','执行站点',(manager||d.actor.role==='拍摄剪辑'?d.sites:sites).filter((site:string)=>input.decision!=='跨站测试'||site!==post?.site)),
@@ -77,7 +78,7 @@ export function ContentForm({initial,data,onClose,onSave,busy,error}:{initial:Ro
     item.options?<select name={item.key} aria-label={item.label} required={!item.optional} value={value[item.key]||''} onChange={e=>update(item.key,e.target.value)}><option value="">{item.optional?'不指定':'请选择'}</option>{item.options.map(option=>{const [k,v]=Array.isArray(option)?option:[option,option];return <option key={k} value={k}>{v}</option>;})}</select>:
     item.type==='checkbox'?<input type="checkbox" name={item.key} required checked={value[item.key]===true} onChange={e=>update(item.key,e.target.checked)}/>:
     item.type==='textarea'?<textarea name={item.key} aria-label={item.label} required={!item.optional} value={value[item.key]||''} rows={3} onChange={e=>update(item.key,e.target.value)}/>:
-    <input name={item.key} aria-label={item.label} onInput={e=>update(item.key,e.currentTarget.value)} type={item.type==='percent'?'number':item.type} min={item.key==='originalCount'?1:['number','percent'].includes(item.type||'')?0:undefined} max={item.key==='originalCount'||item.type==='percent'?100:undefined} step={item.type==='percent'?'any':undefined}
+    <input name={item.key} aria-label={item.label} onInput={e=>update(item.key,e.currentTarget.value)} type={item.type==='percent'?'number':item.type} min={item.key==='originalCount'?1:['number','percent'].includes(item.type||'')?0:undefined} max={item.key==='originalCount'||item.type==='percent'?100:undefined} step={item.key==='gmv'?'0.01':item.type==='percent'?'any':undefined}
       required={!item.optional} value={value[item.key]??''} onChange={e=>update(item.key,e.target.value)}/>}
   </label>)}</div>
   {value.action==='create'&&value.source==='studio'&&<label className="cc-reference-upload">上传参考视频（选填，16 MB 以内）

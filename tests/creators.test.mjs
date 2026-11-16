@@ -306,3 +306,18 @@ test('parallel cooperation stays active when another round ends and paused profi
  await f.change(f.users.bd,id,'resume',{note:'确认可恢复跟进',...f.follow(f.users.bd.id)});assert.equal(f.p(id).tier,'trial');
  await f.approve(id,pending);assert.equal(f.p(id).state,'fulfilling');
 });
+
+test('BD与运营可直接登记候选达人，保留本人来源并沿用店铺与去重权限',async t=>{
+ const f=await setup();t.after(()=>f.sqlite.close());
+ const input={scopeId:f.scope,platformId:'@new-discovery',name:'示例达人',kind:'video',profileUrl:'https://example.test/profile',
+  contact:'测试联系渠道',language:'印尼语',fit:'受众匹配',sourceUserId:f.users.malaysia.id,...f.follow(f.users.bd.id)};
+ await assert.rejects(f.act(f.users.bd2,'create',input),{status:403});
+ await assert.rejects(f.act(f.users.finance,'create',input),{status:403});
+ const {id}=await f.act(f.users.bd,'create',input);
+ const row=f.p(id);assert.equal(row.source_user_id,f.users.bd.id);assert.equal(row.owner_bd_id,f.users.bd.id);
+ assert.equal(row.state,'candidate');assert.equal(row.accepted_at,null);
+ assert.ok((await readCreators(f.db,f.users.bd)).profiles.some(p=>p.id===id));
+ await assert.rejects(f.act(f.users.indonesia,'create',input),{status:409});
+ const other=await f.act(f.users.indonesia,'create',{...input,platformId:'ops-discovery'});
+ assert.equal(f.p(other.id).source_user_id,f.users.indonesia.id);
+});
