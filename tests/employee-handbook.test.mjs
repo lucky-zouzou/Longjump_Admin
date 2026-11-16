@@ -42,3 +42,25 @@ test('管理员首发及修订留历史，同版重传幂等，非管理员与�
  await importHandbook(f.db,admin,next,one.revision);assert.equal((await currentHandbook(f.db)).edition,'v2');
  assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM employee_handbooks').get().n,2);
 });
+
+test('岗位日程识别自然问句，区分代问、具体操作和实时数值，复用时仍校验权限',async t=>{
+  const f=fixture();t.after(()=>f.sqlite.close());
+  const entry=(id,role,page)=>({...topic,id,page,title:role+'日常示例',roles:[...new Set([role,'管理员'])],dailyRole:role});
+  const ops=entry('fixture-routine-ops','运营','sales'), admin=entry('fixture-routine-admin','管理员','overview');
+  const handbook={...parseHandbook({format:1,edition:'test',guides:[ops,admin]}),revision:'test-1'};
+  const options={apiKey:'offline-test',request:()=>assert.fail('unexpected upstream call')};
+  const ask=(a,question,extra={})=>answerWithKnowledge(f.db,{...a,handbook},{question,...extra},options);
+  const exact='我是一名新入职的运营，我每天需要做什么';
+  assert.equal((await ask(f.users.admin,exact)).guide.id,ops.id);
+  assert.equal((await ask(f.users.admin,exact,{page:'sales'})).source,'knowledge');
+  assert.equal((await ask(f.users.admin,'第二步呢',{previous:ops.id})).answer,ops.steps[1]);
+  assert.equal((await ask(f.users.admin,'今天上班我先做什么？')).guide.id,admin.id);
+  const operator=Object.values(f.users).find(a=>a.role==='运营');
+  for(const q of [exact,'小品同学，作为站点运营，日常工作怎么安排？','我每天都要做哪些事','我刚入职，从哪里开始？'])
+    assert.equal((await ask(operator,q)).guide.id,ops.id);
+  assert.equal((await ask(operator,'刚入职，如何导入销售日报？')).guide.id,'sales-import');
+  assert.equal((await ask(operator,'昨天的销售额是多少？')).intent,'live');
+  assert.equal((await ask(operator,'管理员每天需要做什么？')).guide,null);
+  assert.throws(()=>parseHandbook({format:1,edition:'bad',guides:[ops,{...ops,id:'another'}]}),/daily handbook/);
+  assert.throws(()=>parseHandbook({format:1,edition:'bad',guides:[{...ops,dailyRole:'工厂'}]}),/daily handbook/);
+});

@@ -6,7 +6,7 @@ import {assistantName,wakeQuestion} from '../lib/employee-wake.mjs';
 type Entry={id:string;title:string};
 type Topic={scope:'internal'|'public';key:string;title:string};
 type Mode='auto'|'internal'|'public';
-type Home={edition?:string;revision?:string;role:string;intro:string;guides:Entry[];recent:Topic[]};
+type Home={edition?:string;revision?:string;role:string;intro:string;dailyGuide?:string;guides:Entry[];recent:Topic[]};
 type Citation={start:number;end:number;url:string;title:string};
 type Answer={topic?:Topic;saved?:boolean;verifiedAt?:string;citations?:Citation[];answer:string;notice:string;source:string;intent:string;guide:(Entry & {steps:string[];next:string;page:string})|null};
 type Turn={question:string;reply:Answer};
@@ -109,6 +109,7 @@ export default function EmployeeAssistant({initialQuestion,page,close,go}:{initi
     <div className="employee-transcript" ref={transcript}>
       {home && <><p>{home.intro}</p><div className="employee-picks">
         <button disabled={busy} onClick={()=>void submit('我刚入职，应该从哪里开始？')}>我刚入职，从哪里开始？</button>
+        {home.dailyGuide&&<button disabled={busy} onClick={()=>void submit('我每天需要做什么？')}>我每天需要做什么？</button>}
         {home.guides.slice(0,2).map(g=><button key={g.id} disabled={busy} onClick={()=>void submit(g.title,'',g.id)}>{g.title}</button>)}
       </div><details><summary>查看全部岗位指引（{home.guides.length}）</summary><div className="employee-picks">{home.guides.map(g=><button key={g.id} disabled={busy} onClick={()=>void submit(g.title,'',g.id)}>{g.title}</button>)}</div></details>{!!home.recent?.length&&<details><summary>岗位知识库 · 最近解答</summary><div className="employee-picks">{home.recent.map(t=><button key={t.key} disabled={busy} onClick={()=>void submit(t.title,'','',t.scope,t.key)}>{t.title}</button>)}</div></details>}</>}
       {!home&&!error&&<p role="status">正在读取岗位手册…</p>}
