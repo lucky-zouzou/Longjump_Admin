@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {fixture} from './fixtures.mjs';
 import {answerWithKnowledge,assistantHome} from '../lib/employee-assistant.mjs';
+import {encouragementFor,guideQuestion} from '../lib/employee-voice.mjs';
 import {recentKnowledge} from '../lib/employee-knowledge.mjs';
 
 const time='2026-11-16T04:00:00.000Z';
@@ -117,4 +118,36 @@ test('按手册逐步追问直到交接；缓存区分步骤，明确换题不�
   assert.equal((await ask(a,'这个月的海运轨迹怎么查？',{previous})).guide.id,'shipping');
   assert.equal((await ask(a,'谁来接手？',{previous})).answer,one.guide.next);
   assert.equal((await ask(a,q,{previous:'no-such-guide'})).guide,null);
+});
+
+test('口语提问与原手册对应，旧知识换口吻；闲聊留在本地，不干扰正经问题',async t=>{
+  const {users,sqlite,ask}=setup(t);
+  const offline={apiKey:'fixture',request:()=>assert.fail('闲聊和手册不应外发')};
+  const q=guideQuestion('跟踪海运批次与目的地');
+  const answer=await ask(users.admin,q,{},offline);
+  assert.equal(answer.guide.id,'shipping');
+  sqlite.prepare("UPDATE employee_knowledge SET answer_json=json_set(answer_json,'$.answer','按以下步骤办理。') WHERE question_key=?").run(answer.topic.key);
+  const cached=await ask(users.admin,'最近解答',{knowledgeId:answer.topic.key,mode:'internal'},offline);
+  assert.equal(cached.source,'knowledge');
+  assert.equal(cached.answer,answer.answer);assert.deepEqual(cached.guide.steps,answer.guide.steps);
+  for(const [word,mode] of [['早呀！','auto'],['谢啦','internal'],['在吗？','public']]){
+    const chat=await ask(users.admin,word,{mode},offline);
+    assert.equal(chat.intent,'chat');assert.equal(chat.guide,null);
+  }
+  assert.equal(sqlite.prepare('SELECT COUNT(*) n FROM employee_knowledge').get().n,1);
+  assert.equal((await ask(users.admin,'谢谢，备货计划是谁审核？',{},offline)).intent,'handoff');
+});
+
+test('每类回答都能给一句鼓励，重复追问先轮换；卡住或没有来源时不说已经办好',()=>{
+  for(const intent of ['steps','step','handoff','chat','choose','live','public','unknown']){
+    const last=[];
+    for(let i=0;i<8;i++){
+      const line=encouragementFor({intent},last);
+      assert.ok(line.length>0);
+      assert.ok(!last.slice(0,2).includes(line));
+      assert.equal((line.match(/[。！？]/gu)||[]).length,1);
+      if(intent==='unknown')assert.doesNotMatch(line,/搞定|已完成|找着了/);
+      last.unshift(line);
+    }
+  }
 });

@@ -10,7 +10,7 @@ import {currentHandbook,importHandbook} from '../../../lib/employee-handbook-sto
 
 const headers={'Cache-Control':'private, no-store'};
 function problem(e:unknown) {
-  return Response.json({error:e instanceof HttpError?e.message:'助手暂时无法访问，请重新打开再试。'},
+  return Response.json({error:e instanceof HttpError?e.message:'小品这次没连上。重新打开对话框试试吧。'},
     {status:e instanceof HttpError?e.status:503,headers});
 }
 
@@ -18,7 +18,7 @@ export async function GET(request:Request) {
   try {
     const actor={...await requireActor(request),handbook:await currentHandbook(database())};
     if(new URL(request.url).searchParams.has('actionCounts')) {
-      if(!canReadActions(actor)) throw new HttpError(403,'此岗位无权查看经营行动单');
+      if(!canReadActions(actor)) throw new HttpError(403,'你这个岗位看不到经营行动单。');
       return Response.json(await employeeActionCounts(database(),actor),{headers});
     }
     const page=new URL(request.url).searchParams.get('page')||'';
@@ -33,7 +33,7 @@ export async function POST(request:Request) {
     if(!request.headers.get('content-type')?.startsWith('application/json')) throw new HttpError(415,'请提交 JSON 格式的问题');
     const identity=await requireActor(request);
     const upload=new URL(request.url).searchParams.has('handbook');
-    if(upload && identity.role!=='管理员') throw new HttpError(403,'仅管理员可导入员工手册');
+    if(upload && identity.role!=='管理员') throw new HttpError(403,'只有管理员能更新员工手册。');
     const limit=upload?256000:8192;
     const sizeError=()=>new HttpError(413,upload?'手册文件过大':'问题过长');
     if(Number(request.headers.get('content-length'))>limit) throw sizeError();
