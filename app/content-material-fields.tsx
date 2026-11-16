@@ -6,7 +6,7 @@ export type MaterialOptions={colors:string[];directions:string[];sellingPoints:s
 export const defaultOptions:MaterialOptions={colors:['黑色','白色','棕色','米色','蓝色','卡其色','军绿','粉色','灰色'],directions:['新品种草','产品展示','开箱测评','容量展示','细节展示','场景搭配'],sellingPoints:['大容量','可折叠','防水','多颜色','材质质感','轻便']};
 export function remembered(actor:string){try{return JSON.parse(localStorage.getItem('lj.material-recent.'+actor)||'{}');}catch{return {};}}
 export function remember(actor:string,data:Record<string,unknown>){try{const previous=remembered(actor),history=[data,...(Array.isArray(previous.history)?previous.history:[])].filter((v,i,all)=>v?.sku&&all.findIndex(other=>other.sku===v.sku)===i).slice(0,20);localStorage.setItem('lj.material-recent.'+actor,JSON.stringify({...data,history}));}catch{/* Browser storage is optional. */}}
-function Tags({label,options,value,onChange}:{label:string;options:string[];value:string[];onChange:(value:string[])=>void}){
+export function Tags({label,options,value,onChange}:{label:string;options:string[];value:string[];onChange:(value:string[])=>void}){
  const id=useId(),[custom,setCustom]=useState(''),[customMode,setCustomMode]=useState(false);
  function add(v:string){v=v.trim();if(v&&!value.includes(v)&&value.length<20)onChange([...value,v]);setCustom('');setCustomMode(false);}
  return <div className="cc-quick-tags"><span>{label}</span><div className="cc-tag-values">{value.map(v=><button type="button" key={v} onClick={()=>onChange(value.filter(x=>x!==v))}>{v} ×</button>)}</div>
