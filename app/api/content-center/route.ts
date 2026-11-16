@@ -2,7 +2,7 @@ import { requireActor } from '../../../lib/auth';
 import { database } from '../../../lib/database';
 import {env} from 'cloudflare:workers';
 import {readContentCompass} from '../../../lib/content-compass.mjs';
-import { readPlatformReports, readCenter, mutateCenter, referenceLimit } from '../../../lib/content-center.mjs';
+import { previewReport, reportHistory, readPlatformReports, readCenter, mutateCenter, referenceLimit } from '../../../lib/content-center.mjs';
 
 const headers={'Cache-Control':'private, no-store'};
 function failure(e:any){
@@ -14,6 +14,7 @@ export async function GET(request:Request){
     const actor=await requireActor(request),query=new URL(request.url).searchParams;
     const data=query.get('view')==='compass'
       ?await readContentCompass(database(),actor,query.get('period')||'month')
+      :query.get('view')==='report-history'?await reportHistory(database(),actor,query.get('site'),query.get('start'),query.get('end'),query.get('videoId'),Number(query.get('offset')||0))
       :query.get('view')==='platform-report'?await readPlatformReports(database(),actor,query.get('site'),Number(query.get('offset')||0))
       :await readCenter(database(),actor);
     return Response.json(data,{headers});
@@ -36,6 +37,6 @@ export async function POST(request:Request){
     const raw=await request.text();
     if(raw.length>240000)return Response.json({error:'请缩短表单内容'},{status:413});
     let form;try{form=JSON.parse(raw);}catch{return Response.json({error:'表单格式无效'},{status:400});}
-    return Response.json(await mutateCenter(database(),actor,form),{headers});
+    return Response.json(form?.action==='previewPlatformReport'?await previewReport(database(),actor,form):await mutateCenter(database(),actor,form),{headers});
   }catch(e){return failure(e);}
 }

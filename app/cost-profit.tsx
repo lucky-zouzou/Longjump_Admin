@@ -26,7 +26,7 @@ function Fee({title,value,onChange}:{title:string;value:Row;onChange:(v:Row)=>vo
 export default function CostWorkspace({role='管理员',initialView='',initialSku=''}:{role?:string;initialView?:string;initialSku?:string}){
  // Product specifications are available to supply-chain staff; the settlement ledger has an additional per-account grant.
  const defaultView=role==='供应链'?'information':'products';
- const [view,setView]=useState(initialView==='evidence'?'evidence':initialView==='information'&&['管理员','财务','供应链'].includes(role)?'information':defaultView);const leave=useDirtyGuard(false);
+ const [view,setView]=useState(initialView==='finance'&&['管理员','财务'].includes(role)?'finance':initialView==='evidence'?'evidence':initialView==='information'&&['管理员','财务','供应链'].includes(role)?'information':defaultView);const leave=useDirtyGuard(false);
  return <><nav className="pc-workspace-switch" aria-label="成本工作区">{['管理员','财务','供应链'].includes(role)&&<button className={'btn '+(view==='information'?'primary':'')} onClick={()=>{if(leave())setView('information');}}>商品资料</button>}{role!=='供应链'&&<button className={'btn '+(view==='products'?'primary':'')} onClick={()=>{if(leave())setView('products');}}>商品成本与动销</button>}<button className={'btn '+(view==='evidence'?'primary':'')} onClick={()=>{if(leave())setView('evidence');}}>批次成本与结算证据</button>{['管理员','财务'].includes(role)&&<button className={'btn '+(view==='finance'?'primary':'')} onClick={()=>{if(leave())setView('finance');}}>资金与库存价值</button>}</nav>{view==='information'?<ProductInformation initialSku={initialSku}/>:view==='products'?<ProductCosts/>:view==='finance'?<FinanceLedger role={role}/>:<CostProfit/>}</>;
 }
 function CostProfit(){
