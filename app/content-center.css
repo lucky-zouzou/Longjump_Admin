@@ -76,6 +76,8 @@
 .cc-compass table {width:100%;margin:12px 0;font-variant-numeric:tabular-nums}
 .cc-compass th,.cc-compass td {padding:10px;text-align:right;border-bottom:1px solid #e4eaf2}
 .cc-compass th:first-child {text-align:left}
+.cc-compass-fx summary {cursor:pointer;color:#284e77;font-weight:600}
+.cc-compass-fx td {white-space:nowrap}
 @media(max-width:640px){.cc-compass-cards{grid-template-columns:1fr}.cc-compass-cards article{padding:12px}.cc-compass-filters{gap:8px}}
 
 .cc-reference-upload label{display:grid;gap:6px}.cc-reference-upload .btn{justify-self:start;margin-top:6px}
