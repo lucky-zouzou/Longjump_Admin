@@ -1,0 +1,77 @@
+/* Perspective belongs to the stationary stage so the floor stays behind Xiaopin. */
+.xiaopin-mascot{
+  --figure-scale:1.34;--forward:227px;--lift:-9px;--wave-room:30px;
+  position:relative;display:block;align-self:start;isolation:isolate;
+  width:128px;height:84px;pointer-events:none;
+  perspective:480px;perspective-origin:50% 33%;
+}
+.xiaopin-mascot::before,.xiaopin-mascot::after{
+  content:"";position:absolute;left:50%;border-radius:50%;transform:translateX(-50%);
+}
+.xiaopin-mascot::before{
+  bottom:0;width:84%;height:18px;
+  background:radial-gradient(ellipse,#ecd496 0%,#f3e4bd 50%,#f5ebce00 72%);
+}
+.xiaopin-mascot::after{bottom:4px;width:48%;height:8px;background:#675b3145;z-index:1}
+.xiaopin-jump{position:absolute;inset:0;z-index:2;transform-origin:50% 94%}
+.xiaopin-figure{
+  position:absolute;left:calc(50% - 42px);bottom:0;width:84px;height:82px;
+  transform:scale(var(--figure-scale));transform-origin:50% 100%;
+}
+/* Paint at double resolution before projection to keep the face crisp up close. */
+@supports (zoom:2){
+  .xiaopin-figure{zoom:2;transform:scale(calc(var(--figure-scale) / 2))}
+}
+.xiaopin-head,.xiaopin-screen,.xiaopin-eyes,.xiaopin-smile,.xiaopin-coat,.xiaopin-satchel,.xiaopin-arm,.xiaopin-wave,.xiaopin-mitten,.xiaopin-feet{position:absolute;display:block}
+.xiaopin-head{left:14px;top:14px;width:51px;height:37px;border:1.5px solid #4d887b;border-radius:18px 18px 16px 15px;background:linear-gradient(140deg,#ecfff1,#b9e3cc 62%,#89b9a5);box-shadow:inset 1px 2px 0 #ffffffe0,0 2px 0 #47756430;transform:rotate(-4deg)}
+.xiaopin-head::before{content:"";position:absolute;left:16px;bottom:100%;width:15px;height:7px;border:3px solid #579481;border-bottom:0;border-radius:12px 12px 0 0}
+.xiaopin-screen{inset:5px 4px 5px;border-radius:12px 13px 11px 11px;background:linear-gradient(160deg,#386e61,#204f49 70%);box-shadow:inset 0 1px 2px #183c3790}
+.xiaopin-eyes{left:8px;right:8px;top:6px;height:7px}
+.xiaopin-eyes::before,.xiaopin-eyes::after{content:"";position:absolute;width:5px;height:100%;border-radius:4px;background:#ffefba}
+.xiaopin-eyes::before{left:1px}.xiaopin-eyes::after{right:1px}
+.xiaopin-smile{bottom:4px;left:calc(50% - 4px);width:9px;height:5px;border-radius:0 0 9px 9px;background:#ffefba}
+.xiaopin-feet{left:24px;top:65px;width:32px;height:11px}
+.xiaopin-feet::before,.xiaopin-feet::after{content:"";position:absolute;bottom:0;width:13px;height:10px;border-radius:5px 5px 6px 4px;background:#306356;box-shadow:inset 0 -2px 0 #20463c}
+.xiaopin-feet::after{right:0;border-radius:5px 6px 4px 5px}
+.xiaopin-coat{left:21px;top:44px;width:39px;height:26px;overflow:hidden;background:linear-gradient(120deg,#96cdbc,#5b9e89);border:1.5px solid #507e6e;border-radius:14px 14px 10px 10px}
+.xiaopin-coat::after{content:"";position:absolute;top:-10px;right:0;width:5px;height:34px;background:#f4c274;transform:rotate(43deg);transform-origin:bottom left;left:7px}
+.xiaopin-satchel{z-index:1;left:2px;bottom:0;width:16px;height:11px;border-radius:4px 4px 5px 5px;background:#d99b59;border:1px solid #a37445;box-shadow:inset 0 4px 0 #f6cc80}
+.xiaopin-arm,.xiaopin-wave{width:11px;border:1px solid #518777;background:#98cabb;border-radius:7px}
+.xiaopin-arm{height:18px;left:15px;top:47px;transform:rotate(22deg)}
+.xiaopin-wave{height:17px;left:55px;top:39px;transform-origin:50% 92%;transform:rotate(40deg)}
+.xiaopin-mitten{width:14px;height:15px;left:-2px;top:-9px;border:1px solid #548a79;border-radius:8px 8px 6px 6px;background:linear-gradient(130deg,#e0f5d9,#a0ceba)}
+.xiaopin-mitten::after{content:"";position:absolute;top:6px;left:-4px;width:5px;height:8px;border-radius:4px;background:#b4dbc7;transform:rotate(-32deg)}
+.xiaopin-head{transform-origin:50% 90%}
+@media(prefers-reduced-motion:no-preference){
+  .login-reminder[data-has-tasks="true"]{--pop-time:1400ms}
+  .login-reminder[data-has-tasks="true"] .xiaopin-mascot{margin-inline-end:var(--wave-room)}
+  .xiaopin-wave{animation:xiaopin-hello 820ms ease-in-out 1}
+  .xiaopin-eyes{animation:xiaopin-blink 170ms 700ms ease-in-out}
+  .login-reminder[data-has-tasks="true"] .xiaopin-jump{animation:xiaopin-pop var(--pop-time) both}
+  .login-reminder[data-has-tasks="true"] .xiaopin-mascot::after{animation:xiaopin-shadow var(--pop-time) both}
+  .login-reminder[data-has-tasks="true"] .xiaopin-wave{animation:xiaopin-hello 740ms 260ms ease-in-out,xiaopin-point 1000ms var(--pop-time) ease-in-out}
+  .login-reminder[data-has-tasks="true"] .xiaopin-head{animation:xiaopin-look 1000ms var(--pop-time) ease-in-out}
+  .login-reminder-body .overview-task:first-child .task-mark{animation:xiaopin-task-cue 1100ms calc(var(--pop-time) + 160ms) ease-out}
+  .login-reminder.is-leaving .login-reminder-greeting,.login-reminder.is-leaving .login-reminder-body{animation:xiaopin-fade 175ms ease-in both}
+}
+@keyframes xiaopin-pop{
+  0%,100%{transform:none}
+  13%{transform:translate3d(0,3px,-20px) rotateX(7deg) scale(1.04,.83);animation-timing-function:cubic-bezier(.17,.67,.29,1)}
+  39%,52%{transform:translate3d(0,var(--lift),var(--forward)) rotateX(-4deg) rotate(-4deg);animation-timing-function:cubic-bezier(.48,0,.72,.92)}
+  81%{transform:translate3d(0,4px,-38px) rotate(2deg) scale(1.04,.9)}
+  92%{transform:translate3d(0,-2px,9px)}
+}
+@keyframes xiaopin-shadow{
+  0%,100%{opacity:1;transform:translateX(-50%) scale(1)}
+  39%,52%{opacity:.25;transform:translateX(-50%) scale(.5)}
+  81%{opacity:.9;transform:translateX(-50%) scale(1.12)}
+}
+@keyframes xiaopin-hello{0%,100%{transform:rotate(40deg)}30%,65%{transform:rotate(12deg)}48%,83%{transform:rotate(57deg)}}
+@keyframes xiaopin-point{0%,100%{transform:rotate(40deg)}30%,68%{transform:rotate(117deg)}}
+@keyframes xiaopin-look{0%,100%{transform:rotate(-4deg)}35%,68%{transform:translate(2px,1px) rotate(8deg)}}
+@keyframes xiaopin-task-cue{0%,100%{box-shadow:inset 0 0 0 0 transparent}30%,55%{background:#dceee4;box-shadow:inset 0 0 0 2px #67a08b;color:#275c50}}
+@keyframes xiaopin-blink{50%{transform:scaleY(.14)}}
+@keyframes xiaopin-fade{to{opacity:0}}
+@media(max-width:600px){
+  .xiaopin-mascot{--figure-scale:1.04;--forward:172px;--lift:-8px;--wave-room:20px;width:86px;height:68px}
+}

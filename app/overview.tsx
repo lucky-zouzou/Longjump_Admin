@@ -9,13 +9,12 @@ import ZeroSalesNotifications from "./zero-sales-notifications";
 // These rows are already filtered by the server's role and site boundaries.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Row=Record<string,any>;
-type Props={allowed:string[];data:{metrics:Row;actor:Row;currentMonth:string;myTasks:Row[];monthlyStatus:Row[];issues:Row[]};go:(tab:string,task?:Row)=>void};
+type Props={reminder:React.ReactNode;allowed:string[];data:{metrics:Row;actor:Row;currentMonth:string;myTasks:Row[];monthlyStatus:Row[];issues:Row[]};go:(tab:string,task?:Row)=>void};
 const number=(value:unknown)=>Number(value||0).toLocaleString("zh-CN");
 
 
-export default function Overview({data,go,allowed}:Props){
-  const [allTasks,setAllTasks]=useState(false),[allIssues,setAllIssues]=useState(false);
-  const tasks=data.myTasks.filter(t=>t.kind!=='zero-sales-alert');
+export default function Overview({data,go,allowed,reminder}:Props){
+  const [allIssues,setAllIssues]=useState(false);
   const m=data.metrics;
   const completeness=m.monthlyRequired?Math.min(100,100*m.monthlySubmitted/m.monthlyRequired):0;
   const sites=[...new Set(data.monthlyStatus.map(r=>String(r.site)))];
@@ -26,6 +25,7 @@ export default function Overview({data,go,allowed}:Props){
       <div><div className="overview-eyebrow">经营工作台 <span> / </span> OVERVIEW</div><h1>经营协同总览</h1>{createElement('workplace-welcome',{'employee-name':data.actor.name||''},'很高兴见到你！')}<script async type="module" src="/workplace-welcome.js"/></div>
       <div className="overview-period"><Icon name="monthly"/><span>经营月份<strong>{data.currentMonth}</strong></span></div>
     </div>
+    {reminder}
     <section className="overview-kpis" aria-label="经营关键数据">
       {[
         {label:'当前可售库存',value:m.inventoryQty,icon:'inventory',note:`待上架 ${number(m.pendingShelfQty)} · 隔离 ${number(m.quarantineQty)}`,tone:'stock'},
@@ -38,12 +38,6 @@ export default function Overview({data,go,allowed}:Props){
     <ZeroSalesNotifications tasks={data.myTasks} actor={data.actor} go={go}/>
     <div className="overview-columns">
       <div className="overview-primary">
-        <section className="overview-card overview-tasks">
-          <header><div><h2><Icon name="business-actions"/>我的待办 <span className="overview-count">{tasks.length}</span></h2><p>按当前账号分工处理，完成后自动移出。</p></div>{tasks.length>4&&<button className="overview-link" aria-expanded={allTasks} onClick={()=>setAllTasks(!allTasks)}>{allTasks?'收起':`查看全部 ${tasks.length} 项`}<Icon name="chevron"/></button>}</header>
-          <div className="overview-task-list">
-            {tasks.length===0?<div className="overview-empty"><Icon name="approval"/><strong>当前没有待办事项</strong><span>有新的协作任务时，会在这里提醒您。</span></div>:(allTasks?tasks:tasks.slice(0,4)).map((task,index)=><button className={`overview-task ${task.level}`} key={`${task.title}-${index}`} onClick={()=>go(task.tab,task)}><span className="task-mark"><Icon name={task.tab}/></span><span className="task-copy"><strong>{task.title}</strong><span>{task.detail}</span></span><span className="task-priority">{task.level==='red'?'优先处理':'待处理'}</span><Icon name="chevron"/></button>)}
-          </div>
-        </section>
         <section className="overview-card overview-submissions">
           <header><div><h2>月度需求提交</h2><p>五站双渠道，全部提交后才能进入审批。</p></div>{actionLink('monthly','查看明细')}</header>
           <div className="submission-progress"><div><strong>{number(m.monthlySubmitted)}<small> / {number(m.monthlyRequired)} 已提交</small></strong><span>{Math.round(completeness)}%</span></div><div className="bar" role="progressbar" aria-label="月度需求提交完整度" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(completeness)}><i style={{width:`${completeness}%`}}/></div></div>

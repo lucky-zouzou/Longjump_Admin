@@ -196,3 +196,39 @@
 @media(max-width:1400px){.zero-notice-grid:not(.single){grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:1000px){.zero-notice-grid:not(.single){grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:600px){.zero-notice-grid:not(.single){grid-template-columns:1fr}}
+
+.login-reminder{margin:20px 0 18px;border:1px solid #d5e3de;border-radius:14px;background:#fff;color:#213e42}
+.login-reminder.is-closed{margin-top:0}
+@media(prefers-reduced-motion:no-preference){
+  .login-reminder[data-has-tasks="true"]{margin-top:52px}
+  .overview-heading + .login-reminder[data-has-tasks="true"]{margin-top:66px}
+}
+.login-reminder-toggle{display:flex;align-items:center;gap:9px;width:100%;padding:10px 16px;text-align:left;border:0;border-radius:inherit;background:#f4f8f5;color:#315c52}
+.login-reminder-toggle>.workspace-icon{width:17px;height:17px}
+.login-reminder-toggle strong{font-size:13px}
+.login-reminder-disclosure,.login-reminder-caption{color:#49655e;font-size:12px}
+.login-reminder-disclosure{display:flex;align-items:center;gap:5px;margin-left:auto}
+.login-reminder-disclosure .workspace-icon{width:13px;height:13px;transform:rotate(90deg)}
+.login-reminder-greeting{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:16px;padding:12px 16px;border-radius:inherit;background:linear-gradient(105deg,#f9f5e8,#eff7f1 38%,#f4f8f5)}
+.login-reminder[data-has-tasks="true"] .login-reminder-greeting{border-radius:13px 13px 0 0}
+.login-reminder-message>strong{font-size:16px;line-height:1.45;color:#244d42}
+.login-reminder-caption{display:inline-block;margin-left:10px}
+.login-reminder-message>p{margin:5px 0 0;color:#35554d;font-size:14px;line-height:1.6;overflow-wrap:anywhere}
+.login-reminder-close{align-self:start;display:inline-flex;align-items:center;gap:4px;padding:7px 8px;min-height:36px;background:transparent;border:0;border-radius:8px;color:#49655e;font-size:12px}
+.login-reminder-close .workspace-icon{width:16px;height:16px}
+.login-reminder-close:hover,.login-reminder-toggle:hover{background:#e6f0eb}
+.login-reminder-body{padding:4px 16px 10px}
+.login-reminder-body .overview-task{padding:8px 0}
+.login-reminder-body>.overview-link{margin-top:8px}
+@media(max-width:600px){
+  .login-reminder-greeting{gap:8px;padding:8px}
+  .login-reminder-message>strong{font-size:14px}
+  .login-reminder-caption{margin-left:5px;font-size:11px}
+  .login-reminder-message>p{font-size:12px}
+  .login-reminder-close{min-height:40px;min-width:40px;justify-content:center}
+  .login-reminder-close>span{display:none}
+}
+@media(max-width:600px) and (prefers-reduced-motion:no-preference){
+  .login-reminder[data-has-tasks="true"]{margin-top:38px}
+  .overview-heading + .login-reminder[data-has-tasks="true"]{margin-top:50px}
+}
