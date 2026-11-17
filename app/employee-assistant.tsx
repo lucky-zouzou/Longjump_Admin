@@ -202,6 +202,7 @@ export default function EmployeeAssistant({initialQuestion,page,pageTitle,close,
             {['管理员','财务','运营主管','运营'].includes(home.role)&&<button disabled={busy} onClick={()=>void submit(home.role==='运营'?'本站本月的销售额和广告投入是多少？':'本月哪个站点的销售贡献小，广告投入占比却高？',{mode:'internal'})}>{home.role==='运营'?'本站的销售和投放怎么样？':'哪站投入多、贡献少？'}</button>}
             {['管理员','财务','运营主管'].includes(home.role)&&<button disabled={busy} onClick={()=>void submit('今天最该盯哪件事？',{mode:'internal'})}>今天最该盯哪件事？</button>}
             {['monthly','fulfillment','suggestions'].includes(page)&&['管理员','供应链','运营','运营主管'].includes(home.role)&&<button disabled={busy} onClick={()=>void submit('本月备货计划到哪一步了？',{mode:'internal'})}>本月备货到哪了？</button>}
+            <button disabled={busy} onClick={()=>void submit('我有哪些待办？',{mode:'internal'})}>我有哪些待办？</button>
             {home.dailyGuide&&<button disabled={busy} onClick={()=>void submit('我每天先忙啥？',{guideId:home.dailyGuide,mode:'internal'})}>我每天先忙啥？</button>}
           </div>
         </section>

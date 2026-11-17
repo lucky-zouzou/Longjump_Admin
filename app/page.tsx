@@ -1,4 +1,4 @@
-import { headers } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { getChatGPTUser } from "./chatgpt-auth";
 import ControlTower from "./control-tower";
@@ -20,5 +20,6 @@ export default async function Home() {
     fullName: "本地管理员",
   };
 
-  return <ControlTower identity={identity} />;
+  const marker=(await cookies()).get("lj_workspace_visit")?.value;
+  return <ControlTower identity={{...identity, loginVisit:marker && /^[a-f0-9]{24}$/.test(marker) ? marker : ""}} />;
 }

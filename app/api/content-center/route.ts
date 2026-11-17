@@ -1,8 +1,7 @@
 import { requireActor } from '../../../lib/auth';
 import { database } from '../../../lib/database';
 import {env} from 'cloudflare:workers';
-import {readContentCompass} from '../../../lib/content-compass.mjs';
-import { previewReport, reportHistory, readPlatformReports, readCenter, mutateCenter, referenceLimit } from '../../../lib/content-center.mjs';
+import { readCenterCompass, previewReport, reportHistory, readPlatformReports, readCenter, mutateCenter, referenceLimit } from '../../../lib/content-center.mjs';
 
 const headers={'Cache-Control':'private, no-store'};
 function failure(e:any){
@@ -13,9 +12,9 @@ export async function GET(request:Request){
   try{
     const actor=await requireActor(request),query=new URL(request.url).searchParams;
     const data=query.get('view')==='compass'
-      ?await readContentCompass(database(),actor,query.get('period')||'month')
+      ?await readCenterCompass(database(),actor,query.get('period')||'month',query.get('range')||'')
       :query.get('view')==='report-history'?await reportHistory(database(),actor,query.get('site'),query.get('start'),query.get('end'),query.get('videoId'),Number(query.get('offset')||0))
-      :query.get('view')==='platform-report'?await readPlatformReports(database(),actor,query.get('site'),Number(query.get('offset')||0),query.get('period')||'all')
+      :query.get('view')==='platform-report'?await readPlatformReports(database(),actor,query.get('site'),Number(query.get('offset')||0),query.get('period')||'all',Date.now(),query.get('range')||'')
       :await readCenter(database(),actor);
     return Response.json(data,{headers});
   }

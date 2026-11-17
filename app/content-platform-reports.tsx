@@ -14,16 +14,16 @@ function RevisionHistory({site,row}:{site:string;row:Row}){
  },[site,row.start_day,row.end_day,row.video_id,row.revision,offset]);
  return <div>{error||(!result&&'正在读取历史…')}{result?.rows.map((v:Row)=><p key={v.revision}><b>V{v.revision} · {v.source_file}</b><small>{new Date(v.created_at).toLocaleString()} · {row.currency}</small>{reportFields.filter(([key])=>v.metrics[key]!=null).map(([key,label])=>label+' '+v.metrics[key]).join(' / ')}</p>)}{offset>0&&<button onClick={()=>setOffset(offset-20)}>上一页</button>}{result?.more&&<button onClick={()=>setOffset(offset+20)}>下一页</button>}</div>;
 }
-export function PlatformReports({site,period,refreshKey}:{site:string;period?:string;refreshKey:number}){
+export function PlatformReports({site,period,range='',refreshKey}:{site:string;period?:string;range?:string;refreshKey:number}){
  const [history,setHistory]=useState('');
  const [offset,setOffset]=useState(0),[data,setData]=useState<Row|null>(null),[error,setError]=useState('');
  useEffect(()=>{
    const ctl=new AbortController();setError('');setData(null);
-   fetch('/api/content-center?'+new URLSearchParams({view:'platform-report',site,period:period||'all',offset:String(offset)}),{cache:'no-store',signal:ctl.signal})
+   fetch('/api/content-center?'+new URLSearchParams({view:'platform-report',site,period:period||'all',range,offset:String(offset)}),{cache:'no-store',signal:ctl.signal})
      .then(parseWorkspaceResponse).then(v=>{if(!ctl.signal.aborted)setData(v);})
      .catch(e=>{if(!ctl.signal.aborted)setError(e.message);});
    return ()=>ctl.abort();
- },[site,refreshKey,offset,period]);
+ },[site,refreshKey,offset,period,range]);
  return <section className="cc-card"><h3>{period?'创作者视频明细':site+' · 平台报表记录'}</h3>
   {period&&<p>按报表结束日筛选。每行是一条视频在该报表期间的表现，金额为站点原币。</p>}
   {error?<p role="alert">{error}</p>:!data?<p>正在读取…</p>:!data.rows.length?<p>本页暂无记录。</p>:<div className="cc-table-scroll"><table><thead><tr>

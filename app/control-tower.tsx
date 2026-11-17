@@ -8,6 +8,8 @@ const BestWaybillLookup=lazy(()=>import("./best-tracking").then(m=>({default:m.B
 const ProductInformation=lazy(()=>import("./product-information"));
 const HistoryBrowser=lazy(()=>import("./history-browser"));
 import Overview from "./overview";
+import LoginTaskReminder from "./login-task-reminder";
+import {forgetTabReminder} from "../lib/login-task-reminder.mjs";
 import WorkspaceIcon from "./workspace-icons";
 import {WorkspaceGuard,useWorkspaceRoute,useVisibleRefresh} from "./workspace-hooks";
 import {NAV_GROUPS,mobileModules,hasIndependentLedger,workspaceUrl} from "../lib/workspace-model.mjs";
@@ -47,7 +49,7 @@ import type {ManagedUser} from "./user-management";
 import { WholesaleLanguageContext,useWholesalePreference } from "./wholesale-language";
 import { translateWholesale } from "../lib/wholesale-i18n.mjs";
 import { lazy,Suspense,useCallback, useEffect, useRef, useState } from "react";
-import { dataDomainsForRole, DATA_DOMAIN_LABELS, hasPermission, navigationForRole, PERMISSION_LABELS, permissionsForRole, ROLE_PERMISSIONS } from "../lib/permissions.mjs";
+import { dataDomainsForRole, DATA_DOMAIN_LABELS, hasPermission, navigationForActor, navigationForRole, PERMISSION_LABELS, permissionsForRole, ROLE_PERMISSIONS } from "../lib/permissions.mjs";
 
 const ContentCenter=lazy(()=>import("./content-center"));
 const CreatorWorkspace=lazy(()=>import("./creator-workspace"));
@@ -78,7 +80,7 @@ const MOVEMENT_TONE:Record<string,string> = { "到仓入库":"green", "销售出
 const ALERT_TONE:Record<string,string> = { critical:"red", data:"amber", eta:"amber", warning:"amber", watch:"blue", healthy:"green" };
 const NEW_PRODUCT_STAGE:Record<string,string> = { selection:"选款立项", parallel_test:"调研与种草", finance:"财务测算", sample:"打板确认", production:"首批生产", abandoned:"已放弃" };
 
-type Identity = { userId:string; displayName:string; email:string; fullName:string|null };
+type Identity = { loginVisit:string; userId:string; displayName:string; email:string; fullName:string|null };
 // Snapshot rows come from several server-side tables and contain different fields.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Row = Record<string,any>;
@@ -133,7 +135,7 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
   const [collapsedGroups,setCollapsedGroups]=useState<Record<string,boolean>>({});
   useEffect(()=>{const group=NAV_GROUPS.find(g=>g.keys.includes(selectedTab));if(group)setCollapsedGroups(old=>({...old,[group.label]:false}));},[selectedTab]);
   useEffect(()=>{if(!more)return;const close=(event:KeyboardEvent)=>{if(event.key==="Escape")setMore(false);};window.addEventListener("keydown",close);return()=>window.removeEventListener("keydown",close);},[more]);
-  const setTab=(page:string,task:Row={})=>{if(navigate({page,entity:task.entity||"",view:task.view||"",month:task.month||"",search:"",status:"all"})){setMore(false);setNavQuery("");}};
+  const setTab=(page:string,task:Row={})=>{const moved=navigate({page,entity:task.entity||"",view:task.view||"",month:task.month||"",search:"",status:"all"});if(moved){setMore(false);setNavQuery("");}return moved;};
   const loader=useRef<ReturnType<typeof createWorkspaceLoader>|null>(null);
   if(!loader.current)loader.current=createWorkspaceLoader(readWorkspace);
   const taskLoader=useRef<ReturnType<typeof createWorkspaceLoader>|null>(null);
@@ -251,7 +253,7 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
   if (loading&&!data) return <BrandWelcome name={identity.fullName}/>;
   if (!data) return <div className="empty" style={{paddingTop:160}}><p>{connectionError||"系统暂时无法读取数据"}</p><button className="btn" onClick={()=>void refresh().catch(()=>{})}>重新连接</button></div>;
   const actor=data.actor;
-  const roleNav=navigationForRole(actor.role).filter(key=>!["wholesale","distribution"].includes(key)||actor.role!=="运营"||actor.site==="印尼");
+  const roleNav=navigationForActor(actor);
   const tab=roleNav.includes(selectedTab)?selectedTab:roleNav[0];
   const visibleNav = navItems.filter(([key]) => roleNav.includes(key)&&key!=="after-sales");
   const taskCount=(key:string)=>key==="overview"?data.myTasks.length:data.myTasks.filter(task=>task.tab===key).length;
@@ -264,6 +266,10 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
   const filteredNav=visibleNav.filter(([key,label])=>`${navLabel(key,label)} ${label} ${key}`.toLowerCase().includes(navQuery.trim().toLowerCase()));
   const wake= wakeQuestion(navQuery);
   const openAssistant=(question="")=>{setMore(false);setNavQuery("");setAssistant({question,scope:actorScope(actor)});};
+  const reminder=<LoginTaskReminder key={JSON.stringify([actorScope(actor),identity.loginVisit,tab])}
+    scope={actorScope(actor)} visit={identity.loginVisit} name={actor.name} allowed={roleNav} tasks={data.myTasks}
+    ready={data.module===selectedTab && !data.tasksDeferred && !connectionError} failed={Boolean(connectionError)}
+    go={setTab}/>;
   const navigation=(surface:string)=><>
     <div className="nav-search"><WorkspaceIcon name="search"/><input aria-label={shellT("搜索工作区")} placeholder={shellT("搜索工作区")} value={navQuery} onChange={event=>setNavQuery(event.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&!e.nativeEvent.isComposing&&e.nativeEvent.keyCode!==229&&wake!==null){e.preventDefault();openAssistant(wake);}}}/>{navQuery&&<button aria-label={shellT("清除搜索")} onClick={()=>setNavQuery("")}><WorkspaceIcon name="close"/></button>}</div>
     <div className="nav-sections">{NAV_GROUPS.filter(group=>filteredNav.some(([key])=>group.keys.includes(key))).map((group,index)=>{
@@ -279,7 +285,7 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
       <div className="brand"><img className="brand-logo" src="/loong-jump-logo-white.png" alt="LOONG JUMP"/><p>{shellT("品牌出海供应链控制塔")}</p><span className="brand-workspace">WORKSPACE</span></div>
       <nav className="nav" aria-label={shellT("系统导航")}>{navigation("desktop")}</nav>
       <div className="account"><div className="account-profile"><div className="account-avatar" aria-hidden="true">{String(actor.name||"L").slice(0,1)}</div><div><strong>{actor.name}</strong><span>{shellT(actor.role)} · {actor.site ? `${shellT(actor.site)} / ${actor.channel||""}` : shellT(ROLE_LABEL[actor.role])}</span></div></div><span className="account-email">{identity.email}</span>
-        {identity.userId!=="local-admin" && <a className="account-signout" href="/signout-with-chatgpt?return_to=%2F"><WorkspaceIcon name="logout"/>{shellT("退出登录")}</a>}
+        {identity.userId!=="local-admin" && <a className="account-signout" onClick={()=>forgetTabReminder(actorScope(actor))} href="/signout-with-chatgpt?return_to=%2F"><WorkspaceIcon name="logout"/>{shellT("退出登录")}</a>}
       </div>
     </aside>
     <main className="main">
@@ -292,7 +298,7 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
         </div>
       </header>
       {assistant && assistant.scope===actorScope(actor) && <Suspense fallback={<p role="status">正在打开小品同学…</p>}><EmployeeAssistant key={tab} initialQuestion={assistant.question} page={tab} pageTitle={activeItem?navLabel(activeItem[0],activeItem[1]):''} close={()=>setAssistant(null)} go={(page,view,month,entity)=>{if(roleNav.includes(page)){setAssistant(null);setTab(page,{view,month,entity});}}}/></Suspense>}
-      <div className="content"><Suspense fallback={<div className="panel" role="status">正在打开工作区…</div>}>{data.module&&data.module!==tab&&!(tab===selectedTab&&hasIndependentLedger(tab))?<div className="panel" role="status">正在读取当前工作区…{connectionError&&<p>{connectionError}</p>}</div>:<>
+      <div className="content">{tab!=="overview" && reminder}<Suspense fallback={<div className="panel" role="status">正在打开工作区…</div>}>{data.module&&data.module!==tab&&!(tab===selectedTab&&hasIndependentLedger(tab))?<div className="panel" role="status">正在读取当前工作区…{connectionError&&<p>{connectionError}</p>}</div>:<>
         {actor.role==="运营" && (!actor.site || !actor.channel) && <div className="notice warn">当前账号尚未绑定站点和渠道，请联系管理员在“用户管理”中完成分配后再录入业务数据。</div>}
         {tab==="distribution" && <WholesaleLanguageContext.Provider value={wholesaleLocale}><Distribution route={route} navigate={navigate} onChanged={()=>refresh(true)}/></WholesaleLanguageContext.Provider>}
         {tab==="wholesale" && <WholesaleLanguageContext.Provider value={wholesaleLocale}><Wholesale onChanged={()=>refresh(true)} route={route} navigate={navigate}/></WholesaleLanguageContext.Provider>}
@@ -306,9 +312,9 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
         {tab==="clearance" && <Clearance initialMonth={route.month} initialId={route.entity} initialView={route.view}/>}
         {tab==="promotions" && <Promotions initialId={route.entity}/>}
         {["after-sales","quality-incidents"].includes(tab) && <AfterSales key={tab+route.month+route.entity} kind="all" initialMonth={route.month} initialId={route.entity}/>}
-        {tab==="overview" && <Overview data={data} go={setTab} allowed={roleNav}/>}
+        {tab==="overview" && <Overview data={data} go={setTab} allowed={roleNav} reminder={reminder}/>}
         {tab==="suggestions" && <Suggestions data={data} act={act} busy={busy}/>}
-        {tab==="new-products" && <NewProducts data={data} act={act} busy={busy}/>}
+        {tab==="new-products" && <NewProducts key={route.entity} initialId={route.entity} data={data} act={act} busy={busy}/>}
         {["sales","suggestions"].includes(tab)&&["管理员","供应链","运营","运营主管"].includes(actor.role)&&<div className="notice info"><span>五站 TikTok／Shopee：查看近30天零销量、有库存的商品及日报缺口</span> <button className="btn" onClick={()=>setTab("promotions")}>零销量预警与优惠申请 →</button></div>}
         {tab==="sales" && route.view==='imports' && <SalesImportHistory key={route.entity} initialSearch={route.entity} data={data} act={act} busy={busy}/>}
         {tab==="sales" && route.view!=='imports' && <SalesImport data={data} act={act} busy={busy}/>}
@@ -515,10 +521,10 @@ function npiStepState(project:Row,index:number) {
   return index<active?"complete":index===active?"active":"pending";
 }
 
-function NewProducts({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
+function NewProducts({initialId,data,act,busy}:{initialId:string;data:Snapshot;act:Act;busy:boolean}) {
   const actor=data.actor,projects=data.newProductProjects||[];
   const [supplyUserId,setSupplyUserId]=useState("");
-  const [selectedId,setSelectedId]=useState(projects[0]?.id||"");
+  const [selectedId,setSelectedId]=useState(initialId||projects[0]?.id||"");
   const selected=projects.find(project=>project.id===selectedId)||projects[0];
   const effectiveId=selected?.id||"";
   const [start,setStart]=useState({cycleMonth:data.currentMonth,sku:"",name:"",firstBatchQty:"3000"});

@@ -6,7 +6,7 @@ import {parseWorkspaceResponse} from '../lib/workspace-response.mjs';
 import {useVisibleRefresh} from './workspace-hooks';
 import {ContentForm,sourceLabels,type Row} from './content-center-forms';
 import {SITE_CURRENCIES} from '../lib/sales-data.mjs';
-import {ContentCompass} from './content-compass';
+import {ContentCompass,type CompassSelection} from './content-compass';
 import {PlatformReports} from './content-platform-reports';
 import {ContentMetricsImport} from './content-metrics-import';
 import {ContentMaterials} from './content-materials';
@@ -37,6 +37,7 @@ export default function ContentCenter({initialId='',tasks=[]}:{initialId?:string
  const [focus,setFocus]=useState(initialId);
  const [snapshot,setData]=useState<Row|null>(null),[chosenTab,setTab]=useState<number|null>(initialId?0:null),[filter,setFilter]=useState(''),[site,setSite]=useState(''),[source,setSource]=useState(''),[week,setWeek]=useState('');
  const [form,setForm]=useState<Row|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
+ const [compassSelection,setCompassSelection]=useState<CompassSelection>();
  const [materialDirty,setMaterialDirty]=useState(false),[materialRefresh,setMaterialRefresh]=useState(0);
  const formBox=useRef<HTMLDivElement>(null),counter=useRef(0);
  const refresh=useCallback(async()=>{const generation=++counter.current;
@@ -84,7 +85,7 @@ export default function ContentCenter({initialId='',tasks=[]}:{initialId?:string
  const queue=visibleScripts.filter(s=>inWeek(s.shoot_date||s.due)&&(!focus||s.id===focus||versions.some(v=>v.id===focus&&v.script_id===s.id)));
  const newValues={source:'studio',originalCount:1,site:data.writeSites[0]||'',scene:'公司静拍'};
  const canClaim=(s:Row)=>ops&&data.writeSites.some((site:string)=>s.source!=='creator'||s.allowedSites.includes(site));
- const go=(i:number)=>{if(form||materialDirty&&i!==tab)return;setTab(i);setNotice('');};
+ const go=(i:number,selection?:CompassSelection)=>{if(form||materialDirty&&i!==tab)return;setCompassSelection(selection);setTab(i);setNotice('');};
  function task(s:Row){
   const product=skuByCode.get(s.sku),accepted=new Set(versions.filter(v=>v.script_id===s.id&&v.status==='已验收').map(v=>v.original_no)).size;
   const tags=(text:string)=>text?text.split(/[、，,\n]+/).map(t=>t.trim()).filter(Boolean).map((t,i)=><span className="cc-task-tag" key={i}>{t}</span>):'未指定';
@@ -147,14 +148,14 @@ export default function ContentCenter({initialId='',tasks=[]}:{initialId?:string
   <nav aria-label="内容工作区">{tabOrder.map(i=><button key={i} aria-current={i===tab?'page':undefined} disabled={!!form||materialDirty} onClick={()=>go(i)}>{tabs[i]}</button>)}</nav>
   {notice&&<p role="status">{notice}</p>}{error&&!form&&<p className="cc-error" role="alert">{error}</p>}
   {form&&<div ref={formBox}><ContentForm key={form.operationId} initial={form} data={data} error={error} busy={busy} onClose={()=>{setForm(null);setError('');}} onSave={save}/></div>}
-  <fieldset disabled={!!form} className="cc-body">{tab===5?<ContentMaterials data={data} onDirty={setMaterialDirty} refreshKey={materialRefresh}/>:tab===6?<ContentCompass sites={data.sites} reportSites={camera?data.sites:data.writeSites} refreshKey={materialRefresh}/>:<div className="cc-filters">
+  <fieldset disabled={!!form} className="cc-body">{tab===5?<ContentMaterials data={data} onDirty={setMaterialDirty} refreshKey={materialRefresh}/>:tab===6?<ContentCompass initial={compassSelection} sites={data.sites} reportSites={camera?data.sites:data.writeSites} refreshKey={materialRefresh}/>:<div className="cc-filters">
     <input aria-label="搜索内容" placeholder="搜索 SKU、卖点、脚本或账号" value={filter} onChange={e=>setFilter(e.target.value)}/>
     <select aria-label="筛选站点" value={site} onChange={e=>setSite(e.target.value)}><option value="">全部站点</option>{data.sites.map((s:string)=><option key={s}>{s}</option>)}</select>
     <select aria-label="筛选来源" value={source} onChange={e=>setSource(e.target.value)}><option value="">全部来源</option>{Object.entries(sourceLabels).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select>
     {tab===0&&<label>排期起始日 <input type="date" aria-label="从此日起七天" value={week} onChange={e=>setWeek(e.target.value)}/></label>}</div>}
   {tab===0&&<><h3>需求与拍摄排期</h3>{!queue.length&&<Empty>当前没有符合条件的需求。运营可从「新建需求」指定包款和必拍镜头。</Empty>}
     <div className="cc-grid">{queue.map(task)}</div></>}
-  {tab===3&&<><button className="btn" onClick={()=>go(6)}>查看五站数据罗盘 →</button>{ops&&data.writeSites.length>0&&<ContentMetricsImport sites={data.writeSites} posts={posts.filter(p=>p.published_at&&ownsSite(p.site)&&p.url)} refresh={refresh}/>}
+  {tab===3&&<><button className="btn" onClick={()=>go(6)}>查看五站数据罗盘 →</button>{ops&&data.writeSites.length>0&&<ContentMetricsImport openCompass={selection=>go(6,selection)} sites={data.writeSites} posts={posts.filter(p=>p.published_at&&ownsSite(p.site)&&p.url)} refresh={refresh}/>}
     {visiblePosts.some(p=>!p.published_at)&&<section><h3>待登记发布</h3><div className="cc-grid">{visiblePosts.filter(p=>!p.published_at).map(p=>postCard(p))}</div></section>}
     {!ops&&camera&&<PlatformReports key={site} site={site||data.sites[0]} refreshKey={materialRefresh}/>}
     <h3>按脚本对照发布效果</h3>{!visiblePosts.some(p=>p.published_at)&&<Empty>发布后可按脚本对照各站版本，并记录 24 小时和 7 天表现。</Empty>}
