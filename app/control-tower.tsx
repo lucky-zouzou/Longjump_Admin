@@ -10,7 +10,7 @@ const HistoryBrowser=lazy(()=>import("./history-browser"));
 import Overview from "./overview";
 import WorkspaceIcon from "./workspace-icons";
 import {WorkspaceGuard,useWorkspaceRoute,useVisibleRefresh} from "./workspace-hooks";
-import {NAV_GROUPS,mobileModules,hasIndependentLedger} from "../lib/workspace-model.mjs";
+import {NAV_GROUPS,mobileModules,hasIndependentLedger,workspaceUrl} from "../lib/workspace-model.mjs";
 import {createWorkspaceLoader} from "../lib/workspace-loader.mjs";
 import {parseWorkspaceResponse} from "../lib/workspace-response.mjs";
 const InboundReceipts=lazy(()=>import("./inbound-receipts"));
@@ -291,7 +291,7 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
           <span className={`status-pill ${connectionError?"connection-failed":""}`} role="status">{connectionError?shellT("更新失败 · 数据可能已过时"):data.tasksDeferred?shellT("正在更新导航待办"):`${shellT(hasIndependentLedger(selectedTab)?"导航已更新":"工作区已更新")} ${lastSync||"—"}`}</span>{connectionError&&<button className="btn danger" onClick={()=>void refresh().catch(()=>{})}>{shellT("重新连接")}</button>}
         </div>
       </header>
-      {assistant && assistant.scope===actorScope(actor) && <Suspense fallback={<p role="status">正在打开小品同学…</p>}><EmployeeAssistant key={tab} initialQuestion={assistant.question} page={tab} pageTitle={activeItem?navLabel(activeItem[0],activeItem[1]):''} close={()=>setAssistant(null)} go={(page,view)=>{if(roleNav.includes(page)){setAssistant(null);setTab(page,{view});}}}/></Suspense>}
+      {assistant && assistant.scope===actorScope(actor) && <Suspense fallback={<p role="status">正在打开小品同学…</p>}><EmployeeAssistant key={tab} initialQuestion={assistant.question} page={tab} pageTitle={activeItem?navLabel(activeItem[0],activeItem[1]):''} close={()=>setAssistant(null)} go={(page,view,month,entity)=>{if(roleNav.includes(page)){setAssistant(null);setTab(page,{view,month,entity});}}}/></Suspense>}
       <div className="content"><Suspense fallback={<div className="panel" role="status">正在打开工作区…</div>}>{data.module&&data.module!==tab&&!(tab===selectedTab&&hasIndependentLedger(tab))?<div className="panel" role="status">正在读取当前工作区…{connectionError&&<p>{connectionError}</p>}</div>:<>
         {actor.role==="运营" && (!actor.site || !actor.channel) && <div className="notice warn">当前账号尚未绑定站点和渠道，请联系管理员在“用户管理”中完成分配后再录入业务数据。</div>}
         {tab==="distribution" && <WholesaleLanguageContext.Provider value={wholesaleLocale}><Distribution route={route} navigate={navigate} onChanged={()=>refresh(true)}/></WholesaleLanguageContext.Provider>}
@@ -299,8 +299,8 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
         {tab==="reviews" && <BusinessReviews initialView={route.view} initialDate={route.entity}/>}
         {tab==="content-center" && <ContentCenter key={route.entity} initialId={route.entity} tasks={data.myTasks.filter(t=>t.tab===tab)}/>}
         {tab==="creators" && <CreatorWorkspace initialId={route.entity}/>}
-        {tab==="cost-profit" && <CostProfit key={route.view+route.entity} role={actor.role} initialView={route.view} initialSku={route.entity}/>}
-        {tab==="sales-targets" && <SalesTargets initialMonth={route.month}/>}
+        {tab==="cost-profit" && <CostProfit key={route.view+route.entity+route.month} role={actor.role} initialView={route.view} initialSku={route.entity} initialMonth={route.month}/>}
+        {tab==="sales-targets" && <SalesTargets key={route.month} initialMonth={route.month}/>}
         {tab==="business-actions" && route.view==='evidence' && <EvidenceWorkbench key={route.entity} initialKey={route.entity} site="" channel="" refresh="" standalone/>}
         {tab==="business-actions" && route.view!=='evidence' && <BusinessActions key={route.entity} initialId={route.entity} actor={actor}/>}
         {tab==="clearance" && <Clearance initialMonth={route.month} initialId={route.entity} initialView={route.view}/>}
@@ -314,7 +314,7 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
         {tab==="sales" && route.view!=='imports' && <SalesImport data={data} act={act} busy={busy}/>}
         {tab==="inventory" && <Inventory data={data} act={act} busy={busy} scope={inventoryScope} clearScope={()=>setInventoryScope(null)}/>}
         {tab==="receipt" && <Receipt data={data} act={act} busy={busy}/>}
-        {tab==="monthly" && <Monthly data={data} act={act} busy={busy}/>}
+        {tab==="monthly" && <Monthly data={data} act={act} busy={busy} route={route}/>}
         {tab==="approval" && <Approvals data={data} act={act} busy={busy} goInventory={scope=>{setInventoryScope(scope);setTab("inventory");}} goWholesale={()=>setTab("wholesale")}/>}
         {tab==="production-tracking" && <ProductionTracking rows={data.productionTracking||[]} generatedAt={data.generatedAt}/>}
         {tab==="fulfillment" && <Fulfillment data={data} act={act} busy={busy}/>}
@@ -780,7 +780,37 @@ function Receipt({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
   return <InboundReceipts data={data} act={act} busy={busy}/>;
 }
 
-function Monthly({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
+function ProductionPriority({data}:{data:Snapshot}) {
+  const orders=data.productionOrders.filter(order=>order.priority);
+  const [all,setAll]=useState(false);
+  const labels:Record<string,string>={urgent:"优先催办",soon:"尽快排期",verify:"待核实",normal:"常规跟进"};
+  const factory=data.actor.role==="工厂";
+  const urgent=orders.filter(o=>o.priority.level==="urgent").length;
+  const soon=orders.filter(o=>o.priority.level==="soon").length;
+  const verify=orders.filter(o=>o.priority.unverified>0).length;
+  return <Panel title="工厂排产提醒" desc="跨月跟踪已下发、尚未完工的订单，按最紧迫的站点 SKU 排序。">
+    {orders.length===0?<Empty>当前没有需要跟进排产的工厂单</Empty>:<>
+      <p role="status"><strong>{urgent} 张优先催办</strong> · {soon} 张尽快排期 · {verify} 张含待核实资料</p>
+      <div className="table-wrap"><table><thead><tr><th>顺序</th><th>生产单</th><th>重点 SKU / 站点</th><th>提醒依据</th></tr></thead><tbody>
+        {(all?orders:orders.slice(0,5)).map(order=>{
+          const p=order.priority;
+          return <tr key={order.id}><td><Pill tone={p.level==="urgent"?"red":p.level==="normal"?"green":"amber"}>{p.rank} · {labels[p.level]}</Pill></td>
+            <td><a href={workspaceUrl({page:"fulfillment",entity:order.id})}>{order.series_name} · {order.month}</a><div className="cell-note">{order.id} · {order.status==="in_production"?"生产中":"待工厂排产"}</div></td>
+            <td><SkuLabel sku={p.sku}/><div className="cell-note">{[p.site,p.channel].filter(Boolean).join(" · ")||"分配待核实"}</div></td>
+            <td>{p.shortage?"预计 "+p.shortage+" 出现缺口":p.reason||(p.level==="verify"?"请供应链核对资料":"按现有排期跟进")}
+              {p.stock!=null&&<div className="cell-note">可售 {fmt(p.stock)} 件 · 预测日销 {Number(p.daily.toFixed(2))} 件 · {p.cover==null?"暂无动销":`库存约可售 ${p.cover} 天`}</div>}
+              {p.cutoff&&<div className="cell-note">销量截至 {p.cutoff} · 预计生产至到仓 {p.lead} 天{p.overdue?" · 工厂交期已过，请核实":""}</div>}
+              {p.unverified>0&&p.level!=="verify"&&<div className="cell-note">另有 {p.unverified} 项需核实</div>}
+            </td></tr>;
+        })}
+      </tbody></table></div>
+      {orders.length>5&&<button className="btn" onClick={()=>setAll(!all)}>{all?"收起":"查看全部 "+orders.length+" 张"}</button>}
+      {!factory&&<p className="cell-note">采用补货驾驶舱的日销预测，按批次预计到仓日计入在途。预计补到前会缺货的先催，同等紧迫时先跟进较早下发的订单。</p>}
+    </>}
+  </Panel>;
+}
+
+function Monthly({data,act,busy,route}:{data:Snapshot;act:Act;busy:boolean;route:Row}) {
   const submitted=data.monthlyStatus.filter(r=>r.submitted).length;
   const currentPlan=data.approvals.find(r=>r.type==="monthly_plan"&&r.month===data.currentMonth);
   const locked=currentPlan&&["pending","approved"].includes(currentPlan.status);
@@ -789,7 +819,8 @@ function Monthly({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
     <PageHead title="月度备货计划" desc="提交完整度是进入审批的硬门槛，不允许部分站点计划提前审批">
       {submitted===data.monthlyStatus.length?<Pill tone="green">已全部提交</Pill>:<Pill tone="red">待提交 {data.monthlyStatus.length-submitted} 项</Pill>}
     </PageHead>
-    <ReplenishmentHistory actor={data.actor as {role:string}} currentMonth={data.currentMonth} refreshToken={data.generatedAt}/>
+    <ProductionPriority data={data}/>
+    <ReplenishmentHistory key={[route.view,route.entity,route.month].join("|")} initial={route.view==="plan-history"?{month:route.month,scope:route.entity}:undefined} actor={data.actor as {role:string}} currentMonth={data.currentMonth} refreshToken={data.generatedAt}/>
     <Panel title={`${data.currentMonth} 提交矩阵`} desc="五个站点的TikTok与Shopee">
       <div className="table-wrap"><table><thead><tr><th>站点</th><th>TikTok</th><th>Shopee</th></tr></thead><tbody>{SITES.map(site=><tr key={site}><td><strong>{site}</strong></td>{REQUIRED_CHANNELS.map(channel=>{const r=data.monthlyStatus.find(x=>x.site===site&&x.channel===channel);return <td key={channel}>{r?.submitted?<Pill tone="green">已提交</Pill>:<Pill tone="red">未提交</Pill>}</td>})}</tr>)}</tbody></table></div>
       <div className="notice info" style={{marginTop:14}}>月度计划由供应链账号送审、管理员审批。{locked?currentPlan.status==="pending"?"本月已送审；需要调整时，请原申请人到审批中心撤回。":"本月已批准，后续调整请提交变更审批。":"五站双渠道全部提交后，由供应链核对需求并送审。"}</div>
@@ -818,6 +849,7 @@ function Fulfillment({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}){
     <PageHead title="系列采购与生产" desc="运营需求保留SKU，供应链和工厂按产品系列协同">
       <Pill tone={data.metrics.readyToShipProductionOrderCount?"red":"green"}>{data.metrics.readyToShipProductionOrderCount?`${data.metrics.readyToShipProductionOrderCount}张生产单待发货`:"生产发货衔接正常"}</Pill>
     </PageHead>
+    <ProductionPriority data={data}/>
     <div className="metrics">
       <div className="metric"><div className="label">系列采购单</div><div className="value">{fmt(data.purchaseOrders.length)}</div><div className="foot">按系列＋供应商合并</div></div>
       <div className="metric"><div className="label">生产执行中</div><div className="value">{fmt(data.metrics.activeProductionOrderCount)}</div><div className="foot">工厂按系列排产</div></div>

@@ -58,6 +58,7 @@ function fields(input:Row,d:Row):Field[]{
 }
 export function ContentForm({initial,data,onClose,onSave,busy,error}:{initial:Row;data:Row;onClose:()=>void;onSave:(v:Row,reference?:File)=>Promise<void>;busy:boolean;error:string}){
  const [value,set]=useState(initial),[reference,setReference]=useState<File>();const dirty=!!reference||JSON.stringify(value)!==JSON.stringify(initial);const confirm=useDirtyGuard(dirty);
+ const referenceInput=useRef<HTMLInputElement>(null);
  const update=(key:string,v:any)=>{if(key==='source')setReference(undefined);set(old=>({...old,[key]:v,...(key==='site'?{ownerId:''}:{}),...(key==='shoot'?{jointWith:''}:{}),
    ...(key==='decision'?{site:'',ownerId:''}:{}),...(key==='source'?{sourceContentId:''}:{})}));};
  return <form className="cc-form" aria-label={actions[value.action]} onSubmit={e=>{
@@ -83,8 +84,13 @@ export function ContentForm({initial,data,onClose,onSave,busy,error}:{initial:Ro
     <input name={item.key} aria-label={item.label} onInput={e=>update(item.key,e.currentTarget.value)} type={item.type==='percent'?'number':item.type} min={item.key==='originalCount'?1:['number','percent'].includes(item.type||'')?0:undefined} max={item.key==='originalCount'||item.type==='percent'?100:undefined} step={item.key==='gmv'?'0.01':item.type==='percent'?'any':undefined}
       required={!item.optional} value={value[item.key]??''} onChange={e=>update(item.key,e.target.value)}/>}
   </label>)}</div>
-  {value.action==='create'&&value.source==='studio'&&<label className="cc-reference-upload">上传参考视频（选填，16 MB 以内）
-    <input type="file" accept=".mp4,.mov,.webm,video/mp4,video/quicktime,video/webm" onChange={e=>{const file=e.target.files?.[0];e.target.setCustomValidity(file&&file.size>16*1024*1024?'视频超过 16 MB，可改填参考链接':'');setReference(file);}}/></label>}
+  {value.action==='create'&&value.source==='studio'&&<div className="cc-reference-upload"><label>上传参考视频（选填，16 MB 以内）
+    <input ref={referenceInput} disabled={busy} type="file" accept=".mp4,.mov,.webm,video/mp4,video/quicktime,video/webm" onChange={e=>{const file=e.target.files?.[0];e.target.setCustomValidity(file&&file.size>16*1024*1024?'视频超过 16 MB，可改填参考链接':'');setReference(file);}}/></label>
+    {reference&&<button type="button" className="btn" disabled={busy} onClick={()=>{
+      const input=referenceInput.current;
+      if(input){input.value='';input.setCustomValidity('');input.focus();}
+      setReference(undefined);
+    }}>移除参考视频</button>}</div>}
   {error&&<p className="cc-error" role="alert">{error}</p>}
   <footer><button className="btn primary" disabled={busy}>{busy?'正在提交…':'保存'+(value.action==='return'?'退回意见':'')}</button></footer>
  </form>;

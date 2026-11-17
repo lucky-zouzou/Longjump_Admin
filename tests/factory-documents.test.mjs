@@ -12,6 +12,7 @@ import {REQUIRED_MONTHLY_SCOPES} from '../lib/rules.mjs';
 import {ticketRows,orderPayload,importRows,review} from './cost-fixture.mjs';
 import {mutateCost,readCostProfit} from '../lib/cost-profit.mjs';
 import {localDay} from '../lib/promotion-model.mjs';
+import {answerWithKnowledge} from '../lib/employee-assistant.mjs';
 import {deliveryStep} from '../lib/dispatch-demand.mjs';
 test('发货下一步指引区分未安排、待审核与已进入运输',()=>{
  const order={qc_status:'passed',productionStatus:'completed',promised_completion_date:'2026-11-04'};
@@ -46,6 +47,22 @@ test('采购准备→管理员批准锁定并下发→工厂导出可见采购�
  const b=X.read(X.write(purchaseWorkbook(X,d),{type:'buffer',bookType:'xlsx'}),{type:'buffer'});assert.equal(b.Sheets['采购订单'].G8.v,25.5);assert.equal(b.Sheets['采购订单'].I8.v,255);assert.equal(b.Sheets['采购订单'].I8.f,'ROUND(F8*G8,2)');assert.equal(b.Sheets['站点需求分配'].F2.v,10);
  await assert.rejects(preparePurchase(f),/已更新|变化/);
  }finally{f.sqlite.close();}
+});
+test('小品按月度计划追踪实际出厂、装箱复核、订舱和到仓，不重复累计同批货',async t=>{
+ const f=await setup();t.after(()=>f.sqlite.close());
+ const ask=async()=>answerWithKnowledge(f.db,f.users.supply,{question:'印尼2026年9月备货计划到哪一步了？发出去了多少？',mode:'internal'});
+ const n=await f.issue();
+ const requested=await ask();assert.match(requested.answer,/完工 10 件，已发出 0 件，仓库已实收 0 件/);assert.match(requested.answer,/发货通知待管理员审核/);
+ await changeDispatch(f.db,f.factory,await f.pack(n.id,8));
+ assert.match((await ask()).answer,/已发出 8 件/);assert.match((await ask()).answer,/8 件 为工厂回传|8 件为工厂回传/);
+ await changeDispatch(f.db,f.users.supply,{action:'reviewPacking',noticeId:n.id,version:3,decision:'confirm',reason:'核实八件部分发货'});
+ svc.setActor(f.users.supply);
+ const result=await svc.POST(new Request('http://localhost/api/system',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'createTransportBatch',noticeId:n.id,noticeVersion:4,batchNo:'PACK-TRACK',carrierName:'承运商'})}));assert.equal(result.status,200,JSON.stringify(await result.clone().json()));
+ const booked=await ask();assert.match(booked.answer,/已发出 8 件/);assert.match(booked.answer,/8 件 待补到仓日期/);assert.ok(booked.brief.details.some(d=>d.includes('订舱交接')));
+ const leg=f.sqlite.prepare('SELECT id FROM transport_legs').get();
+ f.sqlite.prepare("UPDATE transport_legs SET stage='awaiting_receipt',eta='2020-01-01' WHERE id=?").run(leg.id);
+ f.sqlite.prepare('UPDATE transport_leg_items SET received_qty=3 WHERE leg_id=?').run(leg.id);
+ const arrived=await ask();assert.match(arrived.answer,/已发出 8 件，仓库已实收 3 件/);assert.match(arrived.answer,/5 件 的预计到仓日已过/);
 });
 test('三单闭环：装箱复核后按实发转海运，不改海外库存、不允许重复转单',async()=>{
  const f=await setup();try{const before=f.sqlite.prepare('SELECT * FROM inventory_balances').all(),n=await f.issue();let a=await dispatchAvailability(f.db,f.order().id);assert.equal(a[0].available,0);

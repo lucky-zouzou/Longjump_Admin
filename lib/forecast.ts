@@ -5,7 +5,7 @@ import {prorateAllocations} from './rules.mjs';
 type AnyRow=Record<string,any>;
 const parseJson=<T=any>(v:unknown,f:T):T=>{try{return JSON.parse(String(v))}catch{return f}};
 const cleanText=(v:unknown,n:number)=>String(v||'').slice(0,n);
-export async function loadForecast(db:any,actor:any,asOf?:string,focusKey?:string):Promise<{suggestions:AnyRow[];salesDaily:AnyRow[];policies:AnyRow[]}>{
+export async function loadForecast(db:any,actor:any,asOf?:string,focusKey?:string|ReadonlySet<string>):Promise<{suggestions:AnyRow[];salesDaily:AnyRow[];policies:AnyRow[]}>{
  if(!asOf){
   const now=new Date(),sites=actor.role==='运营'?[actor.site]:['马来西亚','印尼','泰国','越南','菲律宾'];
   const days=[...new Set<string>(sites.map((site:string)=>localDay(now,site)))],parts=[];
@@ -16,13 +16,28 @@ export async function loadForecast(db:any,actor:any,asOf?:string,focusKey?:strin
  const chinaDate=(offset=0)=>new Date(Date.parse(asOf)+offset*86400000).toISOString().slice(0,10);
  const daysFromToday=(v:unknown)=>/^\d{4}-\d{2}-\d{2}$/.test(String(v))?Math.ceil((Date.parse(String(v))-Date.parse(asOf))/86400000):null;
  const scope=actor.role==='运营'?{clause:' WHERE site=? AND channel=?',args:[actor.site,actor.channel]}:{clause:'',args:[]};
+ // A factory queue only needs forecasts for the SKU allocations on its open orders.
+ const keys=typeof focusKey==='object'?focusKey:null;
+ const skuArgs=keys?[JSON.stringify([...new Set([...keys].map(k=>k.split('|')[2]))])]:[];
+ const skuFilter='sku IN (SELECT value FROM json_each(?))';
+ const readRows=(table:string,filter=skuFilter,scoped=false)=>{
+   const base=scoped?scope.clause:'';
+   return all('SELECT * FROM '+table+base+(keys?(base?' AND ':' WHERE ')+filter:''),[...(scoped?scope.args:[]),...skuArgs]);
+ };
  const [inventory,skuSettings,batches,productionOrderRows,productionItemRows,purchaseItems,shipmentRows,shipmentItemRows,transportLegRows,transportItemRows,transportLegItemRows,receipts,policies,corrections]=await Promise.all([
- all(`SELECT * FROM inventory_balances${scope.clause}`,scope.args),all('SELECT * FROM sku_settings'),all('SELECT * FROM production_batches'),all('SELECT * FROM series_production_orders'),all('SELECT * FROM series_production_order_items'),all('SELECT * FROM series_purchase_order_items'),all('SELECT * FROM shipment_batches'),all('SELECT * FROM shipment_batch_items'),all('SELECT * FROM transport_legs'),all('SELECT * FROM transport_batch_items'),all('SELECT * FROM transport_leg_items'),all('SELECT * FROM shipment_receipt_items'),all(`SELECT * FROM supply_policies${scope.clause}`,scope.args),all(`SELECT * FROM sales_demand_corrections${scope.clause}`,scope.args)]);
+   readRows('inventory_balances',skuFilter,true),readRows('sku_settings'),readRows('production_batches'),
+   readRows('series_production_orders',`id IN (SELECT production_order_id FROM series_production_order_items WHERE ${skuFilter})`),
+   readRows('series_production_order_items'),readRows('series_purchase_order_items'),
+   readRows('shipment_batches',`id IN (SELECT batch_id FROM shipment_batch_items WHERE ${skuFilter})`),readRows('shipment_batch_items'),
+   readRows('transport_legs',`id IN (SELECT leg_id FROM transport_leg_items WHERE ${skuFilter})`),readRows('transport_batch_items'),
+   readRows('transport_leg_items'),readRows('shipment_receipt_items',`batch_item_id IN (SELECT id FROM shipment_batch_items WHERE ${skuFilter})`),
+   readRows('supply_policies',skuFilter,true),readRows('sales_demand_corrections',skuFilter,true)
+ ]);
  const purchaseItemById=new Map<string,AnyRow>(purchaseItems.map((r:AnyRow)=>[r.id,r]));
  const shippedByProductionItem=new Map<string,number>();for(const r of shipmentItemRows)shippedByProductionItem.set(r.production_order_item_id,(shippedByProductionItem.get(r.production_order_item_id)||0)+Number(r.shipped_qty));for(const r of transportItemRows)shippedByProductionItem.set(r.production_order_item_id,(shippedByProductionItem.get(r.production_order_item_id)||0)+Number(r.shipped_qty));
     const cutoff28 = chinaDate(-56);
     const [salesDaily, importCoverage] = await Promise.all([
-      all(`SELECT business_date,site,channel,sku,SUM(qty) qty FROM sales_records${scope.clause ? scope.clause + " AND " : " WHERE "}reversed_at IS NULL AND business_date>=? AND business_date<=? AND qty>0 GROUP BY business_date,site,channel,sku`, [...scope.args,cutoff28,chinaDate(-1)]),
+      all(`SELECT business_date,site,channel,sku,SUM(qty) qty FROM sales_records${scope.clause ? scope.clause + " AND " : " WHERE "}reversed_at IS NULL AND business_date>=? AND business_date<=? AND qty>0 ${keys?" AND "+skuFilter:""} GROUP BY business_date,site,channel,sku`, [...scope.args,cutoff28,chinaDate(-1),...skuArgs]),
       all(`SELECT site,channel,COUNT(DISTINCT business_date) data_days,MAX(business_date) last_sale_date,GROUP_CONCAT(DISTINCT business_date) imported_dates FROM sales_imports${scope.clause ? scope.clause + " AND " : " WHERE "}reversed_at IS NULL AND report_kind IN ('complete','zero') AND NOT EXISTS(SELECT 1 FROM sales_records r WHERE r.site=sales_imports.site AND r.channel=sales_imports.channel AND r.business_date=sales_imports.business_date AND r.qty>0 AND r.reversed_at IS NULL GROUP BY r.sku HAVING COUNT(DISTINCT r.import_id)>1) AND business_date>=? AND business_date<=? GROUP BY site,channel`, [...scope.args,cutoff28,chinaDate(-1)]),
     ]);
     const dayKeys = Array.from({length:56},(_,index)=>chinaDate(index-56));
@@ -36,8 +51,8 @@ export async function loadForecast(db:any,actor:any,asOf?:string,focusKey?:strin
       dailySales.set(key,values);
     }
     // Wholesale demand follows the actual stock allocation, not two copies of the sale.
-    const wholesaleDaily=await all(`SELECT s.business_date date,i.sku,j.value allocation,1 direction FROM wholesale_shipment_items si JOIN wholesale_shipments s ON s.id=si.shipment_id JOIN wholesale_order_items i ON i.id=si.order_item_id JOIN json_each(si.allocations_json) j WHERE s.business_date BETWEEN ? AND ? UNION ALL SELECT r.business_date,i.sku,j.value,-1 FROM wholesale_returns r JOIN wholesale_order_items i ON i.id=r.order_item_id JOIN json_each(r.allocations_json) j WHERE r.business_date BETWEEN ? AND ?`,[cutoff28,asOf,cutoff28,asOf]);
-    const wholesaleStarts=await all(`SELECT i.sku,json_extract(j.value,'$.channel') channel,MIN(s.business_date) first_date FROM wholesale_shipment_items si JOIN wholesale_shipments s ON s.id=si.shipment_id JOIN wholesale_order_items i ON i.id=si.order_item_id JOIN json_each(si.allocations_json) j GROUP BY i.sku,json_extract(j.value,'$.channel')`);
+    const wholesaleDaily=await all(`SELECT s.business_date date,i.sku,j.value allocation,1 direction FROM wholesale_shipment_items si JOIN wholesale_shipments s ON s.id=si.shipment_id JOIN wholesale_order_items i ON i.id=si.order_item_id JOIN json_each(si.allocations_json) j WHERE s.business_date BETWEEN ? AND ? ${keys?" AND i."+skuFilter:""} UNION ALL SELECT r.business_date,i.sku,j.value,-1 FROM wholesale_returns r JOIN wholesale_order_items i ON i.id=r.order_item_id JOIN json_each(r.allocations_json) j WHERE r.business_date BETWEEN ? AND ? ${keys?" AND i."+skuFilter:""}`,[cutoff28,asOf,...skuArgs,cutoff28,asOf,...skuArgs]);
+    const wholesaleStarts=await all(`SELECT i.sku,json_extract(j.value,'$.channel') channel,MIN(s.business_date) first_date FROM wholesale_shipment_items si JOIN wholesale_shipments s ON s.id=si.shipment_id JOIN wholesale_order_items i ON i.id=si.order_item_id JOIN json_each(si.allocations_json) j ${keys?" WHERE i."+skuFilter:""} GROUP BY i.sku,json_extract(j.value,'$.channel')`,skuArgs);
     const offlineSales=new Map<string,number[]>(),offlineStarts=new Map<string,string>(wholesaleStarts.map(r=>[`印尼|${r.channel}|${r.sku}`,r.first_date]));
     for(const row of wholesaleDaily){const a=parseJson<AnyRow>(row.allocation,{}),key=`印尼|${a.channel}|${row.sku}`,index=dayIndex.get(row.date);if(index===undefined)continue;const values=offlineSales.get(key)??Array(56).fill(0);values[index]+=Number(a.qty||0)*row.direction;offlineSales.set(key,values);}
     const coverage = new Map<string,AnyRow>(importCoverage.map((row:AnyRow)=>[`${row.site}|${row.channel}`,row]));
@@ -105,7 +120,8 @@ export async function loadForecast(db:any,actor:any,asOf?:string,focusKey?:strin
     };
     const inventoryByKey=new Map<string,AnyRow>(inventory.map((row)=>[`${row.site}|${row.channel}|${row.sku}`,row]));
     const suggestionKeys=new Set<string>([...inventoryByKey.keys(),...dailySales.keys(),...offlineSales.keys(),...seaTransit.keys(),...productionPipeline.keys(),...warehousePending.keys()].filter(visibleKey));
-    const suggestions:AnyRow[] = (focusKey?(suggestionKeys.has(focusKey)?[focusKey]:[]):[...suggestionKeys]).map((key) => {
+    const selectedKeys=typeof focusKey==="string"?[focusKey]:keys??suggestionKeys;
+    const suggestions:AnyRow[] = [...selectedKeys].filter(key=>suggestionKeys.has(key)).map((key) => {
       const [site,channel,sku]=key.split("|");
       const setting = settings.get(sku) ?? {};
       const row:AnyRow=inventoryByKey.get(key)??{site,channel,sku,name:setting.name??"",qty:0,updated_at:""};

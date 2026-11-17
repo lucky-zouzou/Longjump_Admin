@@ -147,7 +147,7 @@ export default function ContentCenter({initialId='',tasks=[]}:{initialId?:string
   <nav aria-label="内容工作区">{tabOrder.map(i=><button key={i} aria-current={i===tab?'page':undefined} disabled={!!form||materialDirty} onClick={()=>go(i)}>{tabs[i]}</button>)}</nav>
   {notice&&<p role="status">{notice}</p>}{error&&!form&&<p className="cc-error" role="alert">{error}</p>}
   {form&&<div ref={formBox}><ContentForm key={form.operationId} initial={form} data={data} error={error} busy={busy} onClose={()=>{setForm(null);setError('');}} onSave={save}/></div>}
-  <fieldset disabled={!!form} className="cc-body">{tab===5?<ContentMaterials data={data} onDirty={setMaterialDirty} refreshKey={materialRefresh}/>:tab===6?<ContentCompass sites={data.sites} refreshKey={materialRefresh}/>:<div className="cc-filters">
+  <fieldset disabled={!!form} className="cc-body">{tab===5?<ContentMaterials data={data} onDirty={setMaterialDirty} refreshKey={materialRefresh}/>:tab===6?<ContentCompass sites={data.sites} reportSites={camera?data.sites:data.writeSites} refreshKey={materialRefresh}/>:<div className="cc-filters">
     <input aria-label="搜索内容" placeholder="搜索 SKU、卖点、脚本或账号" value={filter} onChange={e=>setFilter(e.target.value)}/>
     <select aria-label="筛选站点" value={site} onChange={e=>setSite(e.target.value)}><option value="">全部站点</option>{data.sites.map((s:string)=><option key={s}>{s}</option>)}</select>
     <select aria-label="筛选来源" value={source} onChange={e=>setSource(e.target.value)}><option value="">全部来源</option>{Object.entries(sourceLabels).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select>

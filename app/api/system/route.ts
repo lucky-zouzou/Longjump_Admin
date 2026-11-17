@@ -18,6 +18,7 @@ import {validateImportRows} from "../../../lib/tabular-import.mjs";
 import {checkPlanInventory,confirmPlanInventory,reviewedInventoryGuards} from "../../../lib/plan-integrity.mjs";
 import {systemChecks} from "../../../lib/system-checks.mjs";
 import {saveForecastData} from "../../../lib/forecast-management.mjs";
+import {queueForecastKeys,rankProductionOrders} from "../../../lib/production-priority.mjs";
 import {loadForecast} from "../../../lib/forecast";
 import { PLAN_ACTIONS, managePlan } from "../../../lib/plan-changes.mjs";
 import { resolveInventoryHoldSources, transportCompletionStatements } from "../../../lib/inventory-holds.mjs";
@@ -289,7 +290,7 @@ export async function GET(request:Request) {
       rows.push({...item,allocations,orderedQty:Number(purchaseItem.ordered_qty||item.planned_qty||0),visiblePlanned:actor.role==="运营"?allocations.reduce((sum,row)=>sum+Number(row.qty||0),0):Number(item.planned_qty||0),visibleProduced,shippedQty:shippedByProductionItem.get(item.id)??0,remainingToShip:Math.max(0,Number(item.produced_qty||0)-(shippedByProductionItem.get(item.id)??0))});
       productionItemsByOrder.set(item.production_order_id,rows);
     }
-    const productionOrders:AnyRow[]=productionOrderRows.map((order):AnyRow=>{
+    let productionOrders:AnyRow[]=productionOrderRows.map((order):AnyRow=>{
       const items=productionItemsByOrder.get(order.id)??[];
       const producedVariance=Number(order.total_produced_qty||0)!==Number(order.total_planned_qty||0);
       return {...order,workflowVersion:purchaseOrderRows.find(p=>p.id===order.purchase_order_id)?.workflow_version||0,items,visiblePlannedQty:items.reduce((sum,row)=>sum+Number(row.visiblePlanned||0),0),visibleProducedQty:items.reduce((sum,row)=>sum+Number(row.visibleProduced||0),0),remainingToShip:items.reduce((sum,row)=>sum+Number(row.remainingToShip||0),0),producedVariance,evidence:parseJson(order.evidence_json,[])};
@@ -408,6 +409,12 @@ export async function GET(request:Request) {
     });
 
     const {suggestions,salesDaily,policies}=!module||["overview","suggestions","monthly"].includes(module)?await loadForecast(database(),actor):{suggestions:[] as AnyRow[],salesDaily:[] as AnyRow[],policies:[] as AnyRow[]};
+
+    if ((!module||module==="monthly"||module==="fulfillment")&&canReadDomain(actor.role,"fulfillment")) {
+      const keys=queueForecastKeys(productionOrders);
+      const queueForecasts=module==="fulfillment"&&keys.size?(await loadForecast(database(),actor,undefined,keys)).suggestions:suggestions;
+      productionOrders=rankProductionOrders(productionOrders,queueForecasts,actor.role);
+    }
 
     const currentMonth = monthKey();
     const submittedSet = new Set(submissionScopeRows.filter((r) => r.month === currentMonth).map((r) => `${r.site}|${r.channel}`));

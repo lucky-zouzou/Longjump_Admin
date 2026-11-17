@@ -15,7 +15,7 @@ export async function GET(request:Request){
     const data=query.get('view')==='compass'
       ?await readContentCompass(database(),actor,query.get('period')||'month')
       :query.get('view')==='report-history'?await reportHistory(database(),actor,query.get('site'),query.get('start'),query.get('end'),query.get('videoId'),Number(query.get('offset')||0))
-      :query.get('view')==='platform-report'?await readPlatformReports(database(),actor,query.get('site'),Number(query.get('offset')||0))
+      :query.get('view')==='platform-report'?await readPlatformReports(database(),actor,query.get('site'),Number(query.get('offset')||0),query.get('period')||'all')
       :await readCenter(database(),actor);
     return Response.json(data,{headers});
   }
@@ -35,8 +35,9 @@ export async function POST(request:Request){
       return Response.json(await mutateCenter(database(),actor,form,{bucket,file}),{headers});
     }
     const raw=await request.text();
-    if(raw.length>240000)return Response.json({error:'请缩短表单内容'},{status:413});
+    if(raw.length>3*1024*1024)return Response.json({error:'请缩短表单内容'},{status:413});
     let form;try{form=JSON.parse(raw);}catch{return Response.json({error:'表单格式无效'},{status:400});}
+    if(raw.length>240000&&!['previewPlatformReport','importPlatformReport'].includes(form?.action))return Response.json({error:'请缩短表单内容'},{status:413,headers});
     return Response.json(form?.action==='previewPlatformReport'?await previewReport(database(),actor,form):await mutateCenter(database(),actor,form),{headers});
   }catch(e){return failure(e);}
 }

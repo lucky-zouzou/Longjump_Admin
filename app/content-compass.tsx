@@ -1,5 +1,6 @@
 "use client";
 import {useEffect,useState} from 'react';
+import {PlatformReports} from './content-platform-reports';
 import {parseWorkspaceResponse} from '../lib/workspace-response.mjs';
 
 type SiteRow={site:string;videos:number;views:number|null;orders:number|null;gmvMinor:number|null;
@@ -19,7 +20,7 @@ function Measure({rows,metric}:{rows:SiteRow[];metric:typeof indicators[number]}
     {known<videos&&<small>{known?'已知小计 · ':''}{videos-known-fx>0?(videos-known-fx)+' 条待补录':''}{fx>0?' '+fx+' 条待核汇率':''}</small>}</>;
 }
 
-export function ContentCompass({sites,refreshKey}:{sites:string[];refreshKey:number}){
+export function ContentCompass({sites,reportSites,refreshKey}:{sites:string[];reportSites:string[];refreshKey:number}){
   const [period,setPeriod]=useState('month'),[site,setSite]=useState(''),[attempt,retry]=useState(0);
   const [result,setResult]=useState<{period:string;rows:SiteRow[]}|null>(null),[error,setError]=useState('');
   useEffect(()=>{
@@ -43,5 +44,6 @@ export function ContentCompass({sites,refreshKey}:{sites:string[];refreshKey:num
       <h4>各站点数据明细</h4><div className="cc-table-scroll"><table><thead><tr><th>站点</th><th>播放量</th><th>出单量</th><th>GMV（人民币）</th></tr></thead>
         <tbody>{rows.map(row=><tr key={row.site}><th scope="row">{row.site}</th>{indicators.map(m=><td key={m.field}><Measure rows={[row]} metric={m}/></td>)}</tr>)}</tbody></table></div>
       <p>每条视频取已录入的最长累计窗口，同一窗口取最新修订。GMV 按发布月的财务汇率折算，缺报或缺汇率的部分单独标明。</p></>}
+    {reportSites.length>0&&(!site||reportSites.includes(site))&&<PlatformReports key={period+'/'+site} site={site} period={period} refreshKey={refreshKey}/>}
   </section>;
 }
