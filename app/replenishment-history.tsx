@@ -14,9 +14,11 @@ const statusLabels:Record<string,string>={approved:'已批准',pending:'待审�
 const fmt=(value:number|null)=>value===null?'—':value.toLocaleString('zh-CN');
 const time=(value:string)=>{const d=new Date(value);return Number.isFinite(d.valueOf())?d.toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false}):'时间待核实';};
 
-export default function ReplenishmentHistory({actor,currentMonth,refreshToken}:{actor:Actor;currentMonth:string;refreshToken:string}){
+export default function ReplenishmentHistory({actor,currentMonth,refreshToken,initial}:{actor:Actor;currentMonth:string;refreshToken:string;initial?:{scope:string;month:string}}){
   const lastMonth=previousPlanMonth(currentMonth),id=useId(),restricted=actor.role==='运营';
-  const [open,setOpen]=useState(false),[month,setMonth]=useState(lastMonth),[site,setSite]=useState(''),[channel,setChannel]=useState('');
+  const [requestedSite,requestedChannel]=String(initial?.scope||'').split('|');
+  const [open,setOpen]=useState(Boolean(initial)),[month,setMonth]=useState(initial&&/^20\d{2}-(0[1-9]|1[0-2])$/.test(initial.month)?initial.month:lastMonth);
+  const [site,setSite]=useState(HISTORY_SITES.includes(requestedSite)?requestedSite:''),[channel,setChannel]=useState(HISTORY_CHANNELS.includes(requestedChannel)?requestedChannel:'');
   const [search,setSearch]=useState(''),[page,setPage]=useState(1),[reload,setReload]=useState(0);
   const [response,setResponse]=useState<{key:string;data?:History;error?:string}|null>(null);
   const query=new URLSearchParams({month,site:restricted?actor.site||'':site,channel:restricted?actor.channel||'':channel}).toString();

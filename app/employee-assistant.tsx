@@ -10,16 +10,30 @@ type Topic={scope:'internal'|'public';key:string;title:string};
 type Mode='auto'|'internal'|'public';
 type Home={edition?:string;revision?:string;role:string;intro:string;dailyGuide?:string;suggestions?:Entry[];guides:Entry[];recent:Topic[]};
 type Citation={start:number;end:number;url:string;title:string};
-type Answer={ledger?:{page:string;label:string;view?:string}|null;questions?:string[];topic?:Topic;saved?:boolean;verifiedAt?:string;citations?:Citation[];choices?:Entry[];step?:number;answer:string;notice:string;source:string;intent:string;guide:(Entry & {steps:string[];next:string;page:string})|null};
-type Turn={question:string;reply:Answer;encouragement:string};
-type AskOptions={previous?:string;previousStep?:number;guideId?:string;mode?:Mode;knowledgeId?:string};
-const sources:Record<string,string>={'ledger':'业务台账','conversation':'小品同学','unavailable':'小品同学','knowledge':'公司知识库','openai':'模型匹配 · 岗位手册','public-data':'公开数据源','public-web':'公开网页检索','public-unavailable':'外部资料查询'};
+type DecisionContext={month:string;channel:string;site:string;metric:string;order:string;selectedSites?:string[];aggregate?:boolean;byPlatform?:boolean;targetRanking?:boolean};
+type PlanContext={site:string;channel:string;month:string};
+type ProductionContext={site:string;channel:string;sku:string};
+type Answer={learnable?:boolean;personalMatch?:boolean;planContext?:PlanContext;brief?:{period:string;details:string[]};productionContext?:ProductionContext;decisionContext?:DecisionContext;ledger?:{page:string;label:string;view?:string;month?:string;entity?:string}|null;questions?:string[];topic?:Topic;saved?:boolean;verifiedAt?:string;citations?:Citation[];choices?:Entry[];step?:number;answer:string;notice:string;source:string;intent:string;guide:(Entry & {steps:string[];next:string;page:string})|null};
+type Turn={id:string;question:string;reply:Answer;encouragement:string};
+type AskOptions={planContext?:PlanContext;productionContext?:ProductionContext;decisionContext?:DecisionContext;previous?:string;previousStep?:number;guideId?:string;mode?:Mode;knowledgeId?:string};
+const sources:Record<string,string>={'learned-guide':'学过的问法 · 岗位手册','ledger':'业务台账','conversation':'小品同学','unavailable':'小品同学','knowledge':'公司知识库','openai':'模型匹配 · 岗位手册','public-data':'公开数据源','public-web':'公开网页检索','public-unavailable':'外部资料查询'};
 function currentStep(reply?:Answer){
   if(reply?.intent!=='step'||!reply.guide)return 0;
   return reply.step??reply.guide.steps.indexOf(reply.answer)+1;
 }
 
 function CitedAnswer({reply}:{reply:Answer}){
+  if(reply.brief){
+    const [headline,...reasons]=reply.answer.split('\n');
+    return <div className="employee-brief">
+      <p className="employee-result"><strong>{headline}</strong></p>
+      {reasons.map((line,i)=><p key={i}>{line}</p>)}
+      <small>{reply.brief.period}</small>
+      {!!reply.brief.details.length&&<details><summary>查看明细和计算依据</summary>
+        <ul>{reply.brief.details.map((line,i)=><li key={i}>{line}</li>)}</ul>
+      </details>}
+    </div>;
+  }
   const links=reply.citations||[],parts:React.ReactNode[]=[];
   let offset=0;
   for(const [i,c] of [...links].sort((a,b)=>a.start-b.start).entries()){
@@ -32,6 +46,38 @@ function CitedAnswer({reply}:{reply:Answer}){
     offset=end;
   }
   parts.push(reply.answer.slice(offset));return <p className="employee-answer">{parts}</p>;
+}
+
+function GuideFeedback({question,page,reply,guides,busy,openGuide}:{question:string;page:string;reply:Answer;guides:Entry[];busy:boolean;openGuide:(g:Entry)=>void}){
+  const [editing,setEditing]=useState(false),[selected,setSelected]=useState('');
+  const [saving,setSaving]=useState(false),[known,setKnown]=useState(reply.personalMatch||false),[note,setNote]=useState('');
+  async function save(id:string,forget=false){
+    if(saving)return;
+    setSaving(true);setNote('');
+    try{
+      const r=await fetch('/api/employee-assistant?feedback=1',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({question,page,guideId:id,forget}),signal:AbortSignal.timeout(10000)});
+      const data=await r.json();
+      if(!r.ok)throw Error(data.error||'这次没记住，点一下再试试。');
+      setKnown(data.remembered);setEditing(false);
+      setNote(forget?'已撤回你的选择。':'记住这个问法啦！下次我直接找这条指引。');
+      const guide=guides.find(g=>g.id===id);
+      if(!forget&&guide&&id!==reply.guide?.id)openGuide(guide);
+    }catch(e){setNote(e instanceof Error&&e.name==='Error'?e.message:'刚才没连上，重新点一下吧。');}
+    finally{setSaving(false);}
+  }
+  return <div className="employee-feedback">
+    <div className="employee-picks">
+      {reply.guide&&!known&&<button disabled={busy||saving} onClick={()=>void save(reply.guide!.id)}>对，就是这条</button>}
+      <button disabled={busy||saving} aria-expanded={editing} onClick={()=>{setEditing(!editing);setNote('');}}>{reply.guide?'换条指引':'教小品认这个问法'}</button>
+      {known&&<button disabled={busy||saving} onClick={()=>void save('',true)}>撤回我的选择</button>}
+    </div>
+    {editing&&<div className="employee-feedback-picker"><label>这个问法对应哪条操作？
+      <select value={selected} disabled={saving} onChange={e=>setSelected(e.target.value)}><option value="">选择岗位指引</option>
+        {guides.map(g=><option key={g.id} value={g.id}>{g.title}</option>)}</select></label>
+      <button className="btn" disabled={!selected||saving||busy} onClick={()=>void save(selected)}>记住并查看</button></div>}
+    {note&&<small role="status">{note}</small>}
+  </div>;
 }
 
 function ActionCounts() {
@@ -53,7 +99,7 @@ function ActionCounts() {
   </div>;
 }
 
-export default function EmployeeAssistant({initialQuestion,page,pageTitle,close,go}:{initialQuestion:string;page:string;pageTitle:string;close:()=>void;go:(page:string, view?:string)=>void}) {
+export default function EmployeeAssistant({initialQuestion,page,pageTitle,close,go}:{initialQuestion:string;page:string;pageTitle:string;close:()=>void;go:(page:string, view?:string, month?:string, entity?:string)=>void}) {
   const dialog=useRef<HTMLDialogElement>(null);
   const input=useRef<HTMLTextAreaElement>(null);
   const pending=useRef<AbortController|null>(null);
@@ -68,10 +114,10 @@ export default function EmployeeAssistant({initialQuestion,page,pageTitle,close,
     const ctl=new AbortController();
     pending.current=ctl;setBusy(true);setError('');
     const addTurn=(reply:Answer)=>{
-      const variation=Math.random();
+      const variation=Math.random(),id=crypto.randomUUID();
       setTurns(old=>{
         const encouragement=encouragementFor(reply,old.map(t=>t.encouragement).reverse(),variation);
-        return [...old.slice(-9),{question,reply,encouragement}];
+        return [...old.slice(-9),{id,question,reply,encouragement}];
       });
     };
     try {
@@ -126,13 +172,13 @@ export default function EmployeeAssistant({initialQuestion,page,pageTitle,close,
   }
   function ask() {
     const q=(wakeQuestion(draft)??draft).trim()||(wakeQuestion(draft)===''?'在吗？':'');
-    void submit(q,{previous:last?.guide?.id,previousStep:currentStep(last),mode});
+    void submit(q,{planContext:last?.planContext,decisionContext:last?.decisionContext,productionContext:last?.productionContext,previous:last?.guide?.id||(last?.ledger?.page==='suggestions'?'production-basis':undefined),previousStep:currentStep(last),mode});
   }
   const suggestions=home?.suggestions?.length?home.suggestions:home?.guides.slice(0,2)||[];
   const query=guideSearch.trim().toLocaleLowerCase();
   const matches=home?.guides.filter(g=>g.title.toLocaleLowerCase().includes(query))||[];
   const openGuide=(g:Entry)=>void submit(guideQuestion(g.title),{guideId:g.id,mode:'internal'});
-  const follow=(question:string)=>void submit(question,{previous:last?.guide?.id,previousStep:currentStep(last),mode:'internal'});
+  const follow=(question:string)=>void submit(question,{previous:last?.guide?.id||(last?.ledger?.page==='suggestions'?'production-basis':undefined),previousStep:currentStep(last),mode:'internal'});
 
   return <dialog className="employee-dialog" ref={dialog} aria-labelledby="employee-title" onCancel={e=>{e.preventDefault();close();}}>
     <header className="employee-bar">
@@ -153,6 +199,9 @@ export default function EmployeeAssistant({initialQuestion,page,pageTitle,close,
           </button>)}</div>
           <div className="employee-picks">
             <button disabled={busy} onClick={()=>void submit('我刚来，从哪儿上手？',{mode:'internal'})}>我刚来，从哪儿上手？</button>
+            {['管理员','财务','运营主管','运营'].includes(home.role)&&<button disabled={busy} onClick={()=>void submit(home.role==='运营'?'本站本月的销售额和广告投入是多少？':'本月哪个站点的销售贡献小，广告投入占比却高？',{mode:'internal'})}>{home.role==='运营'?'本站的销售和投放怎么样？':'哪站投入多、贡献少？'}</button>}
+            {['管理员','财务','运营主管'].includes(home.role)&&<button disabled={busy} onClick={()=>void submit('今天最该盯哪件事？',{mode:'internal'})}>今天最该盯哪件事？</button>}
+            {['monthly','fulfillment','suggestions'].includes(page)&&['管理员','供应链','运营','运营主管'].includes(home.role)&&<button disabled={busy} onClick={()=>void submit('本月备货计划到哪一步了？',{mode:'internal'})}>本月备货到哪了？</button>}
             {home.dailyGuide&&<button disabled={busy} onClick={()=>void submit('我每天先忙啥？',{guideId:home.dailyGuide,mode:'internal'})}>我每天先忙啥？</button>}
           </div>
         </section>
@@ -174,14 +223,14 @@ export default function EmployeeAssistant({initialQuestion,page,pageTitle,close,
         </div>
       </>}
       {!home&&!error&&<p role="status">我翻翻岗位手册…</p>}
-      {turns.map(({question,reply,encouragement},i)=><article key={i} className="employee-turn">
+      {turns.map(({id,question,reply,encouragement})=><article key={id} className="employee-turn">
         <h3>{question}</h3>
         <small>{sources[reply.source]||'岗位手册'}{reply.saved?' · 已存入知识库':''}{reply.verifiedAt?' · '+new Date(reply.verifiedAt).toLocaleDateString('zh-CN'):''}</small>
         {reply.notice&&<p className="employee-note">{reply.notice}</p>}
         {reply.guide&&<h4>{reply.guide.title}{reply.intent==='step'&&currentStep(reply)>0&&<small>第 {currentStep(reply)} / {reply.guide.steps.length} 步</small>}{reply.intent==='handoff'&&<small>接下来谁接手</small>}</h4>}
         <CitedAnswer reply={reply}/>
-        {reply.ledger&&<button className="employee-link" onClick={()=>go(reply.ledger!.page,reply.ledger!.view)}>{reply.ledger.label} →</button>}
-        {!!reply.questions?.length&&<div className="employee-picks">{reply.questions.map(q=><button key={q} disabled={busy} onClick={()=>void submit(q,{mode:'internal'})}>{q}</button>)}</div>}
+        {reply.ledger&&<button className="employee-link" onClick={()=>go(reply.ledger!.page,reply.ledger!.view,reply.ledger!.month,reply.ledger!.entity)}>{reply.ledger.label} →</button>}
+        {!!reply.questions?.length&&<div className="employee-picks">{reply.questions.map(q=><button key={q} disabled={busy} onClick={()=>void submit(q,{mode:'internal',planContext:reply.planContext,decisionContext:reply.decisionContext})}>{q}</button>)}</div>}
         {!!reply.choices?.length&&<div className="employee-picks">{reply.choices.map(g=><button key={g.id} disabled={busy} onClick={()=>openGuide(g)}>{guideQuestion(g.title)}</button>)}</div>}
         {reply.guide&&<>
           {reply.intent!=='step'&&reply.intent!=='handoff'&&<><ol>{reply.guide.steps.map((s,n)=><li key={n}>{s}</li>)}</ol>
@@ -195,6 +244,7 @@ export default function EmployeeAssistant({initialQuestion,page,pageTitle,close,
             </div>}
           </div>
         </>}
+        {reply.learnable&&home&&<GuideFeedback question={question} page={page} reply={reply} guides={home.guides} busy={busy} openGuide={openGuide}/>}
         <p className="employee-encouragement"><WorkspaceIcon name="new-products"/>{encouragement}</p>
       </article>)}
       {busy&&<p className="employee-working" role="status">我来瞧瞧…</p>}
@@ -203,7 +253,7 @@ export default function EmployeeAssistant({initialQuestion,page,pageTitle,close,
     <form className="employee-composer" onSubmit={e=>{e.preventDefault();ask();}}>
       <div className="employee-compose-head"><label htmlFor="employee-question">{mode==='public'?'想查什么公开资料？':'想问点什么？'}</label>
         <label className="employee-scope">去哪儿找 <select aria-label="去哪儿找（查询范围）" value={mode} disabled={busy} onChange={e=>setMode(e.target.value as Mode)}>
-          <option value="auto">让小品选</option><option value="internal">系统操作</option><option value="public">外部公开资料</option></select></label>
+          <option value="auto">让小品选</option><option value="internal">内部业务与操作</option><option value="public">外部公开资料</option></select></label>
       </div>
       <div className="employee-input"><textarea ref={input} id="employee-question" maxLength={600} rows={1}
         placeholder={mode==='public'?'说个公开的话题就行，客户、订单和内部数据记得留在公司里。':'比如：'+(last?.guide?'下一步怎么做？':'我在这页先做什么？')} value={draft} disabled={busy} onChange={e=>setDraft(e.target.value)}

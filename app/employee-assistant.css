@@ -61,6 +61,12 @@
 .employee-encouragement { display: flex; align-items: baseline; gap: 7px; margin: 14px 0 0; color: #51665b; font-size: .81rem; }
 .employee-encouragement .workspace-icon { width: 13px; height: 13px; color: #947331; align-self: center; }
 .employee-answer { margin: 4px 0 8px; white-space: pre-line; }
+.employee-brief { margin: 8px 0; line-height: 1.6; }
+.employee-brief p { margin: 4px 0; }
+.employee-brief .employee-result { font-size: 1.1rem; color: var(--ink); }
+.employee-brief small { color: var(--muted); }
+.employee-brief summary { width: fit-content; cursor: pointer; color: var(--teal); padding: 6px 0; }
+.employee-brief ul { margin: 0; padding-left: 1.25rem; list-style: disc; }
 .employee-answer a, .employee-link { color: var(--teal); }
 .employee-answer a { text-decoration: underline; }
 .employee-turn ol { list-style: decimal; padding-left: 1.5em; margin: 8px 0; }
@@ -110,3 +116,9 @@
 @media (forced-colors: active) {
   .employee-input:has(textarea:focus) { outline: 2px solid Highlight; outline-offset: -2px; }
 }
+
+.employee-feedback { margin-top:12px; }
+.employee-feedback-picker { display:flex; gap:8px; flex-wrap:wrap; align-items:end; margin-top:8px; }
+.employee-feedback-picker label { display:grid; gap:4px; max-width:100%; }
+.employee-feedback-picker select { max-width:100%; }
+.employee-feedback small[role=status] { display:block; margin-top:6px; }

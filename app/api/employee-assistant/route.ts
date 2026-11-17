@@ -1,8 +1,11 @@
+import {validPlanContext} from '../../../lib/employee-plan-progress.mjs';
+import {validDecisionContext,validProductionContext} from '../../../lib/employee-decisions.mjs';
 import {database} from '../../../lib/database';
 import {employeeActionCounts} from '../../../lib/business-actions.mjs';
 import {canReadActions} from '../../../lib/business-action-model.mjs';
 import {env} from 'cloudflare:workers';
 import {requireActor,HttpError} from '../../../lib/auth';
+import {saveGuideFeedback} from '../../../lib/employee-learning.mjs';
 import {recentKnowledge} from '../../../lib/employee-knowledge.mjs';
 import {answerWithKnowledge,assistantHome} from '../../../lib/employee-assistant.mjs';
 
@@ -62,10 +65,21 @@ export async function POST(request:Request) {
       }
     }
     const actor={...identity,handbook:await currentHandbook(database())};
+    if(new URL(request.url).searchParams.has('feedback')){
+      try{return Response.json(await saveGuideFeedback(database(),actor,input),{headers});}
+      catch(error){
+        const e=error as {status?:number;message?:string};
+        if(e.status&&[400,403,409].includes(e.status))throw new HttpError(e.status,e.message||'这次没记住');
+        throw error;
+      }
+    }
     if(!input || typeof input.question!=='string' || !input.question.trim() || input.question.length>600 ||
       ['guideId','previous','page'].some(k=>input[k]!==undefined && (typeof input[k]!=='string'||input[k].length>80)))
       throw new HttpError(400,'请输入 1 至 600 字的问题');
-    if((input.previousStep!==undefined&&(!Number.isInteger(input.previousStep)||input.previousStep<0||input.previousStep>4))||
+    if((input.planContext!==undefined&&!validPlanContext(input.planContext))||
+      (input.decisionContext!==undefined&&!validDecisionContext(input.decisionContext))||
+      (input.productionContext!==undefined&&!validProductionContext(input.productionContext))||
+      (input.previousStep!==undefined&&(!Number.isInteger(input.previousStep)||input.previousStep<0||input.previousStep>4))||
       (input.mode!==undefined&&!['auto','internal','public'].includes(input.mode))||
       (input.knowledgeId!==undefined&&(typeof input.knowledgeId!=='string'||!/^[0-9a-f]{64}$/.test(input.knowledgeId))))throw new HttpError(400,'无效的知识查询');
     const configured=typeof env.readEmployeeAssistantKey==='function'?env.readEmployeeAssistantKey():env.OPENAI_API_KEY;
