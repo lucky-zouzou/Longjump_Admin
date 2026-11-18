@@ -28,6 +28,82 @@ async function setup(){
  return f;
 }
 
+test('intake review allows an omitted follow-up date for every decision and keeps undated work visible',async t=>{
+ for(const decision of ['accepted','queued','returned']){
+  const f=await setup();t.after(()=>f.sqlite.close());const row=await f.submit();
+  await f.review(row,{decision,nextAt:null});
+  const saved=f.sqlite.prepare('SELECT * FROM creator_submissions WHERE id=?').get(row.id),review=JSON.parse(saved.review_json);
+  assert.equal(saved.status,decision);assert.equal(review.nextAt,null);assert.equal(f.profile(row.creator_id).next_at,null);
+  const actor=decision==='returned'?f.users.indonesia:f.users.bd;
+  const tasks=(await readCreators(f.db,actor)).tasks.filter(task=>task.id===row.creator_id||task.submissionId===row.id);
+  assert.equal(tasks.length,1,decision);assert.equal(tasks[0].dueAt,null);assert.equal(tasks[0].overdue,false);
+  assert.equal((await creatorWorkspaceTasks(f.db,actor)).find(task=>task.entity===row.creator_id||task.entity==='submission:'+row.id).level,'amber');
+ }
+});
+
+test('optional follow-up still validates non-empty dates and does not save invalid input',async t=>{
+ const f=await setup();t.after(()=>f.sqlite.close());const row=await f.submit();
+ for(const nextAt of ['not-a-date',ago()])await assert.rejects(()=>f.review(row,{nextAt}),/时间|晚于/);
+ assert.equal(f.sqlite.prepare('SELECT version FROM creator_submissions').get().version,1);
+ await f.review(row,{nextAt:''});assert.equal(JSON.parse(f.sqlite.prepare('SELECT review_json FROM creator_submissions').get().review_json).nextAt,null);
+});
+
+const batchInput=(rows,extra={})=>({items:rows.map(r=>({submissionId:r.id,version:r.version})),decision:'accepted',nextAction:'核实合作意向，按实际条件提报',note:'已核实移交资料',...extra});
+async function twoShopSubmissions(f){
+ const otherScope=(await f.act(f.users.admin,'scope',{site:'马来西亚',platform:'TikTok',shop:'TEST-MY',operatorId:f.users.malaysia.id,bdId:f.users.other.id})).id;
+ await f.act(f.users.admin,'intakeSubmit',{rows:[f.row(),f.row({scopeId:otherScope,platformId:'other.creator'})]});
+ return f.sqlite.prepare('SELECT * FROM creator_submissions ORDER BY scope_id').all();
+}
+
+test('batch acceptance preserves per-shop BD ownership, audit history and finance approval boundaries',async t=>{
+ const f=await setup();t.after(()=>f.sqlite.close());const rows=await twoShopSubmissions(f);
+ const result=await f.act(f.users.admin,'intakeReviewBatch',batchInput(rows));assert.equal(result.processed,2);
+ for(const row of rows){
+  const saved=f.sqlite.prepare('SELECT * FROM creator_submissions WHERE id=?').get(row.id),scope=f.sqlite.prepare('SELECT * FROM creator_scopes WHERE id=?').get(row.scope_id),review=JSON.parse(saved.review_json),profile=f.profile(row.creator_id);
+  assert.equal(saved.status,'accepted');assert.equal(saved.version,2);assert.equal(review.nextOwner,scope.bd_id);assert.equal(review.batchId,result.batchId);assert.equal(review.nextAt,null);
+  assert.equal(profile.owner_bd_id,scope.bd_id);assert.equal(profile.bd_stage,'deep_ready');assert.ok(profile.accepted_at);
+  assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM creator_submission_history WHERE submission_id=?').get(row.id).n,2);
+ }
+ for(const table of ['creator_rounds','creator_finance','sales_records','inventory_movements'])assert.equal(f.sqlite.prepare(`SELECT COUNT(*) n FROM ${table}`).get().n,0,table);
+ await assert.rejects(()=>f.act(f.users.admin,'intakeReviewBatch',batchInput(rows)),/已更新/);
+ assert.equal(f.sqlite.prepare("SELECT COUNT(*) n FROM creator_events WHERE action='accept'").get().n,2);
+});
+
+test('batch review rejects unauthorized, stale, duplicate and oversized selections without partial saves',async t=>{
+ const f=await setup();t.after(()=>f.sqlite.close());const rows=await twoShopSubmissions(f);
+ const input=batchInput(rows);
+ await assert.rejects(()=>f.act(f.users.bd,'intakeReviewBatch',input),/权限/);
+ await assert.rejects(()=>f.act(f.users.indonesia,'intakeReviewBatch',input),/仅负责BD/);
+ await assert.rejects(()=>f.act(f.users.finance,'intakeReviewBatch',input),/仅负责BD/);
+ await assert.rejects(()=>f.act(f.users.admin,'intakeReviewBatch',{...input,items:[input.items[0],{...input.items[1],version:0}]}),/第2条.*已更新.*本批未保存/);
+ await assert.rejects(()=>f.act(f.users.admin,'intakeReviewBatch',{...input,items:[input.items[0],input.items[0]]}),/重复/);
+ await assert.rejects(()=>f.act(f.users.admin,'intakeReviewBatch',{...input,items:Array(51).fill(input.items[0])}),/50/);
+ await assert.rejects(()=>f.act(f.users.admin,'intakeReviewBatch',{...input,items:[]}),/50/);
+ assert.equal(f.sqlite.prepare("SELECT COUNT(*) n FROM creator_submissions WHERE status='pending' AND version=1").get().n,2);
+ assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM creator_submission_history').get().n,2);
+ assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM creator_profiles WHERE accepted_at IS NOT NULL').get().n,0);
+});
+
+test('lead can batch assign, defer and return to each source operator without a mandatory date',async t=>{
+ const f=await setup();t.after(()=>f.sqlite.close());let rows=await twoShopSubmissions(f);
+ await f.act(f.users.admin,'leadAssignment',{userId:f.users.bd.id,active:true,note:'TEST任命'});
+ await f.act(f.users.bd,'intakeReviewBatch',batchInput(rows,{decision:'queued',ownerId:f.users.other.id}));
+ assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM creator_profiles WHERE owner_bd_id=? AND accepted_at IS NULL').get(f.users.other.id).n,2);
+ rows=f.sqlite.prepare('SELECT * FROM creator_submissions').all();
+ await f.act(f.users.bd,'intakeReviewBatch',batchInput(rows,{decision:'returned'}));
+ for(const row of rows){const saved=f.sqlite.prepare('SELECT * FROM creator_submissions WHERE id=?').get(row.id);assert.equal(saved.status,'returned');assert.equal(JSON.parse(saved.review_json).nextOwner,row.submitter_id);}
+});
+
+test('batch review of multiple requests for one creator does not duplicate profiles or follow-up tasks',async t=>{
+ const f=await setup();t.after(()=>f.sqlite.close());
+ await f.act(f.users.indonesia,'intakeSubmit',{rows:[f.row(),f.row({requestKind:'paid',reason:'洽谈付费合作'})]});
+ const rows=f.sqlite.prepare('SELECT * FROM creator_submissions').all();
+ const result=await f.act(f.users.bd,'intakeReviewBatch',batchInput(rows));assert.equal(result.processed,2);
+ assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM creator_profiles').get().n,1);
+ assert.equal(f.sqlite.prepare("SELECT COUNT(*) n FROM creator_submissions WHERE status='accepted'").get().n,2);
+ assert.equal((await creatorWorkspaceTasks(f.db,f.users.bd)).length,1);
+});
+
 test('new and legacy import headers retain missing values, comma styles and explicit money currency',()=>{
  const row=mapIntakeRow({'创建日期':'2026-11-03','月份':'2026-11','国家':'印尼','达人id':' @TEST ','TK主页链接':proof,'近30天GMV（元）':'120000','视频风格/视频类型评估（多选，逗号分隔）':'真人出镜+产品展示，不口播,会自己根据产品创作','运营评估等级':'S-重点潜力'},{scopeId:'scope'});
  assert.throws(()=>normalizeIntake(row,'2026-11-04'),/原币种/);
