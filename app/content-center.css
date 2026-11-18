@@ -78,6 +78,7 @@
 .cc-compass th:first-child {text-align:left}
 .cc-compass-fx summary {cursor:pointer;color:#284e77;font-weight:600}
 .cc-compass-fx td {white-space:nowrap}
+.cc-report-video-link {color:#245ba8;text-decoration:underline;text-underline-offset:3px;overflow-wrap:anywhere}
 @media(max-width:640px){.cc-compass-cards{grid-template-columns:1fr}.cc-compass-cards article{padding:12px}.cc-compass-filters{gap:8px}}
 
 .cc-reference-upload label{display:grid;gap:6px}.cc-reference-upload .btn{justify-self:start;margin-top:6px}
