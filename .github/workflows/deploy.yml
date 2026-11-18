@@ -1,4 +1,4 @@
-name: Recover verified production release
+name: Inspect storage cleanup candidates
 on:
   workflow_dispatch:
 permissions:
@@ -7,9 +7,9 @@ concurrency:
   group: production-refs/heads/main
   cancel-in-progress: false
 jobs:
-  recover:
+  inspect:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - name: Setup SSH
         run: |
@@ -29,28 +29,30 @@ jobs:
             StrictHostKeyChecking yes
           EOF
 
-      - name: Verify completed backup and activate the tested release
+      - name: Inspect storage and backup inventory without changing data
         run: |
-          ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes root@47.238.71.113 'bash -s' -- "$GITHUB_RUN_ID" <<'REMOTE'
-          set -euo pipefail
-          attempt=$1
-          release=5647c055a2a5effce3664204bc89d97eff505882
-          cd /root/loong-jump-v17
-          docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' loong-jump-v17-app-1 | grep -Fxq 'LOONGJUMP_RELEASE=6b7fd2dc449150a2afa0a287c2fe87afa2689b7a'
-          docker image inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "loongjump-release:$release" | grep -Fxq "LOONGJUMP_RELEASE=$release"
-          printf '%s\n' '9a3cb0297cf4c6f79dcfd0d4667f0e75a2905ec7e54a2e7f876bc060ada3d820  scripts/activate-release.sh' | sha256sum -c -
-          docker compose exec -T app node server/cli.mjs verify --input /backups/pre-5647c055a2a5effce3664204bc89d97eff505882-recovery-44264931206.tar </dev/null
-          bash scripts/activate-release.sh "$release" "$attempt" </dev/null
-          docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' loong-jump-v17-app-1 | grep '^LOONGJUMP_RELEASE='
-          df -h /
+          ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes root@47.238.71.113 'python3 -' <<'REMOTE'
+          import os,json,subprocess,time,stat
+          from pathlib import Path
+          def run(args):
+              p=subprocess.run(args,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
+              print(json.dumps({'command':args,'code':p.returncode,'output':p.stdout},ensure_ascii=False))
+          run(['date','-u','+%Y-%m-%dT%H:%M:%SZ'])
+          run(['df','-h','/'])
+          run(['docker','system','df'])
+          run(['du','-xhd1','/root','/var','/tmp','/var/cache','/var/log'])
+          run(['docker','ps','-a','--format','{{.Names}} | {{.Status}} | {{.Image}}'])
+          run(['docker','image','ls','--format','{{.Repository}}:{{.Tag}} | {{.ID}} | {{.Size}}'])
+          run(['journalctl','--disk-usage'])
+          run(['docker','exec','loong-jump-v17-app-1','sh','-c','printenv | grep -E "^LOONGJUMP_BACKUP_(RETENTION_DAYS|MONTHLY_KEEP_MONTHS)=" || true'])
+          root=Path('/root/loong-jump-v17/backups')
+          rows=[]
+          for p in sorted(root.iterdir()):
+              st=p.lstat()
+              rows.append({'name':p.name,'bytes':st.st_size,'mtime':time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime(st.st_mtime)),'regular':stat.S_ISREG(st.st_mode),'symlink':p.is_symlink()})
+          print(json.dumps({'backup_inventory':rows},ensure_ascii=False))
+          for path in ['/root/loong-jump-v17/release-images','/root/.cache','/root/.npm','/var/cache/apt/archives']:
+              root=Path(path)
+              if root.exists():
+                  run(['du','-xhd1',path])
           REMOTE
-      - name: Verify the exact production release
-        run: |
-          for i in $(seq 1 30); do
-            if curl --fail --silent --show-error --max-time 15 https://admin.loongjump.com/healthz | python3 -c 'import json,sys; r=json.load(sys.stdin); sys.exit(0 if r.get("ok") is True and r.get("release")=="5647c055a2a5effce3664204bc89d97eff505882" else 1)'; then
-              echo 'Expected release is healthy'
-              exit 0
-            fi
-            sleep 5
-          done
-          echo 'Expected release did not become healthy'; exit 1
