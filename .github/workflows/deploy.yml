@@ -1,12 +1,15 @@
-name: Inspect production storage
+name: Recover verified production release
 on:
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: production-refs/heads/main
+  cancel-in-progress: false
 jobs:
-  inspect:
+  recover:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Setup SSH
         run: |
@@ -26,15 +29,32 @@ jobs:
             StrictHostKeyChecking yes
           EOF
 
-      - name: Read production storage metadata
+      - name: Reclaim unused application images and back up current data
         run: |
-          ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes root@47.238.71.113 'bash -s' <<'REMOTE'
-          set -eu
-          df -h /
-          df -i /
-          docker system df
+          ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes root@47.238.71.113 'bash -s' -- "$GITHUB_RUN_ID" <<'REMOTE'
+          set -euo pipefail
+          attempt=$1
+          release=5647c055a2a5effce3664204bc89d97eff505882
           cd /root/loong-jump-v17
-          du -xhd1 /root/loong-jump-v17 /var/lib/docker 2>/dev/null | sort -h
-          docker inspect loong-jump-v17-app-1 --format '{{range .Mounts}}{{println .Source " -> " .Destination}}{{end}}'
-          bash scripts/cleanup-images.sh
+          docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' loong-jump-v17-app-1 | grep -Fxq 'LOONGJUMP_RELEASE=6b7fd2dc449150a2afa0a287c2fe87afa2689b7a'
+          docker image inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "loongjump-release:$release" | grep -Fxq "LOONGJUMP_RELEASE=$release"
+          printf '%s\n' '9a3cb0297cf4c6f79dcfd0d4667f0e75a2905ec7e54a2e7f876bc060ada3d820  scripts/activate-release.sh' '7e857eb104c04d7a9074d9ecbd24ce5f7b8eabf47602b14cc4f894242ff06a12  scripts/cleanup-images.sh' | sha256sum -c -
+          bash scripts/cleanup-images.sh --apply --keep 1
+          df -h /
+          free_bytes=$(df -B1 --output=avail / | tail -n 1 | tr -d ' ')
+          data_bytes=$(du -sb /var/lib/docker/volumes/loong-jump-v17_company_data/_data | cut -f1)
+          test "$free_bytes" -gt "$((data_bytes + 536870912))" || { echo 'Insufficient space for verified backup plus reserve'; exit 1; }
+          docker compose exec -T app node server/cli.mjs backup --output "/backups/pre-$release-recovery-$attempt.tar"
+          bash scripts/activate-release.sh "$release" "$attempt"
+          df -h /
           REMOTE
+      - name: Verify the exact production release
+        run: |
+          for i in $(seq 1 30); do
+            if curl --fail --silent --show-error --max-time 15 https://admin.loongjump.com/healthz | python3 -c 'import json,sys; r=json.load(sys.stdin); sys.exit(0 if r.get("ok") is True and r.get("release")=="5647c055a2a5effce3664204bc89d97eff505882" else 1)'; then
+              echo 'Expected release is healthy'
+              exit 0
+            fi
+            sleep 5
+          done
+          echo 'Expected release did not become healthy'; exit 1
