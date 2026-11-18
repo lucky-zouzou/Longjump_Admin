@@ -1,4 +1,4 @@
-name: Inspect storage cleanup candidates
+name: Clean rebuildable files and verify backup retention plan
 on:
   workflow_dispatch:
 permissions:
@@ -7,9 +7,9 @@ concurrency:
   group: production-refs/heads/main
   cancel-in-progress: false
 jobs:
-  inspect:
+  prepare:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Setup SSH
         run: |
@@ -29,30 +29,45 @@ jobs:
             StrictHostKeyChecking yes
           EOF
 
-      - name: Inspect storage and backup inventory without changing data
+      - name: Clean rebuildable files and prepare verified backup plan
         run: |
           ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes root@47.238.71.113 'python3 -' <<'REMOTE'
-          import os,json,subprocess,time,stat
+          import os,json,subprocess,stat,time,hashlib
           from pathlib import Path
           def run(args):
-              p=subprocess.run(args,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
-              print(json.dumps({'command':args,'code':p.returncode,'output':p.stdout},ensure_ascii=False))
-          run(['date','-u','+%Y-%m-%dT%H:%M:%SZ'])
-          run(['df','-h','/'])
-          run(['docker','system','df'])
-          run(['du','-xhd1','/root','/var','/tmp','/var/cache','/var/log'])
-          run(['docker','ps','-a','--format','{{.Names}} | {{.Status}} | {{.Image}}'])
-          run(['docker','image','ls','--format','{{.Repository}}:{{.Tag}} | {{.ID}} | {{.Size}}'])
-          run(['journalctl','--disk-usage'])
-          run(['docker','exec','loong-jump-v17-app-1','sh','-c','printenv | grep -E "^LOONGJUMP_BACKUP_(RETENTION_DAYS|MONTHLY_KEEP_MONTHS)=" || true'])
-          root=Path('/root/loong-jump-v17/backups')
-          rows=[]
-          for p in sorted(root.iterdir()):
-              st=p.lstat()
-              rows.append({'name':p.name,'bytes':st.st_size,'mtime':time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime(st.st_mtime)),'regular':stat.S_ISREG(st.st_mode),'symlink':p.is_symlink()})
-          print(json.dumps({'backup_inventory':rows},ensure_ascii=False))
-          for path in ['/root/loong-jump-v17/release-images','/root/.cache','/root/.npm','/var/cache/apt/archives']:
-              root=Path(path)
-              if root.exists():
-                  run(['du','-xhd1',path])
+              p=subprocess.run(args,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,stdin=subprocess.DEVNULL)
+              print(json.dumps({'command':args,'code':p.returncode,'output':p.stdout},ensure_ascii=False),flush=True)
+              if p.returncode: raise SystemExit(p.returncode)
+              return p.stdout
+          root=Path('/root/loong-jump-v17')
+          expected='7e857eb104c04d7a9074d9ecbd24ce5f7b8eabf47602b14cc4f894242ff06a12'
+          assert hashlib.sha256((root/'scripts/cleanup-images.sh').read_bytes()).hexdigest()==expected
+          run(['df','-B1','/'])
+          run(['bash',str(root/'scripts/cleanup-images.sh'),'--apply','--keep','1'])
+          if Path('/usr/bin/dnf').is_file(): run(['/usr/bin/dnf','clean','all'])
+          run(['df','-B1','/'])
+          run(['docker','ps','--format','{{.Names}} | {{.Status}}'])
+          keep=["pre-5647c055a2a5effce3664204bc89d97eff505882-recovery-44264931206.tar", "pre-6b7fd2dc449150a2afa0a287c2fe87afa2689b7a-1.tar", "pre-599abdd6c4ec7afab285f9f2eb070b90a95d7752-1.tar", "LOONGJUMP-2026-11-01.tar", "LOONGJUMP-2026-11-12.tar", "LOONGJUMP-2026-11-13.tar", "LOONGJUMP-2026-11-14.tar", "LOONGJUMP-2026-11-15.tar", "LOONGJUMP-2026-11-16.tar", "LOONGJUMP-2026-11-17.tar", "LOONGJUMP-2026-11-18.tar"]
+          candidates=["pre-64be56ac221b6ee91ed761406a8ba7c6fe1256a7-1.tar", "pre-60ffc6f30d4ee76b4330d6a397edd4dfb0eb09ac-1.tar", "pre-0260be1268720d079fc1e5d139ca09846b396563-1.tar", "pre-ae77e342b99544b390269544b45629d433acbf8f-1.tar", "pre-b2d6205bcb34a2b79b337b96a50f7a79eb202626-1.tar", "pre-1f608c6be5a21bcd17c9def8882fd2a07c25fbe4-1.tar", "pre-8d74b26c1c8528fa83f54c1f577eb31429f79495-1.tar", "pre-4ac6e45e1663c9c93e1b71e77726316b801094f4-1.tar", "pre-38ae7d46d2c55c8f71157f3456f0b6c85e89a2c2-1.tar", "pre-de90566455ed424045be1b28587d43619eb2029e-1.tar", "pre-171e0b7ea2aef1a52723ca7d965a45d592282058-1.tar"]
+          backup=root/'backups'
+          verified=[]
+          for name in keep:
+              path=backup/name
+              assert path.is_file() and not path.is_symlink()
+              run(['docker','exec','loong-jump-v17-app-1','node','server/cli.mjs','verify','--input','/backups/'+name])
+              st=path.stat()
+              verified.append({'name':name,'bytes':st.st_size,'mtime_ns':st.st_mtime_ns,'inode':st.st_ino})
+          remove=[]
+          for name in candidates:
+              path=backup/name
+              st=path.lstat()
+              assert stat.S_ISREG(st.st_mode) and not path.is_symlink() and name.startswith('pre-') and name.endswith('.tar')
+              remove.append({'name':name,'bytes':st.st_size,'mtime_ns':st.st_mtime_ns,'inode':st.st_ino})
+          plan={'created_at':time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime()),'backup_dir':str(backup),'verified_keep':verified,'proposed_remove':remove,'free_bytes':sum(r['bytes'] for r in remove)}
+          plan_dir=root/'storage-cleanup'
+          plan_dir.mkdir(mode=0o700,exist_ok=True)
+          plan_path=plan_dir/'plan-20261118.json'
+          fd=os.open(plan_path,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
+          with os.fdopen(fd,'w') as f: json.dump(plan,f,ensure_ascii=False,indent=2)
+          print(json.dumps({'cleanup_plan':plan},ensure_ascii=False),flush=True)
           REMOTE
