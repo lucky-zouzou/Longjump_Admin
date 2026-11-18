@@ -18,7 +18,7 @@ async function phPlan(t){
   return {f,id};
 }
 function forecast(sku,qty,daily,lots=[]){
-  return {sku,site:'菲律宾',channel:'TikTok',qty,...forecastPlan({dailySales:Array(56).fill(daily),dailyCoverage:Array(56).fill(true),currentQty:qty,inventoryKnown:true,arrivalLots:lots,productionLeadDays:3,seaLeadDays:5,reviewCycleDays:7},{},[],date)};
+  return {sku,site:'菲律宾',channel:'TikTok',qty,...forecastPlan({dailySales:Array(56).fill(daily),dailyCoverage:Array(56).fill(true),currentQty:qty,inventoryKnown:true,arrivalLots:lots,productionLeadDays:3,seaLeadDays:5,reviewCycleDays:7},{},[],[],date)};
 }
 const order=(id,sku,created_at=date)=>({id,created_at,status:'awaiting_factory',items:[{sku,visiblePlanned:30,visibleProduced:0,allocations:[{site:'菲律宾',channel:'TikTok',qty:30}]}]});
 
