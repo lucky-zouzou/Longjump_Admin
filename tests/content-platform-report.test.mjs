@@ -6,7 +6,7 @@ import {contentFixture,original,ago,date,seedCreator} from './content-center-fix
 import {readPlatformReports,readCenter} from '../lib/content-center.mjs';
 import {readCreators} from '../lib/creators.mjs';
 import {metricSheetRows} from '../lib/content-metrics-import.mjs';
-import {parseReport,reportDateRange,platformSheetRows,findReportHeader} from '../lib/content-platform-report.mjs';
+import {parseReport,reportDateRange,platformSheetRows,findReportHeader,reportVideoUrl} from '../lib/content-platform-report.mjs';
 import {siteTemplate,templatePath} from '../lib/content-report-template.mjs';
 import {SITE_CURRENCIES} from '../lib/sales-data.mjs';
 
@@ -57,12 +57,15 @@ test('实际写入按站点授权，保留未登记的视频，发布后关联�
   assert.equal((await read()).rows.length,0);
   await save();await save();let [row]=(await read()).rows;
   assert.equal(row.revision,1);assert.equal(row.matched,0);
+  assert.equal(row.videoUrl,'https://www.tiktok.com/player/v1/987654321001');
   await original(f);row=(await read()).rows[0];assert.equal(row.matched,1);assert.equal(row.metrics.views,0);
+  assert.equal(row.videoUrl,'https://www.tiktok.com/@loongjump.demo.my/video/987654321001');
   form.rows[0].gpm=310;await save();row=(await read()).rows[0];assert.equal(row.revision,2);assert.equal(row.metrics.attributedGmv,12.01);assert.equal(row.metrics.gpm,310);
   assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM content_metrics').get().n,0);
   assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM content_platform_reports').get().n,2);
   const idReport={...form,site:'印尼',currency:'IDR',rows:[{videoId:form.rows[0].videoId,creatorName:'ID 示例',views:19}]};
   await f.act(f.users.indonesia,'importPlatformReport',idReport);
+  assert.equal((await readPlatformReports(f.db,f.users.indonesia,'印尼')).rows[0].videoUrl,'https://www.tiktok.com/player/v1/987654321001');
   const list=(user,period='all')=>readPlatformReports(f.db,user,'',0,period);
   assert.deepEqual((await list(op)).rows.map(r=>r.metrics.creatorName),['MY 示例']);
   assert.deepEqual((await list(f.camera,'month')).rows.map(r=>r.metrics.creatorName).sort(),['ID 示例','MY 示例']);
@@ -70,6 +73,14 @@ test('实际写入按站点授权，保留未登记的视频，发布后关联�
   delete form.rows[0].creatorName;await save();
   assert.equal((await read()).rows[0].metrics.creatorName,'MY 示例');
  }finally{f.sqlite.close();}
+});
+test('视频直达链接核对编号和域名，缺原链接的历史记录可按完整编号打开',()=>{
+ const fallback='https://www.tiktok.com/player/v1/'+id;
+ assert.equal(reportVideoUrl(id,'https://m.tiktok.com/@test/video/'+id+'?lang=id'),'https://www.tiktok.com/@test/video/'+id);
+ for(const url of ['javascript:alert(1)','https://www.tiktok.com.evil.test/@test/video/'+id,'https://www.tiktok.com/@test/video/987654321001']){
+   assert.equal(reportVideoUrl(id,url),fallback);
+ }
+ assert.equal(reportVideoUrl('7.42E+18'), '');
 });
 test('实拍与达人原片均能省略标题和补充说明',async()=>{
  const f=contentFixture();try{
