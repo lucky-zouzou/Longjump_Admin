@@ -59,11 +59,11 @@ const server=http.createServer(async(req,res)=>{const started=performance.now();
  if(req.headers.host!==origin.host){res.writeHead(400);res.end('Invalid host');return}const url=new URL(req.url,origin);
  if(['/distributor','/api/distributor','/distributor/apply'].includes(url.pathname)){
   const request=new Request(url,{method:req.method,headers:req.headers,...(req.method==='POST'?{body:Readable.toWeb(req),duplex:'half'}:{})});
-  const response=url.pathname==='/distributor/apply'?await handleDistributorApplication(request,env.DB):await handleDistributor(request,env.DB,env.WHOLESALE_FILES);
+  const response=url.pathname==='/distributor/apply'?await handleDistributorApplication(request,env.DB):await handleDistributor(request,env.DB,env.WHOLESALE_FILES,env);
   await sendWebResponse(response,req,res,true);return;
  }
  if(['GET','HEAD'].includes(req.method)&&url.pathname==='/favicon.ico'){res.writeHead(302,{location:'/favicon.png'});res.end();return;}
- if(['GET','HEAD'].includes(req.method)&&['/favicon.png','/workplace-welcome.js','/workplace-greeting.js','/distributor-assets/brand.css','/distributor-assets/partner-green.webp','/distributor-assets/partner-pink.webp','/distributor-assets/payment.js','/distributor-assets/service.js','/distributor-assets/ordering.js','/distributor-assets/ordering.css','/distributor-assets/application.css','/loong-jump-logo-black.png'].includes(url.pathname)){
+ if(['GET','HEAD'].includes(req.method)&&['/favicon.png','/workplace-welcome.js','/workplace-greeting.js','/distributor-assets/materials.js','/distributor-assets/materials.css','/distributor-assets/brand.css','/distributor-assets/partner-green.webp','/distributor-assets/partner-pink.webp','/distributor-assets/payment.js','/distributor-assets/service.js','/distributor-assets/ordering.js','/distributor-assets/ordering.css','/distributor-assets/application.css','/loong-jump-logo-black.png'].includes(url.pathname)){
   if(!await tryServeStatic(req,res,resolve('dist-node/client'),url.pathname,true,undefined,{'Cache-Control':'public, no-cache'})){res.writeHead(404);res.end();}
   return;
  }
