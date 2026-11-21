@@ -1,4 +1,5 @@
 "use client";
+import ForecastEvidence from './forecast-evidence';
 import {createElement} from 'react';
 import {assistantName,wakeQuestion} from '../lib/employee-wake.mjs';
 const EmployeeAssistant=lazy(()=>import('./employee-assistant'));
@@ -453,7 +454,7 @@ function Suggestions({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
     </PageHead>
     <ReplenishmentHistory actor={actor as {role:string}} currentMonth={data.currentMonth} refreshToken={data.generatedAt}/>
     <div className="model-strip">
-      <div><span>需求速度</span><strong>滚动7／21／56天加权，结合需求修正</strong></div><b>×</b><div><span>覆盖周期</span><strong>生产＋海运＋7天复盘</strong></div><b>＋</b><div><span>安全库存</span><strong>销量波动 × 服务水平</strong></div><b>－</b><div><span>供应链库存位</span><strong>库存＋海运＋生产中</strong></div>
+      <div><span>需求速度</span><strong>滚动7／21／56天加权，结合需求修正</strong></div><b>×</b><div><span>覆盖周期</span><strong>生产＋海运＋复盘周期</strong></div><b>＋</b><div><span>安全库存</span><strong>销量波动 × 服务水平</strong></div><b>－</b><div><span>供应链库存位</span><strong>库存＋海运＋生产中</strong></div>
     </div>
     <div className="metrics">
       <div className="metric"><div className="label">当前库存</div><div className="value">{fmt(m.inventoryQty)}</div><div className="foot">实际可售库存</div></div>
@@ -471,6 +472,7 @@ function Suggestions({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
     <Panel title="56天销量趋势" desc={selected?`${selected.site} · ${selected.channel} · ${selected.sku}｜数据可信度：${selected.confidence}（已导入${selected.dataDays}天）`:"先录入销售数据"} action={data.suggestions.length?<select className="compact-select" aria-label="选择趋势SKU" value={effectiveSelectedKey} onChange={event=>setSelectedKey(event.target.value)}>{data.suggestions.map(row=><option key={supplyKey(row)} value={supplyKey(row)}>{row.site} · {row.channel} · {row.sku}</option>)}</select>:undefined}>
       {hasInitialTrend?<SalesTrendChart row={selected}/>:trendError?<p role="alert">{trendError}</p>:selected?trend?.key===effectiveSelectedKey?<SalesTrendChart row={{...selected,...trend}}/>:<p role="status">正在读取所选SKU趋势…</p>:<Empty>请先录入库存和每日销售数据</Empty>}
     </Panel>
+    {selected&&<ForecastEvidence row={{...selected,...(trend?.key===effectiveSelectedKey?trend:{})}}/>}
     <Panel title="动态建议清单" desc="海运补货量解决运输周期缺口；启动生产量覆盖生产＋海运全周期">
       <SkuTablePage rows={data.suggestions}>{visible=><div className="table-wrap"><table className="supply-table"><thead><tr><th>状态</th><th>站点/渠道</th><th>SKU</th><th className="num">7日日均</th><th className="num">趋势</th><th className="num">库存/可售天数</th><th className="num">海运/ETA</th><th className="num">生产中</th><th className="num">建议海运补货</th><th className="num">建议启动生产</th></tr></thead>
       <tbody>{data.suggestions.length===0?<tr><td colSpan={10}><Empty>请先录入库存和销售数据，系统将自动形成动态建议</Empty></td></tr>:visible.map((r)=><tr key={supplyKey(r)}><td><Pill tone={ALERT_TONE[r.alertLevel]||"blue"}>{r.alertLabel}</Pill><div className="cell-note">{r.alertReason}</div></td><td>{r.site}<br/><span className="cell-note">{r.channel}</span></td><td><strong><SkuLabel sku={r.sku}/></strong><br/><span className="cell-note">{r.name||"—"}</span></td><td className="num">{Number(r.avg7).toFixed(1)}</td><td className="num" style={{color:r.trendRate>=.2?"var(--blue)":r.trendRate<0?"var(--green)":undefined}}>{r.previous7>0?`${r.trendRate>=0?"+":""}${pct(r.trendRate)}`:"—"}</td><td className="num" style={{color:r.qty<0?"var(--red)":undefined}}>{fmt(r.qty)}<div className="cell-note">{days(r.stockCoverDays)}</div></td><td className="num">{fmt(r.seaInTransit)}<div className="cell-note">{r.nextSeaEta||"未填写ETA"}</div></td><td className="num">{fmt(r.productionInProgress)}</td><td className="num">{r.suggestedReplenishment==null?"待核实":fmt(r.suggestedReplenishment)}</td><td className="num"><strong>{r.suggestedProduction==null?"待核实":fmt(r.suggestedProduction)}</strong><div className="cell-note">目标 {r.targetQty==null?"待核实":fmt(r.targetQty)}</div></td></tr>)}</tbody></table></div>}</SkuTablePage>

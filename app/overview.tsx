@@ -1,5 +1,6 @@
 "use client";
 import {createElement,useState} from "react";
+import PerformanceSummary from './performance-summary';
 import Icon from "./workspace-icons";
 import StyleOperations from "./style-operations";
 import EvidenceSummary from "./evidence-summary";
@@ -34,6 +35,7 @@ export default function Overview({data,go,allowed,reminder}:Props){
         {label:'建议启动生产',value:m.suggestedProductionQty,icon:'fulfillment',note:m.forecastPendingCount?`已核实部分；${m.forecastPendingCount}项待补数据`:'已扣库存、海运在途和生产中',tone:'production'},
       ].map(k=><article className={`overview-kpi ${k.tone}`} key={k.label}><div className="kpi-caption"><span>{k.label}</span><Icon name={k.icon}/></div><div className="kpi-number">{number(k.value)}<small>件</small></div><p>{k.note}{k.extra&&<small>{k.extra}</small>}</p></article>)}
     </section>
+    <section className="overview-card"><header><div><h2>这次生产建议，为什么变了？</h2><p>{m.forecastChange?.delta==null?'昨日尚无可比快照，开始留存后可查看变化依据。':`与昨日可比范围相比${m.forecastChange.delta>=0?'增加':'减少'} ${number(Math.abs(m.forecastChange.delta))} 件，涉及 ${number(m.forecastChange.comparable)} 项。`}</p></div>{actionLink('suggestions','查看逐日依据')}</header><p className="overview-note">建议随销量、库存、活动和交期更新；已批准订单保持原样。{number(m.forecastChange?.pending)} 项因缺快照、资料不足或规则变化不能直接比较，不表示需求归零。</p></section>
     {allowed.includes('business-actions')&&<EvidenceSummary go={go}/>}
     <ZeroSalesNotifications tasks={data.myTasks} actor={data.actor} go={go}/>
     <div className="overview-columns">
@@ -51,5 +53,6 @@ export default function Overview({data,go,allowed,reminder}:Props){
     </div>
     <StyleOperations role={data.actor.role} allowed={allowed} go={go}/>
     <SupplyChain metrics={m} allowed={allowed} go={go}/>
+    {data.actor.role==='管理员'&&<PerformanceSummary/>}
   </div>;
 }

@@ -141,9 +141,12 @@ test('补货首屏携带首个 SKU 曲线，按 SKU 读取结果与完整预测�
   const page=await read('module=suggestions&navigation=page'),full=await read('');
   const first=page.suggestions[0];assert.ok(first.dailySeries.length>0);
   assert.deepEqual(first.dailySeries,full.suggestions[0].dailySeries);
+  assert.deepEqual(first.projection,full.suggestions[0].projection);
+  assert.deepEqual(first.demandSchedule,full.suggestions[0].demandSchedule);
   assert.ok(page.suggestions.slice(1).every(r=>!r.dailySeries));
   for(const row of full.suggestions.slice(0,2)){
     const trend=await read('forecastTrend='+encodeURIComponent([row.site,row.channel,row.sku].join('|')));
     assert.deepEqual(trend.dailySeries,row.dailySeries);
+    assert.deepEqual(trend.projection,row.projection);
   }
 });

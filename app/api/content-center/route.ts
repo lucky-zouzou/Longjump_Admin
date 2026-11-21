@@ -14,7 +14,7 @@ export async function GET(request:Request){
     const data=query.get('view')==='compass'
       ?await readCenterCompass(database(),actor,query.get('period')||'month',query.get('range')||'')
       :query.get('view')==='report-history'?await reportHistory(database(),actor,query.get('site'),query.get('start'),query.get('end'),query.get('videoId'),Number(query.get('offset')||0))
-      :query.get('view')==='platform-report'?await readPlatformReports(database(),actor,query.get('site'),Number(query.get('offset')||0),query.get('period')||'all',Date.now(),query.get('range')||'')
+      :query.get('view')==='platform-report'?await readPlatformReports(database(),actor,query.get('site'),Number(query.get('offset')||0),query.get('period')||'all',Date.now(),query.get('range')||'',query.get('matching')||'all')
       :await readCenter(database(),actor);
     return Response.json(data,{headers});
   }

@@ -21,7 +21,7 @@ test('every staff role has an accessible starter and only navigable workspaces',
     assert.ok(assistantHome(a).guides.length);
     for(const g of guidesFor(a))assert.ok(nav.includes(g.page));
   }
-  assert.deepEqual(assistantHome(actor('拍摄剪辑')).guides.map(x=>x.id),['studio','material-preview']);
+  assert.deepEqual(assistantHome(actor('拍摄剪辑')).guides.map(x=>x.id),['studio','unmatched-video','material-preview']);
   assert.ok(!guidesFor(actor('运营','泰国')).some(g=>['wholesale','distribution'].includes(g.page)));
   assert.ok(!guidesFor(actor('工厂')).some(g=>g.id==='finance-day'));
   assert.ok(!guidesFor(actor('管理员')).some(g=>g.id==='sales-import'));
