@@ -1,3 +1,5 @@
+import {createRequestMetrics} from './request-metrics.mjs';
+import {scheduleForecastMonitor} from './forecast-monitor.mjs';
 import http from 'node:http';
 import {readWorkplaceWeather} from '../lib/workplace-weather.mjs';
 import {handleDistributorApplication} from '../lib/distributor-application.mjs';
@@ -51,16 +53,17 @@ button{margin-top:14px;background:#174e49;color:#fff;border:0;font-weight:650;cu
 <button>登录 / Masuk</button><p class="help">账号由公司管理员开通。Akun dibuat oleh administrator perusahaan.</p>
 </form></main></body></html>`;
 async function smallBody(req){let chunks=[],size=0;for await(const b of req){size+=b.length;if(size>4096)throw Error('Login request too large');chunks.push(b)}return new URLSearchParams(Buffer.concat(chunks).toString())}
-const server=http.createServer(async(req,res)=>{try{
+const requestMetrics=createRequestMetrics();
+const server=http.createServer(async(req,res)=>{const started=performance.now();res.once('finish',()=>{try{requestMetrics.record(new URL(req.url,origin).pathname,performance.now()-started,res.statusCode);}catch{}});try{
  res.setHeader('Permissions-Policy','camera=(), microphone=(), geolocation=(self)');res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('X-Frame-Options','DENY');res.setHeader('Referrer-Policy','same-origin');res.setHeader('Cache-Control','no-store');
  if(req.headers.host!==origin.host){res.writeHead(400);res.end('Invalid host');return}const url=new URL(req.url,origin);
  if(['/distributor','/api/distributor','/distributor/apply'].includes(url.pathname)){
   const request=new Request(url,{method:req.method,headers:req.headers,...(req.method==='POST'?{body:Readable.toWeb(req),duplex:'half'}:{})});
-  const response=url.pathname==='/distributor/apply'?await handleDistributorApplication(request,env.DB):await handleDistributor(request,env.DB,env.WHOLESALE_FILES);
+  const response=url.pathname==='/distributor/apply'?await handleDistributorApplication(request,env.DB):await handleDistributor(request,env.DB,env.WHOLESALE_FILES,env);
   await sendWebResponse(response,req,res,true);return;
  }
  if(['GET','HEAD'].includes(req.method)&&url.pathname==='/favicon.ico'){res.writeHead(302,{location:'/favicon.png'});res.end();return;}
- if(['GET','HEAD'].includes(req.method)&&['/favicon.png','/workplace-welcome.js','/workplace-greeting.js','/distributor-assets/brand.css','/distributor-assets/partner-green.webp','/distributor-assets/partner-pink.webp','/distributor-assets/payment.js','/distributor-assets/service.js','/distributor-assets/ordering.js','/distributor-assets/ordering.css','/distributor-assets/application.css','/loong-jump-logo-black.png'].includes(url.pathname)){
+ if(['GET','HEAD'].includes(req.method)&&['/favicon.png','/workplace-welcome.js','/workplace-greeting.js','/distributor-assets/materials.js','/distributor-assets/materials.css','/distributor-assets/brand.css','/distributor-assets/partner-green.webp','/distributor-assets/partner-pink.webp','/distributor-assets/payment.js','/distributor-assets/service.js','/distributor-assets/ordering.js','/distributor-assets/ordering.css','/distributor-assets/application.css','/loong-jump-logo-black.png'].includes(url.pathname)){
   if(!await tryServeStatic(req,res,resolve('dist-node/client'),url.pathname,true,undefined,{'Cache-Control':'public, no-cache'})){res.writeHead(404);res.end();}
   return;
  }
@@ -97,6 +100,7 @@ const server=http.createServer(async(req,res)=>{try{
  const user=c.lj_session?db.prepare('SELECT u.* FROM local_sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>? AND u.active=1').get(hashToken(c.lj_session),Date.now()):null;
  if(url.pathname==='/signout-with-chatgpt'){if(c.lj_session)db.prepare('DELETE FROM local_sessions WHERE token_hash=?').run(hashToken(c.lj_session));res.writeHead(303,{'location':'/signin-with-chatgpt','set-cookie':[cookie('lj_session','',0),cookie('lj_workspace_visit','',0)]});res.end();return}
  if(!user){if(url.pathname.startsWith('/api/')){res.writeHead(401,{'content-type':'application/json'});res.end(JSON.stringify({error:'请登录公司账号 / Silakan masuk'}));}else{res.writeHead(303,{'location':'/signin-with-chatgpt'});res.end()}return}
+ if(url.pathname==='/api/system-performance'&&req.method==='GET'){res.writeHead(user.role==='管理员'?200:403,{'content-type':'application/json'});res.end(JSON.stringify(user.role==='管理员'?requestMetrics.snapshot():{error:'仅管理员可查看性能诊断'}));return;}
  if(url.pathname==='/admin/inventory-baseline'||url.pathname==='/api/inventory-baseline'){await handleBaseline(req,res,env,user);return}
  if(url.pathname==='/admin/test-cleanup'||url.pathname==='/api/test-cleanup'){await handleCleanup(req,res,env,user);return}
  if(req.method==='GET'||req.method==='HEAD'){if(await tryServeStatic(req,res,resolve('dist-node/client'),url.pathname,true))return}
@@ -104,6 +108,7 @@ const server=http.createServer(async(req,res)=>{try{
  const h=new Headers();for(const [k,v] of Object.entries(req.headers))if(!k.startsWith('oai-')&&!k.startsWith('x-local-')&&!['host','connection','transfer-encoding','x-forwarded-host','x-forwarded-proto'].includes(k)&&v!=null)h.set(k,Array.isArray(v)?v.join(','):v);
  h.set('host',origin.host);h.set('oai-authenticated-user-id',user.id);h.set('oai-authenticated-user-email',user.email);h.set('oai-authenticated-user-full-name',encodeURIComponent(user.name));h.set('oai-authenticated-user-full-name-encoding','percent-encoded-utf-8');
  const request=new Request(url,{method:req.method,headers:h,...(req.method==='POST'?{body:Readable.toWeb(req),duplex:'half'}:{})});const result=typeof handler==='function'?await handler(request):await handler.fetch(request,env,{waitUntil:p=>p.catch(()=>{}),passThroughOnException(){}});
+ res.setHeader('Server-Timing','app;dur='+(performance.now()-started).toFixed(1));
  await sendWebResponse(result,req,res,true);
  }catch(error){console.error('Request failed:',error.message);if(!res.headersSent){res.writeHead(500,{'content-type':'application/json'});res.end(JSON.stringify({error:'服务器处理失败，请查看管理日志'}))}else res.destroy(error)}});
 server.requestTimeout=120000;server.headersTimeout=15000;
@@ -111,6 +116,7 @@ server.listen(Number(process.env.PORT||3000),process.env.HOST||'0.0.0.0',()=>con
 if(process.env.LOONGJUMP_BACKUP_DIR){const {scheduleBackups}=await import('./backup.mjs');scheduleBackups(env,process.env.LOONGJUMP_BACKUP_DIR);}
 schedulePromotionMonitor(env.DB);
 scheduleBusinessActionMonitor(env.DB);
+scheduleForecastMonitor(env.DB);
 for(const signal of ['SIGINT','SIGTERM'])process.on(signal,()=>server.close(()=>{db.close();process.exit(0)}));
 
 if (env.BEST_PARTNER_ID && env.BEST_API_SECRET) {

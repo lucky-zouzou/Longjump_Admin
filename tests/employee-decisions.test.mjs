@@ -80,7 +80,7 @@ test('利润从财务账读取，销售金额不冒充利润，岗位权限和�
 test('生产依据与大促来自驾驶舱，追问具体货品能区分缺报和预计零需求',async t=>{
   const f=environment(t);
   const general=await ask(f,'建议启动生产的依据是什么，下个月TK大促考虑了吗？');
-  assert.equal(general.ledger.page,'suggestions');assert.match(fullText(general),/50%、30%、20%/);assert.match(fullText(general),/摊到整个周期/);
+  assert.equal(general.ledger.page,'suggestions');assert.match(fullText(general),/50%、30%、20%/);assert.match(fullText(general),/按活动日期逐日叠加需求/);
   const q='印尼 TikTok SKU BAG-A';
   let reply=await ask(f,q,{previous:'production-basis'},f.users.indonesia);
   assert.match(reply.answer,/目前无法确认生产数量/);assert.match(fullText(reply),/尚未登记|没有登记/);

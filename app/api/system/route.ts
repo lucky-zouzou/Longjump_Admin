@@ -1,3 +1,5 @@
+import {forecastChanges} from "../../../lib/forecast-observations.mjs";
+import {transportSummary} from "../../../lib/supply-diagnostics.mjs";
 import {salesWindow} from "../../../lib/sales-window.mjs";
 import {loadReplenishmentCosts,factoryPurchaseDocument} from "../../../lib/replenishment-costs.mjs";
 import {localDay} from "../../../lib/promotion-model.mjs";
@@ -151,7 +153,7 @@ export async function GET(request:Request) {
       if(!navigationForRole(actor.role).includes("suggestions"))throw new HttpError(403,"无权查看补货趋势");
       const forecast=await loadForecast(database(),actor,undefined,forecastTrend),row=forecast.suggestions.find(r=>`${r.site}|${r.channel}|${r.sku}`===forecastTrend);
       if(!row)throw new HttpError(404,"当前权限内未找到该SKU趋势");
-      return Response.json({dailySeries:row.dailySeries,generatedAt:nowIso()});
+      return Response.json({dailySeries:row.dailySeries,projection:row.projection,demandSchedule:row.demandSchedule,generatedAt:nowIso()});
     }
     if((navigation==="shell"||navigation==="page") && hasIndependentLedger(module)){
       return Response.json(publicSystemSnapshot({module,actor,currentMonth:monthKey(),generatedAt:nowIso(),metrics:{},myTasks:[],tasksDeferred:true},actor.role),{headers:{"Cache-Control":"private, no-store"}});
@@ -409,6 +411,9 @@ export async function GET(request:Request) {
     });
 
     const {suggestions,salesDaily,policies}=!module||["overview","suggestions","monthly"].includes(module)?await loadForecast(database(),actor):{suggestions:[] as AnyRow[],salesDaily:[] as AnyRow[],policies:[] as AnyRow[]};
+    const forecastChange=await forecastChanges(database(),actor,suggestions);
+    const changeByKey=new Map(forecastChange.items.map((r:AnyRow)=>[[r.site,r.channel,r.sku].join('|'),r]));
+    for(const row of suggestions)row.change=changeByKey.get([row.site,row.channel,row.sku].join('|'));
 
     if ((!module||module==="monthly"||module==="fulfillment")&&canReadDomain(actor.role,"fulfillment")) {
       const keys=queueForecastKeys(productionOrders);
@@ -456,6 +461,7 @@ export async function GET(request:Request) {
       offlineSales7Qty:offlineSales.periodQty,
       seaTransitQty:suggestions.reduce((sum,row)=>sum+Number(row.seaInTransit),0),
       productionInProgressQty:suggestions.reduce((sum,row)=>sum+Number(row.productionInProgress),0),
+      forecastChange:{delta:forecastChange.delta,comparable:forecastChange.comparable,pending:forecastChange.pending},
       forecastPendingCount:suggestions.filter(r=>r.recommendationReady===false).length,
       suggestedProductionQty:suggestions.reduce((sum,row)=>sum+Number(row.suggestedProduction),0),
       criticalAlertCount:suggestions.filter((row)=>row.alertLevel==="critical").length,
@@ -475,8 +481,7 @@ export async function GET(request:Request) {
       seriesOrderCount:purchaseOrders.length,
       activeProductionOrderCount:productionOrders.filter((row)=>!["cancelled","completed","completed_with_variance"].includes(row.status)).length,
       readyToShipProductionOrderCount:productionOrders.filter((row)=>["completed","completed_with_variance"].includes(row.status)&&row.qc_status==="passed"&&row.remainingToShip>0).length,
-      stalledBatchCount:visibleBatches.filter((row)=>row.stalled).length+shipmentBatches.filter((row)=>row.stalled).length,
-      pendingShelfCount:visibleBatches.filter((row)=>row.stage==="shelf_pending").length+shipmentBatches.filter((row)=>row.stage==="shelf_pending").length,
+      ...transportSummary(visibleBatches,shipmentBatches,transportLegViews),
       salesScopesUpdatedToday:salesScopeStatus.filter((row)=>row.updatedToday).length,
       salesScopesRequired:salesScopeStatus.length,
       batchStageCounts,

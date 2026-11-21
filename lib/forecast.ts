@@ -17,7 +17,7 @@ export async function loadForecast(db:any,actor:any,asOf?:string,focusKey?:strin
  const daysFromToday=(v:unknown)=>/^\d{4}-\d{2}-\d{2}$/.test(String(v))?Math.ceil((Date.parse(String(v))-Date.parse(asOf))/86400000):null;
  const scope=actor.role==='运营'?{clause:' WHERE site=? AND channel=?',args:[actor.site,actor.channel]}:{clause:'',args:[]};
  // A factory queue only needs forecasts for the SKU allocations on its open orders.
- const keys=typeof focusKey==='object'?focusKey:null;
+ const keys=typeof focusKey==='string'?new Set([focusKey]):focusKey??null;
  const skuArgs=keys?[JSON.stringify([...new Set([...keys].map(k=>k.split('|')[2]))])]:[];
  const skuFilter='sku IN (SELECT value FROM json_each(?))';
  const readRows=(table:string,filter=skuFilter,scoped=false)=>{
@@ -59,6 +59,11 @@ export async function loadForecast(db:any,actor:any,asOf?:string,focusKey?:strin
     const settings = new Map<string, AnyRow>(skuSettings.map((r:AnyRow) => [r.sku, r]));
     const seaTransit = new Map<string,number>();
     const productionPipeline = new Map<string,number>();
+    const productionArrivals = new Map<string,AnyRow[]>();
+    const productionOrderById = new Map(productionOrderRows.map(r=>[r.id,r]));
+    const policiesByKey = new Map(policies.map(r=>[`${r.site}|${r.channel}|${r.sku}`,r]));
+    const correctionsByKey = new Map<string,AnyRow[]>();
+    for(const r of corrections){const k=`${r.site}|${r.channel}|${r.sku}`;correctionsByKey.set(k,[...(correctionsByKey.get(k)||[]),r]);}
     const warehousePending = new Map<string,number>();
     const seaArrivals = new Map<string,Array<{qty:number;etaDate:string;days:number|null}>>();
     for (const batch of batches.filter((row) => !["arrived","completed","shelf_pending","on_shelf"].includes(row.stage))) {
@@ -71,7 +76,7 @@ export async function loadForecast(db:any,actor:any,asOf?:string,focusKey?:strin
       }
     }
     for(const item of productionItemRows){
-      const order=productionOrderRows.find((o:AnyRow)=>o.id===item.production_order_id);
+      const order=productionOrderById.get(item.production_order_id);
       if(!order||order.status==="cancelled"||order.qc_status==="failed"||order.qc_status==="rejected")continue;
       const purchaseItem=purchaseItemById.get(item.purchase_order_item_id);
       if(!purchaseItem) continue;
@@ -84,6 +89,10 @@ export async function loadForecast(db:any,actor:any,asOf?:string,focusKey?:strin
       for(const allocation of prorateAllocations(allocations,Math.min(remaining,allocations.reduce((s,a)=>s+a.qty,0)))){
         const key=`${allocation.site}|${allocation.channel}|${item.sku}`;
         productionPipeline.set(key,(productionPipeline.get(key)??0)+allocation.qty);
+        const promise=daysFromToday(order.promised_completion_date),policy=policiesByKey.get(key)||{},setting=settings.get(item.sku)||{};
+        // A promise estimates arrival, never warehouse receipt. Expired promises are unresolved.
+        const days=promise!=null&&promise>=0&&order.status!=="pending_acceptance"?promise+Number(policy.transport_days??setting.sea_lead_days??35):null;
+        productionArrivals.set(key,[...(productionArrivals.get(key)||[]),{qty:allocation.qty,days,orderId:order.id,basis:'工厂承诺完工日加运输周期，待实际交付验证'}]);
       }
     }
     const shipmentById=new Map<string,AnyRow>(shipmentRows.map((row)=>[row.id,row]));
@@ -128,13 +137,13 @@ export async function loadForecast(db:any,actor:any,asOf?:string,focusKey?:strin
       const arrivals=seaArrivals.get(key)??[],datedArrivals=arrivals.filter(lot=>lot.days!==null).sort((a,b)=>Number(a.days)-Number(b.days));
       const scopeCoverage=coverage.get(`${site}|${channel}`)??{};
       const importedDates=new Set(String(scopeCoverage.imported_dates||"").split(",").filter(Boolean));
-      const policy=policies.find((p:AnyRow)=>p.sku===sku&&p.site===site&&p.channel===channel)||{};
+      const policy=policiesByKey.get(key)||{};
       const plan:AnyRow=forecastPlan({
         dailySales:dailySales.get(key)??Array(56).fill(0),
         dailyCoverage:dayKeys.map((date)=>importedDates.has(date)),
         offlineDailySales:offlineSales.get(key)??Array(56).fill(0),
         offlineCoverage:dayKeys.map(date=>Boolean(offlineStarts.get(key)&&date>=offlineStarts.get(key)!)),
-        arrivalLots:arrivals,asOf,inventoryKnown:inventoryByKey.has(key),
+        arrivalLots:arrivals,productionArrivalLots:productionArrivals.get(key)||[],asOf,inventoryKnown:inventoryByKey.has(key),
         currentQty:Number(row.qty)-Number(row.reserved_qty||0),
         pendingShelf:warehousePending.get(key)??Number(row.pending_shelf_qty||0),
         seaInTransit:seaTransit.get(key)??0,
@@ -148,7 +157,7 @@ export async function loadForecast(db:any,actor:any,asOf?:string,focusKey?:strin
         daysToNextSea:datedArrivals[0]?.days??null,
         dataDays:Number(scopeCoverage.data_days??0),
         daysSinceLastImport:scopeCoverage.last_sale_date ? Math.max(0,-Number(daysFromToday(scopeCoverage.last_sale_date))) : null,
-      },policy,corrections.filter((c:AnyRow)=>c.sku===sku&&c.site===site&&c.channel===channel),dayKeys,chinaDate());
+      },policy,correctionsByKey.get(key)||[],dayKeys,chinaDate());
       return {
         ...row,...plan,bookQty:inventoryByKey.has(key)?Number(row.qty):null,qty:inventoryByKey.has(key)?Number(row.qty)-Number(row.reserved_qty||0):null,
         seaInTransit:seaTransit.get(key)??0,

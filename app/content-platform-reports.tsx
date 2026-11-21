@@ -18,17 +18,19 @@ function RevisionHistory({site,row}:{site:string;row:Row}){
  return <div>{error||(!result&&'正在读取历史…')}{result?.rows.map((v:Row)=><p key={v.revision}><b>V{v.revision} · {v.source_file}</b><small>{new Date(v.created_at).toLocaleString()} · {row.currency}</small>{reportFields.filter(([key])=>v.metrics[key]!=null).map(([key,label])=>label+' '+v.metrics[key]).join(' / ')}</p>)}{offset>0&&<button onClick={()=>setOffset(offset-20)}>上一页</button>}{result?.more&&<button onClick={()=>setOffset(offset+20)}>下一页</button>}</div>;
 }
 export function PlatformReports({site,period,range='',refreshKey}:{site:string;period?:string;range?:string;refreshKey:number}){
- const [history,setHistory]=useState('');
+ const [history,setHistory]=useState(''),[matching,setMatching]=useState('all');
  const [offset,setOffset]=useState(0),[data,setData]=useState<Row|null>(null),[error,setError]=useState('');
  useEffect(()=>{
    const ctl=new AbortController();setError('');setData(null);
-   fetch('/api/content-center?'+new URLSearchParams({view:'platform-report',site,period:period||'all',range,offset:String(offset)}),{cache:'no-store',signal:ctl.signal})
+   fetch('/api/content-center?'+new URLSearchParams({view:'platform-report',site,period:period||'all',range,matching,offset:String(offset)}),{cache:'no-store',signal:ctl.signal})
      .then(parseWorkspaceResponse).then(v=>{if(!ctl.signal.aborted)setData(v);})
      .catch(e=>{if(!ctl.signal.aborted)setError(e.message);});
    return ()=>ctl.abort();
- },[site,refreshKey,offset,period,range]);
+ },[site,refreshKey,offset,period,range,matching]);
  return <section className="cc-card"><h3>{period?'创作者视频明细':site+' · 平台报表记录'}</h3>
   {period&&<p>按报表结束日筛选。每行是一条视频在该报表期间的表现，金额为站点原币。</p>}
+  <label>发布关联<select value={matching} onChange={e=>{setMatching(e.target.value);setOffset(0);}}><option value="all">全部报表</option><option value="unmatched">待关联发布</option><option value="matched">已关联发布</option></select></label>
+  {data?.coverage&&<p>当前范围 {data.coverage.total} 条最新报表，已关联 {data.coverage.matched} 条，待关联 {data.coverage.total-data.coverage.matched} 条。按站点＋Video ID 精确匹配；报表结果不自动归功于内部拍摄人员。<small>未关联时，请在对应发布记录核对视频链接。</small></p>}
   {error?<p role="alert">{error}</p>:!data?<p>正在读取…</p>:!data.rows.length?<p>本页暂无记录。</p>:<div className="cc-table-scroll"><table><thead><tr>
     {['站点','报表期间','播放量','归属订单',...(period?amountFields.slice(0,1):amountFields).map(([,l])=>l),'指标明细','Creator name','Video ID'].map(l=><th key={l}>{l}</th>)}
   </tr></thead><tbody>{data.rows.map((r:Row)=><tr key={[r.site,r.video_id,r.start_day,r.end_day].join('/')}>

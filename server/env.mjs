@@ -15,3 +15,5 @@ const bestConfigFile = process.env.LOONGJUMP_BEST_CREDENTIALS_FILE;
 const bestConfig = bestConfigFile ? JSON.parse(readFileSync(bestConfigFile,'utf8')) : {};
 env.BEST_PARTNER_ID = bestConfigFile ? bestConfig.partnerId : process.env.BEST_PARTNER_ID;
 env.BEST_API_SECRET = bestConfigFile ? bestConfig.secret : process.env.BEST_API_SECRET;
+
+for(const key of ['MATERIALS_ENABLED','MATERIALS_S3_ENDPOINT','MATERIALS_S3_BUCKET','MATERIALS_S3_ACCESS_KEY','MATERIALS_S3_SECRET_KEY','MATERIALS_S3_REGION'])env[key]=process.env[key];

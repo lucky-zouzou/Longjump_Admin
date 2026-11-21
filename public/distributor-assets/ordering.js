@@ -208,6 +208,8 @@
   }
   async function load(){
     state=await api();
+    document.dispatchEvent(new CustomEvent("materials-ready",{detail:{only:state.accessMode==='materials'}}));
+    if(state.accessMode==='materials'){document.body.className='portal-member';byId('portal-access').hidden=true;byId('workspace').hidden=true;notice('Selamat datang, '+state.customer.name+'. Pilih materi untuk toko Anda.');return;}
     state.products.sort((a,b)=>Number(b.images.length>0)-Number(a.images.length>0));
     const c=state.customer;
     byId('customer').textContent=c.name+' · '+c.code;byId('sales').textContent='Sales Anda: '+(/[\u3400-\u9fff]/.test(c.sales||'')?'Tim LOONG JUMP':c.sales||'Tim LOONG JUMP');
