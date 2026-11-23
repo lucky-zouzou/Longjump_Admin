@@ -11,7 +11,7 @@ type Act=(action:string,payload:Row,success:string,onError?:(message:string)=>vo
 const fmt=(n:unknown)=>Number(n||0).toLocaleString('zh-CN');
 const time=(v:string)=>v?new Date(v).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false}):'—';
 const today=()=>new Date(Date.now()+8*3600000).toISOString().slice(0,10);
-const eventLabels:Record<string,string>={factory_accepted:'确认接单并开始生产',production_progress:'更新生产进度',production_completed:'生产完成，转待质检',qc_passed:'质检通过',qc_rejected:'质检不通过',dispatch_submitted:'供应链提交发货通知',dispatch_rejected:'管理员驳回发货通知',dispatch_issued:'管理员批准并下发发货通知',packing_submitted:'工厂发货并提交装箱清单',packing_confirmed:'装箱清单复核通过',packing_returned:'装箱清单退回补正',dispatch_cancelled:'取消发货通知',transport_linked:'装箱清单转海运批次'};
+const eventLabels:Record<string,string>={order_quantity_changed:'实际工厂下单数量已调整',factory_accepted:'确认接单并开始生产',production_progress:'更新生产进度',production_completed:'生产完成，转待质检',qc_passed:'质检通过',qc_rejected:'质检不通过',dispatch_submitted:'供应链提交发货通知',dispatch_rejected:'管理员驳回发货通知',dispatch_issued:'管理员批准并下发发货通知',packing_submitted:'工厂发货并提交装箱清单',packing_confirmed:'装箱清单复核通过',packing_returned:'装箱清单退回补正',dispatch_cancelled:'取消发货通知',transport_linked:'装箱清单转海运批次'};
 function Flow({stage}:{stage:string}){
   const current=stage==='awaiting_order'?0:stage==='awaiting_factory'?1:stage==='in_production'||stage==='pending'?2:stage==='ready_to_ship'?5:4;
   return <ol className="production-flow" aria-label="工厂生产流程">{['收到订单','导出确认','生产中','生产完成','待质检','可发货'].map((label,i)=><li key={label} className={i<current?'done':i===current?'current':''}><span>{i<current?'✓':i+1}</span>{label}</li>)}</ol>;

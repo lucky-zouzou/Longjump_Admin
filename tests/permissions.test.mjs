@@ -35,6 +35,7 @@ test("供应链、工厂和海运写入权限互相隔离", () => {
 
   assert.equal(hasPermission("海运","shipment.eta"),true);
   assert.equal(hasPermission("海运","transport.advance.sea"),true);
+  assert.equal(hasPermission("海运","transport.receive"),true);
   assert.equal(hasPermission("海运","inbound.receive"),false);
   assert.equal(hasPermission("海运","shelf.confirm"),false);
 });
@@ -55,6 +56,6 @@ test("只有管理员能查看全量审计和管理账号", () => {
 });
 
 test("海运菜单包含共享生产动态，不出现收货与新品入口", () => {
-  assert.deepEqual(navigationForRole("海运"),["production-tracking","overview","batches"]);
+  assert.deepEqual(navigationForRole("海运"),["production-tracking","overview","batches","attendance","finance-workbench"]);
   assert.equal(navigationForRole("供应链").includes("audit"),false);
 });

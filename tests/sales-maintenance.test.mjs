@@ -79,7 +79,7 @@ test('费用有投放无销售仍计入整体；币种、日期、渠道独立�
   await saveSalesAdSpend(f.db,f.users.admin,expense({businessDate:prior,channel:'Shopee',amount:10}));
   const incomplete=await readSalesDashboard(f.db,f.users.indonesia,{from:prior,to:day});assert.equal(incomplete.currencies.find(c=>c.currency==='IDR').roas,null);assert.equal(incomplete.daily.find(c=>c.date===day).revenue,null);
   await svc.confirmSalesDay(f.users.indonesia,{site:'印尼',channel:'TikTok',businessDate:day,confirmed:true,note:'核对平台确认为零销售'});
-  const r=await readSalesDashboard(f.db,f.users.indonesia,{from:prior,to:day});assert.equal(r.totalQty,3);assert.equal(r.currencies.find(c=>c.currency==='IDR').roas,15);assert.equal(r.currencies.find(c=>c.currency==='USD').adCost,5);assert.equal(r.daily.find(c=>c.currency==='IDR'&&c.date===prior).roas,null);
+  const r=await readSalesDashboard(f.db,f.users.indonesia,{from:prior,to:day});assert.equal(r.totalQty,3);assert.equal(r.currencies.find(c=>c.currency==='IDR').roas,null);assert.ok(r.currencies.find(c=>c.currency==='IDR').crossCurrencyCostDays>0);assert.equal(r.currencies.find(c=>c.currency==='USD').adCost,5);assert.equal(r.daily.find(c=>c.currency==='IDR'&&c.date===prior).roas,null);
   const all=await readSalesDashboard(f.db,f.users.admin,{from:prior,to:day});assert.equal(all.currencies.find(c=>c.currency==='IDR').adCost,30);
  }finally{f.sqlite.close();}
 });

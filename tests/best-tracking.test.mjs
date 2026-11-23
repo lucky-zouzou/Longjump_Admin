@@ -119,7 +119,7 @@ test('已登记交接凭证自动识别；实际派送推进仅一次，预计�
  f.sqlite.prepare("UPDATE best_transport_tracking SET last_attempt_at='2000-01-01'").run();
  await poll([arrived]);assert.equal(legState(f).stage,'last_mile_delivery');
  f.sqlite.prepare("UPDATE best_transport_tracking SET last_attempt_at='2000-01-01'").run();
- await poll([arrived,signed]);assert.equal(legState(f).stage,'awaiting_receipt');assert.equal(legState(f).stage_owner,'供应链');
+ await poll([arrived,signed]);assert.equal(legState(f).stage,'awaiting_receipt');assert.equal(legState(f).stage_owner,'海运');
  assert.deepEqual(f.sqlite.prepare('SELECT * FROM inventory_balances').all(),balances);
  assert.equal(f.sqlite.prepare('SELECT count(*) n FROM transport_receipts').get().n,0);
  assert.equal(f.sqlite.prepare("SELECT count(*) n FROM audit_logs WHERE action='自动推进百世运输节点'").get().n,2);

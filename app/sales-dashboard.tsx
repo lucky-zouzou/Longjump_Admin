@@ -11,7 +11,7 @@ const number=(n:unknown)=>Number(n||0).toLocaleString('zh-CN',{maximumFractionDi
 const money=(n:unknown)=>n==null?'未填报':number(n);
 const today=()=>new Date(Date.now()+8*3600000).toISOString().slice(0,10);
 const ago=(n:number)=>new Date(Date.parse(today())-n*86400000).toISOString().slice(0,10);
-const status=(r:Row)=>r.revenueMissing||r.costMissing?'资料不完整':r.adCost===0?'无投放':'可排名';
+const status=(r:Row)=>r.revenueMissing||r.costMissing?'资料不完整':r.crossCurrencyCostDays?'跨币种，请看人民币投产比':r.adCost===0?'无投放':'可排名';
 const ratio=(r:Row)=>r.roas==null?status(r):`${number(r.roas)}×`;
 function Card({label,value,note}:{label:string;value:string;note:string}){return <div className="metric"><div className="label">{label}</div><div className="value">{value}</div><div className="foot">{note}</div></div>;}
 function Panel({title,desc,children}:{title:string;desc:string;children:React.ReactNode}){return <section className="panel"><div className="panel-head"><div><h4>{title}</h4><p>{desc}</p></div></div>{children}</section>;}
@@ -59,13 +59,13 @@ export default function SalesDashboard({actor,refreshToken}:{actor:Row;refreshTo
       <SalesCnySummary report={report}/>
       {report.quality&&(report.quality.zeroRevenue>0||report.quality.foreign.length>0||report.quality.repeatedCosts.length>0)&&<details className="panel sales-quality"><summary>数据待核对：{report.quality.zeroRevenue} 条有销量零金额 · {report.quality.foreign.length} 组非站点本币 · {report.quality.repeatedCosts.length} 组相同广告费</summary><p>这些提示不自动判定数据错误，请对照平台报表核实后修订。</p>{report.quality.zeroRevenue>0&&<p>有销量但销售额为0：请确认赠品或补齐漏填金额。</p>}{report.quality.foreign.map((r:Row)=><p key={`${r.site}-${r.channel}-${r.currency}`}>{r.site} · {r.channel}：{r.records} 条记录标记为 {r.currency}，请确认原金额确实使用该币种；更改币种标签不会换算原始数据。</p>)}{report.quality.repeatedCosts.map((r:Row)=><p key={`${r.date}-${r.site}-${r.channel}-${r.currency}-${r.adCost}`}>{r.date} · {r.site} · {r.channel}：{r.records} 行广告费相同（每行 {money(r.adCost)} {r.currency}）。全店总费用只登记一次，未知 SKU 成本留空。</p>)}</details>}
       <div className="panel-head"><div><h3>原币明细</h3><p>以下按钮仅筛选原币，不执行换汇。人民币总额见上方经营汇总。</p></div></div>
-      <p className="notice info">广告费用口径：同日、同站点、同渠道、同币种优先使用渠道总费用，不与 SKU 成本重复相加。SKU 成本未知不参与 SKU 投产比排名。</p>
+      <p className="notice info">广告费用口径：同日、同站点、同渠道优先使用店铺广告总费用，销售与广告币种可以不同。费用按原币各计一次，不与 SKU 成本重复相加；跨币种整体投产比见上方人民币汇总。SKU 成本未知不参与 SKU 投产比排名。</p>
       <div className="report-currencies" aria-label="金额统计币种"><strong>原币筛选</strong>{report.currencies.map((r:Row)=><button key={r.currency} className={`btn ${selected===r.currency?'primary':''}`} aria-pressed={selected===r.currency} onClick={()=>setCurrency(r.currency)}>{r.currency==='UNKNOWN'?'历史未标币种':r.currency}</button>)}{!report.currencies.length&&<span>暂无销售数据</span>}<span>此处销量与金额使用同一币种范围；全站销量排名仍包含全部币种。</span></div>
       {report.currencies.some((r:Row)=>r.currency==="UNKNOWN")&&<p className="notice info">包含未标币种的历史记录：这些记录仅计入销量，不混入当前币种的销售额或投产比。可切换“历史未标币种”查看。</p>}
       <div className="report-metrics">
         <Card label={`原币销量 · ${selected}`} value={`${number(financial?.qty)} 件`} note="仅当前原币记录，与下方金额范围一致"/>
         <Card label={`销售额 · ${selected==='UNKNOWN'?'币种未标':selected}`} value={money(financial?.revenue)} note={financial?.revenueMissing?`有 ${number(financial.revenueMissing)} 条未填报；这里只计已填报金额`:'按实际成交金额统计'}/>
-        <Card label={`投放成本 · ${selected==='UNKNOWN'?'币种未标':selected}`} value={money(financial?.adCost)} note={financial?.costMissing?`有 ${number(financial.costMissing)} 条未填报；这里只计已填报成本`:financial?.channelCostDays?`已使用 ${number(financial.channelCostDays)} 个渠道日的总费用`:'明确填写0才视为无投放'}/>
+        <Card label={`投放成本 · ${selected==='UNKNOWN'?'币种未标':selected}`} value={money(financial?.adCost)} note={financial?.costMissing?`有 ${number(financial.costMissing)} 条未填报；这里只计已填报成本`:financial?.crossCurrencyCostDays?'含跨币种店铺广告费，此处仅列当前币种金额':financial?.channelCostDays?`已使用 ${number(financial.channelCostDays)} 个渠道日的总费用`:'明确填写0才视为无投放'}/>
         <Card label="整体投产比 ROAS" value={financial?ratio(financial):'暂无数据'} note="同币种全量金额与成本齐全后计算"/>
         <Card label="成交均价" value={financial?.averagePrice!=null?`${money(financial.averagePrice)} ${selected}`:'资料不完整'} note="该币种销售额 ÷ 该币种销量"/>
       </div>

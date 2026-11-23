@@ -50,7 +50,7 @@ const cases=[
   ["createTransportBatch",["管理员","供应链"]],
   ["advanceTransportLeg",["管理员","供应链","海运"]],
   ["updateTransportLegPlan",["管理员","海运"]],
-  ["receiveTransportLeg",["管理员","供应链"]],
+  ["receiveTransportLeg",["管理员","供应链","海运"]],
   ["confirmTransportShelf",["管理员","运营"]],
   ["startNewProductTest",["管理员"]],
   ["assignUser",["管理员"]],

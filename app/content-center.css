@@ -60,6 +60,7 @@
 
 .cc-sku-search>div:first-child{display:flex;align-items:end;gap:6px}.cc-sku-search>div:first-child label{flex:1;min-width:0}.cc-sku-search>div:first-child button{white-space:nowrap}
 .cc-task>.cc-actions:empty{display:none}
+.cc-report-delete-dialog{width:min(540px,94vw);margin:auto}.cc-report-delete-dialog form>label{display:grid;gap:8px;margin:18px 0 8px}.cc-report-delete-dialog input{width:100%;box-sizing:border-box}.cc-report-delete-dialog p{overflow-wrap:anywhere}.cc-report-delete-dialog footer{justify-content:flex-end}.cc .cc-report-delete{color:#a63f48}.cc .cc-delete-confirm{background:#a63f48;border-color:#a63f48;color:white}
 .cc-reference-upload{display:grid;gap:6px;margin:12px 0}.cc-reference{margin:8px 0}.cc-task dd .cc-text-action{margin-right:12px}
 
 .cc-compass {background:#fff;border:1px solid #dce4ee;border-radius:16px;padding:clamp(16px,2vw,30px)}
