@@ -7,7 +7,7 @@ import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 
 const release='a'.repeat(40),script=fileURLToPath(new URL('../scripts/activate-release.sh',import.meta.url));
-function activate(overrides={},withSync=false,withOverride=false,withBest=false,withEmployee=false){
+function activate(overrides={},withSync=false,withOverride=false,withBest=false,withEmployee=false,withFx=false){
  const dir=mkdtempSync(join(tmpdir(),'lj-deploy-'));
  try{
   writeFileSync(join(dir,'docker'),`#!/bin/bash
@@ -25,6 +25,10 @@ esac
   if(withEmployee){
     mkdirSync(join(dir,'secrets/employee-assistant'),{recursive:true});
     writeFileSync(join(dir,'secrets/employee-assistant/api_key'),'synthetic');
+  }
+  if(withFx){
+    mkdirSync(join(dir,'secrets/exchangerate'),{recursive:true});
+    writeFileSync(join(dir,'secrets/exchangerate/api_key'),'synthetic');
   }
   if(withBest){
     mkdirSync(join(dir,'secrets/best-tracking'),{recursive:true});
@@ -65,4 +69,13 @@ test('助手通过独立只读文件挂载，与已有业务密钥同时启用',
  const r=activate({},true,true,true,true);
  assert.equal(r.status,0,r.stderr);
  assert.equal(r.calls.at(-1),'compose -f compose.yaml -f compose.override.yaml -f compose.inquiry-sync.yaml -f compose.employee-assistant.yaml -f compose.best-tracking.yaml up -d --no-build --pull never app');
+});
+
+test('专用汇率密钥单独挂载，保留其他服务配置并支持单独启用',()=>{
+ const combined=activate({},true,true,true,true,true);
+ assert.equal(combined.status,0,combined.stderr);
+ assert.equal(combined.calls.at(-1),'compose -f compose.yaml -f compose.override.yaml -f compose.inquiry-sync.yaml -f compose.employee-assistant.yaml -f compose.best-tracking.yaml -f compose.exchangerate.yaml up -d --no-build --pull never app');
+ const only=activate({},false,false,false,false,true);
+ assert.equal(only.status,0,only.stderr);
+ assert.equal(only.calls.at(-1),'compose -f compose.yaml -f compose.exchangerate.yaml up -d --no-build --pull never app');
 });
