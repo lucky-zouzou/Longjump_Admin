@@ -1,4 +1,7 @@
 import { env } from "cloudflare:workers";
+import {configureSalesFxKeyReader} from './sales-fx.mjs';
+
+configureSalesFxKeyReader(()=>typeof env.readExchangeRateKey==='function'?env.readExchangeRateKey():env.EXCHANGERATE_API_KEY||'');
 
 let ready = false;
 

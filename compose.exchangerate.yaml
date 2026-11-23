@@ -1,0 +1,9 @@
+services:
+  app:
+    environment:
+      LOONGJUMP_EXCHANGERATE_KEY_FILE: /run/secrets/exchangerate_api_key
+    secrets:
+      - exchangerate_api_key
+secrets:
+  exchangerate_api_key:
+    file: ./secrets/exchangerate/api_key

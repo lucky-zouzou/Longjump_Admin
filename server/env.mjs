@@ -1,8 +1,10 @@
 import {readFileSync} from 'node:fs';
 import {openDatabase,fileBucket} from './storage.mjs';
 import {createCompanyAccount} from './create-account.mjs';
+import {readExchangeRateKey} from './exchangerate-config.mjs';
 const key=Symbol.for('loongjump.node.storage');
 export const env=globalThis[key]||(globalThis[key]={DB:openDatabase(),WHOLESALE_FILES:fileBucket()});
+env.readExchangeRateKey=readExchangeRateKey;
 // Keep private file access in Node. Worker deployments use an OPENAI_API_KEY secret.
 env.readEmployeeAssistantKey = () => {
   if(process.env.OPENAI_API_KEY) return process.env.OPENAI_API_KEY;

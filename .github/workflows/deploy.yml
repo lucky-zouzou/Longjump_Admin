@@ -101,6 +101,14 @@ jobs:
           test -n "$EMPLOYEE_OPENAI_API_KEY"
           printf '%s' "$EMPLOYEE_OPENAI_API_KEY" | ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes root@47.238.71.113 'cd /root/loong-jump-v17 && python3 scripts/configure-employee-key.py'
 
+      - name: Configure ExchangeRate-API secret
+        env:
+          EXCHANGERATE_API_KEY: ${{ secrets.EXCHANGERATE_API_KEY }}
+        run: |
+          if [ -n "$EXCHANGERATE_API_KEY" ]; then
+            printf '%s' "$EXCHANGERATE_API_KEY" | ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes root@47.238.71.113 'cd /root/loong-jump-v17 && python3 scripts/configure-exchangerate-key.py'
+          fi
+
       - name: Activate verified image without compiling on production
         timeout-minutes: 5
         run: |
