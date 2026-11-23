@@ -54,7 +54,7 @@ button{margin-top:14px;background:#174e49;color:#fff;border:0;font-weight:650;cu
 </form></main></body></html>`;
 async function smallBody(req){let chunks=[],size=0;for await(const b of req){size+=b.length;if(size>4096)throw Error('Login request too large');chunks.push(b)}return new URLSearchParams(Buffer.concat(chunks).toString())}
 const requestMetrics=createRequestMetrics();
-const server=http.createServer(async(req,res)=>{const started=performance.now();res.once('finish',()=>{try{requestMetrics.record(new URL(req.url,origin).pathname,performance.now()-started,res.statusCode);}catch{}});try{
+const server=http.createServer(async(req,res)=>{const started=performance.now();res.once('finish',()=>{try{const observed=new URL(req.url,origin);requestMetrics.record(observed.pathname,performance.now()-started,res.statusCode,observed.searchParams);}catch{}});try{
  res.setHeader('Permissions-Policy','camera=(), microphone=(), geolocation=(self)');res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('X-Frame-Options','DENY');res.setHeader('Referrer-Policy','same-origin');res.setHeader('Cache-Control','no-store');
  if(req.headers.host!==origin.host){res.writeHead(400);res.end('Invalid host');return}const url=new URL(req.url,origin);
  if(['/distributor','/api/distributor','/distributor/apply'].includes(url.pathname)){
