@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import {NAV_GROUPS} from '../lib/workspace-model.mjs';
 import {navigationForRole} from '../lib/permissions.mjs';
 
-test('原版三组菜单覆盖管理员入口且保留销售与达人协作',()=>{
-  assert.deepEqual(NAV_GROUPS.map(group=>group.label),['日常工作','供应与履约','产品与系统']);
+test('保留原三组菜单并独立加入人员财务入口',()=>{
+  assert.deepEqual(NAV_GROUPS.map(group=>group.label),['日常工作','供应与履约','人员与财务','产品与系统']);
   const keys=NAV_GROUPS.flatMap(group=>group.keys);
   assert.equal(new Set(keys).size,keys.length);
   for(const key of navigationForRole('管理员'))assert.ok(keys.includes(key),key);

@@ -1,0 +1,150 @@
+Browser tab: 10, Title: "LOONG JUMP · 品牌出海供应链控制塔", URL: "http://127.0.0.1:57467/?page=finance-workbench".
+1 AXWebArea LOONG JUMP · 品牌出海供应链控制塔, URL: 127.0.0.1:57467/?page=finance-workbench
+	2 container
+		3 image LOONG JUMP
+		4 text 品牌出海供应链控制塔
+		5 text WORKSPACE
+		6 container 系统导航
+			7 text field (settable) 搜索工作区
+			8 container
+				9 button (expanded) 日常工作, Secondary Actions: Collapse
+				10 container nav-desktop-0
+					11 button 总览 4项待办
+						39 text 总览
+						40 container 4项待办
+							41 text 4
+					12 button 成本利润透明
+					13 button 月度任务与贡献
+					14 button 每日经营行动单
+					15 button 周报与月度复盘
+					16 button 月度清仓 2项待办
+						42 text 月度清仓
+						43 container 2项待办
+							44 text 2
+					17 button 零销量与优惠
+					18 button 印尼线下批发
+					19 button 分销管理
+					20 button 达人与直播 BD
+				21 button (expanded) 供应与履约, Secondary Actions: Collapse
+				22 container nav-desktop-1
+					23 button 品质与交付异常
+					24 button 生产动态
+				25 button (expanded) 人员与财务, Secondary Actions: Collapse
+				26 container nav-desktop-2
+					27 button 出勤管理
+					28 button 财务工作台 2项待办
+						45 text 财务工作台
+						46 container 2项待办
+							47 text 2
+				29 button (expanded) 产品与系统, Secondary Actions: Collapse
+				30 button 新品孵化
+		31 text TEST-ONLY finance2 财务  ·  财务测算 finance2@example.test
+		32 link Description: 退出登录, Value: 127.0.0.1:57467/signout-with-chatgpt?return_to=%2F
+	33 container
+		34 text 人员与财务
+		35 heading 财务工作台, Value: 2
+			36 text 财务工作台
+		37 pop up button 小品同学
+		38 text 导航已更新 15:16:28
+		48 container 小品同学的待办提醒
+			49 button (collapsed) 我的待办 · 4 展开, Secondary Actions: Expand
+				50 container
+					51 text 我的待办  · 4
+				52 text 展开
+		53 text LOONG JUMP ·  人员与财务
+		54 heading 财务工作台, Value: 2
+			55 text 财务工作台
+		56 container 中文 / Bahasa Indonesia
+			57 checkbox 中文, Value: 1
+			58 checkbox Bahasa Indonesia, Value: 0
+		59 link Description: 导出当前授权范围, Value: 127.0.0.1:57467/api/workplace?view=finance&month=2026-11&export=1
+		60 container
+			61 text 历史月份
+			62 date field (settable) 历史月份, Value: 2026-11
+				63 container
+					64 stepper
+					65 stepper
+				66 pop up button 显示月份选择器 显示月份选择器
+		67 button 刷新
+		68 text 个人打卡及申请需要先配置组织、岗位、主管和班次；已获授权的审批、复核仍可处理。
+		69 heading 按原币核对，沿原单据追踪, Value: 3
+			70 text 按原币核对，沿原单据追踪
+		71 text 审批不等于付款。这里登记已经发生的付款和银行核对，不发起银行转账。薪资、税款及广告额度管理尚未开放。
+		72 container
+			73 text TEST ENTITY ID  ·  印尼  ·  IDR 已批 0.00 已登记付款 0.00 待银行核对 0.00 店铺 / 单元数 1  ·  已批折合人民币 0.00
+		74 container
+			75 text TEST ENTITY ID  ·  印尼  ·  CNY 已批 1,000.00 已登记付款 400.00 待银行核对 0.00 店铺 / 单元数 1  ·  已批折合人民币 1,000.00
+		76 link Description: 查看原资金账、平台结算和关账 →, Value: 127.0.0.1:57467/?page=cost-profit&view=finance
+		77 heading 费用申请与付款进度, Value: 3
+			78 text 费用申请与付款进度
+		79 text 包含所选月历史及所有未办结申请。一般费用缺少既有应付来源时，停留待补来源。
+		80 container
+			81 heading 印尼运营 · 广告预算意向, Value: 4
+				82 text 印尼运营  ·  广告预算意向
+			83 text 待主管审批 TEST ENTITY ID  ·  印尼  ·  TEST ops  ·  TikTok  /  TEST store 200,000.00 IDR TEST ONLY supplies 业务日 / 结算日 2026-09-10  /  2026-09-10  ·  TEST source 已付 0.00  ·  未付 —  ·  已核销 0.00 IDR
+			84 container
+				85 text 上传私有凭证（PDF / PNG / JPG，10MB以内）
+				86 button 上传私有凭证（PDF / PNG / JPG，10MB以内）
+			87 button 上传凭证
+		88 container
+			89 heading 印尼运营 · 办公费用, Value: 4
+				90 text 印尼运营  ·  办公费用
+			91 text 待复核 / 待补来源 TEST ENTITY ID  ·  印尼  ·  TEST ops  ·  TikTok  /  TEST store 500.00 CNY TEST ONLY supplies 业务日 / 结算日 2026-09-10  /  2026-09-10  ·  TEST source 已付 0.00  ·  未付 —  ·  已核销 0.00 CNY 处理依据
+			92 text field (settable) 处理依据
+			93 button (disabled) 财务退回
+			94 container
+				95 text 已核定组织归属的原应付
+				96 pop up button (collapsed, settable) 已核定组织归属的原应付, Value: —, Secondary Actions: Expand
+					97 menu
+						98 (selected) —
+						99 TEST-BILL · TEST supplier · 600.00 CNY
+			100 container
+				101 text 复核依据
+				102 text field (settable) 复核依据
+			103 checkbox (settable, integer) Description: 已核对付款法人、来源、原币金额, Value: 0
+			104 button 财务复核，转待支付
+			105 container
+				106 text 上传私有凭证（PDF / PNG / JPG，10MB以内）
+				107 button 上传私有凭证（PDF / PNG / JPG，10MB以内）
+			108 button 上传凭证
+		109 container
+			110 heading 印尼运营 · 办公费用, Value: 4
+				111 text 印尼运营  ·  办公费用
+			112 text 已批准 TEST ENTITY ID  ·  印尼  ·  TEST ops  ·  TikTok  /  TEST store 1,000.00 CNY TEST ONLY supplies 业务日 / 结算日 2026-09-10  /  2026-09-10  ·  TEST source 已付 400.00  ·  未付 600.00  ·  已核销 400.00 CNY 应付来源 TEST-BILL  ·  复核时汇率 1 CNY / CNY · 2026-09 v1
+			113 link Description: 私有凭证 · TEST-proof.pdf, Value: 127.0.0.1:57467/api/workplace/files?id=fcc3a962-05ed-460f-b44d-462299137b21
+			114 container
+				115 text 上传私有凭证（PDF / PNG / JPG，10MB以内）
+				116 button 上传私有凭证（PDF / PNG / JPG，10MB以内）
+			117 button 上传凭证
+			118 container
+				119 text 本笔实际付款原币
+				120 stepper (settable) 本笔实际付款原币
+			121 container
+				122 text 银行记账日
+				123 date field (settable) 银行记账日
+					124 container
+						125 stepper
+						126 stepper
+						127 stepper
+					128 pop up button 显示日期选择器 显示日期选择器
+			129 container
+				130 text 付款银行账户标识
+				131 text field (settable) 付款银行账户标识
+			132 container
+				133 text 银行流水唯一号
+				134 text field (settable) 银行流水唯一号
+			135 container
+				136 text 银行凭证
+				137 pop up button (collapsed, settable) 银行凭证, Value: —, Secondary Actions: Expand
+					138 menu
+						139 (selected) —
+						140 TEST-proof.pdf
+			141 container
+				142 text 实际付款登记依据
+				143 text field (settable) 实际付款登记依据
+			144 button 登记已付款（不划账）
+			145 text 400.00 CNY  ·  2026-09-11 银行已核对并核销
+		146 button (collapsed) 审批与操作记录, Secondary Actions: Expand
+			147 text 审批与操作记录
+
+The focused UI element is 28 button 财务工作台 2项待办

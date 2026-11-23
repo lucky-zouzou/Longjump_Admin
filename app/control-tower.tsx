@@ -52,6 +52,7 @@ import { translateWholesale } from "../lib/wholesale-i18n.mjs";
 import { lazy,Suspense,useCallback, useEffect, useRef, useState } from "react";
 import { dataDomainsForRole, DATA_DOMAIN_LABELS, hasPermission, navigationForActor, navigationForRole, PERMISSION_LABELS, permissionsForRole, ROLE_PERMISSIONS } from "../lib/permissions.mjs";
 
+const PeopleWorkplace=lazy(()=>import("./people-workplace"));
 const ContentCenter=lazy(()=>import("./content-center"));
 const CreatorWorkspace=lazy(()=>import("./creator-workspace"));
 const CostProfit=lazy(()=>import("./cost-profit"));
@@ -97,7 +98,7 @@ type AllocationDraft = { site:string; channel:string; qty:string };
 type Act = (action:string,payload:Row,success:string,onError?:(message:string)=>void)=>Promise<Row|null>;
 
 const navItems = [
-  ["overview","总览","◫"], ["cost-profit","成本利润透明","◈"], ["sales-targets","月度任务与贡献","◎"], ["business-actions","每日经营行动单","✓"], ["reviews","周报与月度复盘","▤"], ["clearance","月度清仓", "↓"],["promotions","零销量与优惠","↓"], ["after-sales","售后反馈","↩"], ["quality-incidents","品质与交付异常","⚑"], ["users","用户管理","♙"], ["wholesale","印尼线下批发","▣"], ["distribution","分销管理","▣"], ["suggestions","补货驾驶舱","◎"], ["new-products","新品孵化","◇"], ["sales","销售数据","↗"], ["creators","达人与直播 BD","◉"], ["content-center","TikTok 内容中心","▷"], ["inventory","库存流水","▦"],
+  ["attendance","出勤管理","◷"], ["finance-workbench","财务工作台","▤"], ["overview","总览","◫"], ["cost-profit","成本利润透明","◈"], ["sales-targets","月度任务与贡献","◎"], ["business-actions","每日经营行动单","✓"], ["reviews","周报与月度复盘","▤"], ["clearance","月度清仓", "↓"],["promotions","零销量与优惠","↓"], ["after-sales","售后反馈","↩"], ["quality-incidents","品质与交付异常","⚑"], ["users","用户管理","♙"], ["wholesale","印尼线下批发","▣"], ["distribution","分销管理","▣"], ["suggestions","补货驾驶舱","◎"], ["new-products","新品孵化","◇"], ["sales","销售数据","↗"], ["creators","达人与直播 BD","◉"], ["content-center","TikTok 内容中心","▷"], ["inventory","库存流水","▦"],
   ["receipt","历史到仓","↓"], ["monthly","月度计划","▤"], ["approval","审批中心","✓"], ["fulfillment","系列采购生产","▥"], ["production-tracking","生产动态","◉"], ["batches","海运批次","⇢"],
   ["master","主数据","⌘"], ["audit","审计日志","◷"], ["permissions","权限测试","⊙"],
 ];
@@ -304,6 +305,7 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
         {tab==="distribution" && <WholesaleLanguageContext.Provider value={wholesaleLocale}><Distribution route={route} navigate={navigate} onChanged={()=>refresh(true)}/></WholesaleLanguageContext.Provider>}
         {tab==="wholesale" && <WholesaleLanguageContext.Provider value={wholesaleLocale}><Wholesale onChanged={()=>refresh(true)} route={route} navigate={navigate}/></WholesaleLanguageContext.Provider>}
         {tab==="reviews" && <BusinessReviews initialView={route.view} initialDate={route.entity}/>}
+        {["attendance","finance-workbench"].includes(tab) && <WholesaleLanguageContext.Provider value={wholesaleLocale}><PeopleWorkplace key={tab} view={tab==="attendance"?"attendance":"finance"}/></WholesaleLanguageContext.Provider>}
         {tab==="content-center" && <ContentCenter key={route.entity} initialId={route.entity} tasks={data.myTasks.filter(t=>t.tab===tab)}/>}
         {tab==="creators" && <CreatorWorkspace initialId={route.entity}/>}
         {tab==="cost-profit" && <CostProfit key={route.view+route.entity+route.month} role={actor.role} initialView={route.view} initialSku={route.entity} initialMonth={route.month}/>}

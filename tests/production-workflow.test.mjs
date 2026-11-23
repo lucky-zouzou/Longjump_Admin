@@ -59,7 +59,7 @@ test('生产协作岗位共享脱敏动态，专用拍摄账号与工厂业务�
  f.sqlite.prepare("UPDATE series_production_orders SET evidence_json=?").run(JSON.stringify([{stage:'factory_accepted',at:new Date().toISOString(),by:'工厂甲',reference:'PRIVATE-REPORT',note:'PRIVATE-NOTE'}]));
  for(const role of Object.keys(ROLE_PERMISSIONS)){
   const actor=role==='工厂'?{...f.factory,id:'other-factory'}:role==='运营'?f.users.indonesia:{...f.users.sales,role};
-  if(role==='拍摄剪辑'){
+  if(['拍摄剪辑','员工'].includes(role)){
     assert.equal(canReadDomain(role,'production_tracking'),false);assert.equal(navigationForRole(role).includes('production-tracking'),false);
     assert.ok((await read(actor,'production-tracking')).error);continue;
   }
