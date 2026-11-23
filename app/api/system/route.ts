@@ -1,5 +1,6 @@
 import {forecastChanges} from "../../../lib/forecast-observations.mjs";
 import {transportSummary} from "../../../lib/supply-diagnostics.mjs";
+import {transportReceiptOwner} from "../../../lib/transport-workflow.mjs";
 import {salesWindow} from "../../../lib/sales-window.mjs";
 import {loadReplenishmentCosts,factoryPurchaseDocument} from "../../../lib/replenishment-costs.mjs";
 import {localDay} from "../../../lib/promotion-model.mjs";
@@ -64,7 +65,7 @@ const TRANSPORT_FLOW:Record<string,{next:string;nextOwner:string}>={
   sea_freight:{next:"port_arrived",nextOwner:"海运"},
   port_arrived:{next:"customs_clearance",nextOwner:"海运"},
   customs_clearance:{next:"last_mile_delivery",nextOwner:"海运"},
-  last_mile_delivery:{next:"awaiting_receipt",nextOwner:"供应链"},
+  last_mile_delivery:{next:"awaiting_receipt",nextOwner:"海运"},
 };
 const TRANSPORT_STAGE_ORDER=["booking","sea_freight","port_arrived","customs_clearance","last_mile_delivery","awaiting_receipt","shelf_pending","on_shelf"];
 const TRANSPORT_STALL_DAYS:Record<string,number>={booking:2,sea_freight:45,port_arrived:2,customs_clearance:5,last_mile_delivery:5,awaiting_receipt:2,shelf_pending:2};
@@ -272,7 +273,7 @@ export async function GET(request:Request) {
     }
     const purchaseOrders:AnyRow[]=purchaseOrderRows.map((order):AnyRow=>{
       const items=purchaseItemsByOrder.get(order.id)??[];
-      return {...order,...(actor.role==="工厂"?{document_json:JSON.stringify(factoryPurchaseDocument(parseJson(order.document_json,{})))}:{}),items,visibleQty:items.reduce((sum,row)=>sum+Number(row.visibleQty||0),0),visibleSkuCount:items.length};
+      return {...order,...(actor.role==="工厂"?{quantity_document_json:null,document_json:JSON.stringify(factoryPurchaseDocument(parseJson(order.quantity_document_json||order.document_json,{})))}:{}),items,visibleQty:items.reduce((sum,row)=>sum+Number(row.visibleQty||0),0),visibleSkuCount:items.length};
     }).filter((order)=>actor.role!=="运营"||order.items.length>0);
 
     const purchaseItemById=new Map<string,AnyRow>(purchaseItemRows.map((row)=>[row.id,row]));
@@ -356,6 +357,7 @@ export async function GET(request:Request) {
     const bestCards=module==="batches"&&roleVisibleTransportLegs.length?await cardSummaries(database(),roleVisibleTransportLegs.map(l=>l.id)):new Map();
     const transportLegViews:AnyRow[]=roleVisibleTransportLegs.map((leg):AnyRow=>{
       const items=transportLegItemsByLeg.get(leg.id)??[];
+      const stageOwner=leg.stage==="awaiting_receipt"?transportReceiptOwner(leg):leg.stage_owner;
       const stageIndex=TRANSPORT_STAGE_ORDER.indexOf(leg.stage);
       const age=Math.max(0,Math.floor((Date.now()-Date.parse(leg.updated_at))/86400_000));
       const threshold=TRANSPORT_STALL_DAYS[leg.stage]??null;
@@ -365,11 +367,11 @@ export async function GET(request:Request) {
       const received=items.reduce((sum,row)=>sum+Number(row.received_qty||0),0);
       const sellable=items.reduce((sum,row)=>sum+Number(row.sellable_qty||0),0);
       const exceptions:Array<{level:string;type:string;detail:string}>=[];
-      if(threshold!==null&&age>threshold) exceptions.push({level:"red",type:"节点停滞",detail:`已${age}天未更新，请${leg.stage_owner}跟进`});
+      if(threshold!==null&&age>threshold) exceptions.push({level:"red",type:"节点停滞",detail:`已${age}天未更新，请${stageOwner}跟进`});
       if(["sea_freight","port_arrived","customs_clearance","last_mile_delivery"].includes(leg.stage)&&!leg.eta) exceptions.push({level:"amber",type:"缺少ETA",detail:"目的地运输分批尚未维护ETA"});
       if(etaDays!==null&&etaDays<0&&!['shelf_pending','on_shelf'].includes(leg.stage)) exceptions.push({level:"red",type:"ETA逾期",detail:`预计到仓已逾期${Math.abs(etaDays)}天`});
       if(quarantine>0) exceptions.push({level:"amber",type:"隔离库存",detail:`${quarantine}件待质检或报损处理`});
-      return {...leg,items,bestTracking:bestCards.get(leg.id)||[],evidence:parseJson(leg.evidence_json,[]),stageAgeDays:age,exceptions,pendingShelfQty:pendingShelf,quarantineQty:quarantine,receivedQty:received,sellableQty:sellable,progress:leg.stage==="on_shelf"?1:Math.max(0,stageIndex)/(TRANSPORT_STAGE_ORDER.length-1)};
+      return {...leg,stage_owner:stageOwner,items,bestTracking:bestCards.get(leg.id)||[],evidence:parseJson(leg.evidence_json,[]),stageAgeDays:age,exceptions,pendingShelfQty:pendingShelf,quarantineQty:quarantine,receivedQty:received,sellableQty:sellable,progress:leg.stage==="on_shelf"?1:Math.max(0,stageIndex)/(TRANSPORT_STAGE_ORDER.length-1)};
     });
     const transportLegsByBatch=new Map<string,AnyRow[]>();
     for(const leg of transportLegViews){const rows=transportLegsByBatch.get(leg.batch_id)??[];rows.push(leg);transportLegsByBatch.set(leg.batch_id,rows);}
@@ -917,23 +919,27 @@ async function submitPlan(actor:Actor,payload:AnyRow) {
       if(!row.name) row.name=item.name; summary.set(item.sku,row);
     }
   }
-  const items=[...summary.values()];
+  const demandItems=[...summary.values()];
+  let items=demandItems;
   // A fully confirmed zero-demand month is still a valid plan.
   for(const item of items){ if(!allocationMatchesTotal(item.total,item.allocations)) throw new HttpError(409,`${item.sku}总量与站点渠道分配不一致`); }
   const db=database(), timestamp=nowIso();
-  const seriesOrders=buildSeriesOrders(items,await all("SELECT sku,product_series,supplier_name,factory_name FROM sku_settings"));
+  let seriesOrders=buildSeriesOrders(items,await all("SELECT sku,product_series,supplier_name,factory_name FROM sku_settings"));
   const existing=await db.prepare("SELECT * FROM approval_requests WHERE type='monthly_plan' AND month=?").bind(month).first<AnyRow>();
   if(existing && !["rejected","withdrawn"].includes(existing.status)) throw new HttpError(409,"该月计划已经提交审批");
   if(existing && Number(payload.version)!==Number(existing.version)) throw new HttpError(409,"计划版本已变化，请刷新后重新送审");
   const procurement=await purchaseDocumentsForSubmission(db,actor,month,seriesOrders);
+  // Supply-confirmed factory quantities are authoritative for execution; operations demand stays intact.
+  items=procurement.documents.flatMap((document:AnyRow)=>document.items);
+  seriesOrders=procurement.documents.map((document:AnyRow)=>({seriesName:document.seriesName,supplierName:document.supplierName,factoryName:document.factoryName,totalQty:document.totalQty,items:document.items}));
   const approvalId=existing?.id??makeId("approval");
   const sql=existing
     ? "UPDATE approval_requests SET version=version+1,status='pending',stage='admin_review',creator_id=?,creator_role=?,payload_json=?,decision_comment='',approved_by=NULL,updated_at=? WHERE id=?"
     : "INSERT INTO approval_requests (id,type,month,status,stage,creator_id,creator_role,payload_json,decision_comment,approved_by,created_at,updated_at) VALUES (?,'monthly_plan',?,'pending','admin_review',?,?,?,'',NULL,?,?)";
   const statement=existing
-    ? db.prepare(sql).bind(actor.id,actor.role,JSON.stringify({items,seriesOrders,purchaseDocuments:procurement.documents}),timestamp,approvalId)
-    : db.prepare(sql).bind(approvalId,month,actor.id,actor.role,JSON.stringify({items,seriesOrders,purchaseDocuments:procurement.documents}),timestamp,timestamp);
-  await atomicBatch(db,[...procurement.guards,...submissions.map(row=>guardStatement(db,actor,"submitPlan","EXISTS (SELECT 1 FROM monthly_submissions WHERE id=? AND version=?)",[row.id,row.version])),guardStatement(db,actor,"submitPlan",existing?"EXISTS (SELECT 1 FROM approval_requests WHERE id=? AND version=? AND status IN ('rejected','withdrawn'))":"NOT EXISTS (SELECT 1 FROM approval_requests WHERE type='monthly_plan' AND month=?)",existing?[existing.id,existing.version]:[month]),statement,audit(actor,existing?"重新提交月度计划审批":"按系列提交月度计划审批","approval",approvalId,{month,fromStatus:existing?.status??null,fromVersion:existing?.version??null,status:"pending",version:Number(existing?.version||0)+1,creatorId:actor.id,creatorRole:actor.role,seriesCount:seriesOrders.length,skuCount:items.length,totalQty:items.reduce((s,r)=>s+r.total,0),plan:{items,seriesOrders,purchaseDocuments:procurement.documents}})]);
+    ? db.prepare(sql).bind(actor.id,actor.role,JSON.stringify({items,demandItems,seriesOrders,purchaseDocuments:procurement.documents}),timestamp,approvalId)
+    : db.prepare(sql).bind(approvalId,month,actor.id,actor.role,JSON.stringify({items,demandItems,seriesOrders,purchaseDocuments:procurement.documents}),timestamp,timestamp);
+  await atomicBatch(db,[...procurement.guards,...submissions.map(row=>guardStatement(db,actor,"submitPlan","EXISTS (SELECT 1 FROM monthly_submissions WHERE id=? AND version=?)",[row.id,row.version])),guardStatement(db,actor,"submitPlan",existing?"EXISTS (SELECT 1 FROM approval_requests WHERE id=? AND version=? AND status IN ('rejected','withdrawn'))":"NOT EXISTS (SELECT 1 FROM approval_requests WHERE type='monthly_plan' AND month=?)",existing?[existing.id,existing.version]:[month]),statement,audit(actor,existing?"重新提交月度计划审批":"按系列提交月度计划审批","approval",approvalId,{month,fromStatus:existing?.status??null,fromVersion:existing?.version??null,status:"pending",version:Number(existing?.version||0)+1,creatorId:actor.id,creatorRole:actor.role,seriesCount:seriesOrders.length,skuCount:items.length,totalQty:items.reduce((s,r)=>s+r.total,0),plan:{items,demandItems,seriesOrders,purchaseDocuments:procurement.documents}})]);
   return Response.json({ok:true,approvalId,version:Number(existing?.version||0)+1,seriesCount:seriesOrders.length,skuCount:items.length});
 }
 
@@ -1064,7 +1070,7 @@ async function exportProductionOrder(actor:Actor,payload:AnyRow){
   const document=productionDocument(order,items,purchase||{}),fingerprint=await productionFingerprint(order,items,purchase||{}),receiptId=makeId("export"),timestamp=nowIso();
   await atomicBatch(db,[guardStatement(db,actor,"导出工厂订单","EXISTS(SELECT 1 FROM series_production_orders WHERE id=? AND updated_at=? AND status=?)",[order.id,order.updated_at,order.status]),
     db.prepare("INSERT INTO audit_logs(id,action,entity_type,entity_id,detail_json,actor_id,actor_name,created_at) VALUES(?,'生成工厂订单导出','series_production_order',?,?,?,?,?)").bind(receiptId,order.id,JSON.stringify({fingerprint,skuCount:items.length,plannedQty:document.plannedQty}),actor.id,actor.name,timestamp)]);
-  return Response.json({ok:true,document,purchaseDocument:purchase?.workflow_version===1?factoryPurchaseDocument(parseJson(purchase.document_json,{})):null,exportReceiptId:receiptId});
+  return Response.json({ok:true,document,purchaseDocument:purchase?.workflow_version===1?factoryPurchaseDocument(parseJson(purchase.quantity_document_json||purchase.document_json,{})):null,exportReceiptId:receiptId});
 }
 
 async function acceptProductionOrder(actor:Actor,payload:AnyRow){
@@ -1118,7 +1124,7 @@ async function completeProductionOrder(actor:Actor,payload:AnyRow){
   for(const row of Array.isArray(payload.items)?payload.items:[]){const idValue=cleanText(row.id,120),qty=Number(row.producedQty);if(idValue&&Number.isInteger(qty))inputMap.set(idValue,qty);}
   if(sourceItems.some((row)=>!inputMap.has(row.id))) throw new HttpError(400,"请完整填写该系列下所有SKU的完工数量");
   let totalProduced=0;
-  for(const item of sourceItems){const qty=Number(inputMap.get(item.id));if(qty<0||qty>Number(item.planned_qty)*2)throw new HttpError(400,`${item.sku}完工数量不合法`);totalProduced+=qty;}
+  for(const item of sourceItems){const qty=Number(inputMap.get(item.id));if(qty<Number(item.produced_qty||0)||qty>Number(item.planned_qty)*2)throw new HttpError(400,`${item.sku}完工数量不合法`);totalProduced+=qty;}
   const timestamp=nowIso(),status=totalProduced===Number(order.total_planned_qty)?"completed":"completed_with_variance";
   const evidence=parseJson<AnyRow[]>(order.evidence_json,[]);evidence.push({stage:"production_completed",reference:evidenceRef,note,plannedQty:Number(order.total_planned_qty),producedQty:totalProduced,at:timestamp,by:actor.name,role:actor.role});
   const statements=[guardStatement(db,actor,"生产完工状态校验","EXISTS(SELECT 1 FROM series_production_orders WHERE id=? AND status=? AND updated_at=?)",[productionOrderId,order.status,order.updated_at]),...sourceItems.map((item)=>db.prepare("UPDATE series_production_order_items SET produced_qty=?,updated_at=? WHERE id=?").bind(inputMap.get(item.id),timestamp,item.id))];
@@ -1247,7 +1253,7 @@ async function advanceTransportLeg(actor:Actor,payload:AnyRow){
   if(transition.next==="customs_clearance"&&!ata) throw new HttpError(400,"到港转清关必须填写实际到港日");
   const expectedVersion=Number.isInteger(version)?version:Number(leg.version),timestamp=nowIso(),evidence=parseJson<AnyRow[]>(leg.evidence_json,[]);
   evidence.push({stage:leg.stage,reference:evidenceRef,note,etd:etd||undefined,eta:eta||undefined,ata:ata||undefined,portName:portName||undefined,at:timestamp,by:actor.name,role:actor.role});
-  const result=await db.prepare("UPDATE transport_legs SET stage=?,stage_owner=?,etd=CASE WHEN ?<>'' THEN ? ELSE etd END,eta=CASE WHEN ?<>'' THEN ? ELSE eta END,ata=CASE WHEN ?<>'' THEN ? ELSE ata END,port_name=CASE WHEN ?<>'' THEN ? ELSE port_name END,evidence_json=?,version=version+1,updated_at=? WHERE id=? AND version=?").bind(transition.next,transition.nextOwner,etd,etd,eta,eta,ata,ata,portName,portName,JSON.stringify(evidence),timestamp,legId,expectedVersion).run();
+  const result=await db.prepare("UPDATE transport_legs SET stage=?,stage_owner=?,etd=CASE WHEN ?<>'' THEN ? ELSE etd END,eta=CASE WHEN ?<>'' THEN ? ELSE eta END,ata=CASE WHEN ?<>'' THEN ? ELSE ata END,port_name=CASE WHEN ?<>'' THEN ? ELSE port_name END,evidence_json=?,version=version+1,updated_at=? WHERE id=? AND version=?").bind(transition.next,transition.next==="awaiting_receipt"?transportReceiptOwner(leg):transition.nextOwner,etd,etd,eta,eta,ata,ata,portName,portName,JSON.stringify(evidence),timestamp,legId,expectedVersion).run();
   if(!result.meta.changes) throw new HttpError(409,"该运输节点已被其他人更新，请刷新后重试");
   await db.batch([db.prepare("UPDATE transport_batches SET status='active',updated_at=? WHERE id=?").bind(timestamp,leg.batch_id),audit(actor,"推进目的地运输节点","transport_leg",legId,{from:leg.stage,to:transition.next,evidenceRef,note,etd,eta,ata,portName})]);
   return Response.json({ok:true,stage:transition.next,version:expectedVersion+1});
@@ -1271,6 +1277,9 @@ async function receiveTransportLeg(actor:Actor,payload:AnyRow){
   if(!legId||!receiptNo||!proofRef) throw new HttpError(400,"请填写到仓单号和到仓凭证");
   const db=database(),leg=await db.prepare("SELECT * FROM transport_legs WHERE id=?").bind(legId).first<AnyRow>();
   if(!leg||leg.stage!=="awaiting_receipt") throw new HttpError(409,"该目的地分腿当前不在等待到仓节点");
+  if(actor.role==="海运") requireAssignedActor(actor,"海运",leg.assigned_user_id,"运输分腿");
+  const expectedVersion=payload.version==null?Number(leg.version):Number(payload.version);
+  if(!Number.isSafeInteger(expectedVersion)||expectedVersion!==Number(leg.version)) throw new HttpError(409,"签收记录已更新，请刷新后核对剩余可收数量");
   if(await db.prepare("SELECT id FROM transport_receipts WHERE receipt_no=?").bind(receiptNo).first()) throw new HttpError(409,"到仓单号已经登记");
   const sourceItems=await all("SELECT li.*,bi.name FROM transport_leg_items li JOIN transport_batch_items bi ON bi.id=li.batch_item_id WHERE li.leg_id=?",[legId]);
   const inputMap=new Map<string,{received:number;quarantine:number}>();
@@ -1280,6 +1289,7 @@ async function receiveTransportLeg(actor:Actor,payload:AnyRow){
   if(!selected.length) throw new HttpError(400,"本次至少登记一个SKU的实收数量");
   for(const item of selected) if(inputMap.get(item.id)!.received>Number(item.qty)-Number(item.received_qty||0)) throw new HttpError(409,`${item.sku}实收超过剩余可收数量`);
   const receiptId=makeId("transport_receipt"),timestamp=nowIso(),totalReceived=selected.reduce((sum,row)=>sum+inputMap.get(row.id)!.received,0),totalQuarantine=selected.reduce((sum,row)=>sum+inputMap.get(row.id)!.quarantine,0),statements:ReturnType<ReturnType<typeof database>["prepare"]>[]=[];
+  statements.push(guardStatement(db,actor,"登记目的地到仓",`EXISTS(SELECT 1 FROM transport_legs WHERE id=? AND stage='awaiting_receipt' AND version=?${actor.role==="海运"?" AND assigned_user_id=?":""})`,[legId,expectedVersion,...(actor.role==="海运"?[actor.id]:[])]));
   statements.push(db.prepare("INSERT INTO transport_receipts (id,receipt_no,leg_id,proof_ref,note,total_received_qty,total_quarantine_qty,actor_id,received_at) VALUES (?,?,?,?,?,?,?,?,?)").bind(receiptId,receiptNo,legId,proofRef,note,totalReceived,totalQuarantine,actor.id,timestamp));
   for(const item of selected){
     const value=inputMap.get(item.id)!,pending=value.received-value.quarantine;
@@ -1291,8 +1301,8 @@ async function receiveTransportLeg(actor:Actor,payload:AnyRow){
     );
   }
   const willBeComplete=sourceItems.every((item)=>Number(item.received_qty||0)+(inputMap.get(item.id)?.received??0)>=Number(item.qty));
-  statements.push(db.prepare("UPDATE transport_legs SET stage=?,stage_owner=?,version=version+1,updated_at=? WHERE id=?").bind(willBeComplete?"shelf_pending":"awaiting_receipt",willBeComplete?"运营":"供应链",timestamp,legId),audit(actor,"登记目的地到仓","transport_leg",legId,{receiptNo,totalReceived,totalQuarantine,complete:willBeComplete,proofRef,note}));
-  await db.batch(statements);
+  statements.push(db.prepare("UPDATE transport_legs SET stage=?,stage_owner=?,version=version+1,updated_at=? WHERE id=?").bind(willBeComplete?"shelf_pending":"awaiting_receipt",willBeComplete?"运营":transportReceiptOwner(leg),timestamp,legId),audit(actor,"登记目的地到仓","transport_leg",legId,{receiptNo,totalReceived,totalQuarantine,complete:willBeComplete,proofRef,note}));
+  await atomicBatch(db,statements);
   return Response.json({ok:true,receiptId,totalReceived,totalQuarantine,stage:willBeComplete?"shelf_pending":"awaiting_receipt"});
 }
 

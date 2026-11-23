@@ -40,6 +40,7 @@ const ReplenishmentExport=lazy(()=>import("./replenishment-export"));
 const ReplenishmentHistory=lazy(()=>import("./replenishment-history"));
 const TransportLegCard=lazy(()=>import("./transport-workflow"));
 const TransportCreated=lazy(()=>import("./transport-workflow").then(m=>({default:m.TransportCreated})));
+const PurchaseQuantityChanges=lazy(()=>import("./purchase-quantity-changes"));
 const PlanChanges=lazy(()=>import("./plan-changes"));
 const SupplyPicker=lazy(()=>import("./plan-changes").then(m=>({default:m.SupplyPicker})));
 const PurchaseReassign=lazy(()=>import("./plan-changes").then(m=>({default:m.PurchaseReassign})));
@@ -323,10 +324,10 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
         {tab==="sales" && route.view!=='imports' && <SalesImport data={data} act={act} busy={busy}/>}
         {tab==="inventory" && <Inventory data={data} act={act} busy={busy} scope={inventoryScope} clearScope={()=>setInventoryScope(null)}/>}
         {tab==="receipt" && <Receipt data={data} act={act} busy={busy}/>}
-        {tab==="monthly" && <Monthly data={data} act={act} busy={busy} route={route}/>}
+        {tab==="monthly" && <Monthly data={data} act={act} busy={busy} route={route} onRefresh={()=>refresh(true)}/>}
         {tab==="approval" && <Approvals data={data} act={act} busy={busy} goInventory={scope=>{setInventoryScope(scope);setTab("inventory");}} goWholesale={()=>setTab("wholesale")}/>}
         {tab==="production-tracking" && <ProductionTracking rows={data.productionTracking||[]} generatedAt={data.generatedAt}/>}
-        {tab==="fulfillment" && <Fulfillment data={data} act={act} busy={busy}/>}
+        {tab==="fulfillment" && <Fulfillment data={data} act={act} busy={busy} onRefresh={()=>refresh(true)}/>}
         {tab==="batches" && <Batches data={data} act={act} busy={busy}/>}
         {tab==="master" && <MasterData data={data} act={act} busy={busy}/>}
         {tab==="audit" && <Audit data={data}/>}
@@ -820,7 +821,7 @@ function ProductionPriority({data}:{data:Snapshot}) {
   </Panel>;
 }
 
-function Monthly({data,act,busy,route}:{data:Snapshot;act:Act;busy:boolean;route:Row}) {
+function Monthly({data,act,busy,route,onRefresh}:{data:Snapshot;act:Act;busy:boolean;route:Row;onRefresh:()=>Promise<unknown>}) {
   const submitted=data.monthlyStatus.filter(r=>r.submitted).length;
   const currentPlan=data.approvals.find(r=>r.type==="monthly_plan"&&r.month===data.currentMonth);
   const locked=currentPlan&&["pending","approved"].includes(currentPlan.status);
@@ -840,6 +841,7 @@ function Monthly({data,act,busy,route}:{data:Snapshot;act:Act;busy:boolean;route
     <Panel title="各站点提交记录" desc="进入审批后锁定；已批准计划通过变更审批调整">
       <div className="table-wrap"><table><thead><tr><th>月份</th><th>站点/渠道</th><th className="num">SKU数</th><th className="num">备货量</th><th>提交时间</th></tr></thead><tbody>{data.submissions.length===0?<tr><td colSpan={5}><Empty>暂无月度提交记录</Empty></td></tr>:data.submissions.map(r=><tr key={r.id}><td>{r.month}</td><td>{r.site} · {r.channel}</td><td className="num">{r.items.length}</td><td className="num">{fmt(r.total_qty)}</td><td>{String(r.submitted_at).replace("T"," ").slice(0,16)}</td></tr>)}</tbody></table></div>
     </Panel>
+    {["管理员","供应链"].includes(data.actor.role)&&<PurchaseQuantityChanges actor={data.actor} month={data.currentMonth} onChanged={async()=>{await onRefresh();}}/>}
     <PlanChanges data={data} act={act} busy={busy}/>
   </>;
 }
@@ -852,7 +854,7 @@ function Approvals({data,act,busy,goWholesale,goInventory}:{data:Snapshot;act:Ac
   </>;
 }
 
-function Fulfillment({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}){
+function Fulfillment({data,act,busy,onRefresh}:{data:Snapshot;act:Act;busy:boolean;onRefresh:()=>Promise<unknown>}){
   const statusLabel:Record<string,string>={draft:"待供应商确认",supplier_confirmed:"供应商已接单",in_production:"生产中",awaiting_qc:"待质检",ready_to_ship:"可发货",qc_rejected:"质检不通过",awaiting_order:"待采购确认",awaiting_factory:"待工厂接单",pending:"历史待生产",completed:"已完工",completed_with_variance:"差异完工"};
   const confirmPurchase=async(order:Row)=>{const orderRef=window.prompt("供应商订单号");const expectedCompletionDate=window.prompt("预计完工日（YYYY-MM-DD）",localDate());const note=window.prompt("接单说明")||"供应商已确认";if(orderRef&&expectedCompletionDate)await act("confirmPurchaseOrder",{purchaseOrderId:order.id,orderRef,expectedCompletionDate,note},"供应商接单已确认并推送工厂");};
   return <>
@@ -866,7 +868,7 @@ function Fulfillment({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}){
       <div className="metric"><div className="label">待创建海运批次</div><div className="value">{fmt(data.metrics.readyToShipProductionOrderCount)}</div><div className="foot">可按SKU拆分发货</div></div>
       <div className="metric"><div className="label">运输主批次</div><div className="value">{fmt(data.transportBatches.length)}</div><div className="foot">可跨系列合柜，多目的地分腿</div></div>
     </div>
-    {["管理员","供应链","工厂"].includes(data.actor.role)&&<FactoryDocuments actor={data.actor} act={act} busy={busy}/>}
+    {["管理员","供应链","工厂"].includes(data.actor.role)&&<FactoryDocuments actor={data.actor} act={act} busy={busy} onRefresh={onRefresh}/>}
     {data.actor.role==="工厂"&&<ProductionOrders data={data} act={act} busy={busy}/>}
     <Panel title="系列采购单" desc="默认只展示系列汇总；SKU明细在生产单中追溯">
       <div className="table-wrap"><table><thead><tr><th>月份</th><th>系列</th><th>供应商</th><th className="num">SKU数</th><th className="num">下单数量</th><th>订单/交期</th><th>状态</th><th></th></tr></thead><tbody>{data.purchaseOrders.length===0?<tr><td colSpan={8}><Empty>管理员批准月度计划后自动生成系列采购单</Empty></td></tr>:data.purchaseOrders.map(order=><tr key={order.id} data-entity-id={order.id} tabIndex={-1}><td>{order.month}</td><td><strong>{order.series_name}</strong><div className="cell-note">{order.id}</div></td><td>{order.supplier_name}</td><td className="num">{fmt(order.visibleSkuCount)}</td><td className="num">{fmt(order.visibleQty)}</td><td>{order.order_ref||"—"}<div className="cell-note">{order.expected_completion_date||"待确认"}</div></td><td><Pill tone={order.status==="draft"?"red":order.status==="qc_rejected"?"red":"green"}>{order.workflow_version===1&&order.status==="supplier_confirmed"?"已批准下发工厂":statusLabel[order.status]||order.status}</Pill></td><td>{["draft","ordered"].includes(order.status)&&hasPermission(data.actor.role,"purchase.confirm")&&<button className="btn primary" disabled={busy} onClick={()=>confirmPurchase(order)}>确认接单</button>}<PurchaseReassign data={data} order={order} act={act} busy={busy}/></td></tr>)}</tbody></table></div>
@@ -909,13 +911,14 @@ function TransportReceipt({leg,act,busy,close}:{leg:Row;act:Act;busy:boolean;clo
   const [form,setForm]=useState({receiptNo:"",proofRef:"",note:"目的地仓签收"});
   const [draft,setDraft]=useState<Record<string,{qty:string;quarantine:string}>>({});
   const items=leg.items.filter((item:Row)=>Number(item.qty)>Number(item.received_qty||0)).map((item:Row)=>({...item,remaining:Number(item.qty)-Number(item.received_qty||0)}));
-  const submit=async()=>{setError("");const result=await act("receiveTransportLeg",{legId:leg.id,...form,items:items.filter((item:Row)=>Number(draft[item.id]?.qty)>0).map((item:Row)=>({id:item.id,receivedQty:Number(draft[item.id]?.qty),quarantineQty:Number(draft[item.id]?.quarantine||0)}))},"到仓已登记：合格品进入待上架，异常品进入隔离",setError);if(result)close();};
+  const submit=async()=>{setError("");const result=await act("receiveTransportLeg",{legId:leg.id,version:leg.version,...form,items:items.filter((item:Row)=>Number(draft[item.id]?.qty)>0).map((item:Row)=>({id:item.id,receivedQty:Number(draft[item.id]?.qty),quarantineQty:Number(draft[item.id]?.quarantine||0)}))},"到仓已登记：合格品进入待上架，异常品进入隔离",setError);if(result)close();};
   return <div ref={target} style={{scrollMarginTop:90}}><Panel title={`到仓登记 · ${leg.leg_no}`} desc={`${leg.site} · ${leg.channel} · ${leg.warehouse_name}`} action={<button type="button" className="btn" disabled={busy} onClick={close}>关闭</button>}>
     <TableImport kind="receipt" busy={busy} contextKey={leg.id} templateRows={items.map((item:Row)=>({itemId:item.id,sku:item.sku,qty:"",quarantineQty:0}))} description="导入当前目的地的实收和隔离数量；同SKU有多条明细时请保留明细编号。导入后核对单号及凭证再提交。" onApply={rows=>{const matched=matchImportItems(rows,items);setDraft(Object.fromEntries(matched.map((row:Row)=>[row.itemId,{qty:String(row.qty),quarantine:String(row.quarantineQty)}])));return true;}}/>
     <div className="form-grid"><Field label="到仓单号"><input value={form.receiptNo} onChange={e=>setForm({...form,receiptNo:e.target.value})}/></Field><Field label="到仓凭证"><input value={form.proofRef} onChange={e=>setForm({...form,proofRef:e.target.value})}/></Field><Field label="说明" span={2}><input value={form.note} onChange={e=>setForm({...form,note:e.target.value})}/></Field></div>
     <div className="table-wrap"><table><thead><tr><th>SKU</th><th>剩余可收</th><th>本次实收</th><th>其中隔离 / 破损</th></tr></thead><tbody>{items.map((item:Row)=><tr key={item.id}><td><SkuLabel sku={item.sku}/></td><td>{item.remaining}</td><td><input aria-label={`${item.sku}实收数量`} type="number" min="0" max={item.remaining} step="1" value={draft[item.id]?.qty||""} onChange={e=>setDraft({...draft,[item.id]:{qty:e.target.value,quarantine:draft[item.id]?.quarantine||"0"}})}/></td><td><input aria-label={`${item.sku}隔离数量`} type="number" min="0" max={draft[item.id]?.qty||0} step="1" value={draft[item.id]?.quarantine||"0"} onChange={e=>setDraft({...draft,[item.id]:{qty:draft[item.id]?.qty||"",quarantine:e.target.value}})}/></td></tr>)}</tbody></table></div>
     {error&&<p className="notice error" role="alert">{error}</p>}
-    <div className="form-actions"><button className="btn primary" type="button" disabled={busy||!form.receiptNo||!form.proofRef||!Object.values(draft).some(row=>Number(row.qty)>0)} onClick={submit}>确认到仓入库</button></div>
+    <p className="notice info">按仓库签收凭证填写实际数量，可分次登记。合格品先进入待上架，破损品进入隔离；由站点运营确认上架后才增加可售库存。</p>
+    <div className="form-actions"><button className="btn primary" type="button" disabled={busy||!form.receiptNo||!form.proofRef||!Object.values(draft).some(row=>Number(row.qty)>0)} onClick={submit}>确认本次签收</button></div>
   </Panel></div>;
 }
 
@@ -948,6 +951,7 @@ function Batches({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
     <TransportControl data={data} act={act} busy={busy}/>
 
     <Panel collapsible title="历史单系列海运批次" desc="旧版本记录继续保留并可完成原流程；新发货请使用上方跨系列运输主批次">
+    {data.actor.role==="海运"&&<p className="notice info">历史批次未绑定独立海运负责人，到仓签收仍由供应链登记。上方分配给你的目的地运输分批，可直接登记仓库实收。</p>}
     <div className="batch-toolbar"><div className="segmented"><button className={filter==="all"?"active":""} onClick={()=>setFilter("all")}>全部</button><button className={filter==="exceptions"?"active":""} onClick={()=>setFilter("exceptions")}>异常优先</button><button className={filter==="active"?"active":""} onClick={()=>setFilter("active")}>进行中</button><button className={filter==="completed"?"active":""} onClick={()=>setFilter("completed")}>已上架</button></div><input aria-label="搜索批次或SKU" value={query} onChange={event=>setQuery(event.target.value)} placeholder="搜索批次号、系列或SKU"/></div>
       {visible.length===0?<Empty>{data.shipmentBatches.length?"没有符合筛选条件的批次":"系列生产完工后，由供应链创建第一个多SKU海运批次"}</Empty>:<div className="batch-card-list">{visible.map(batch=><article className={classNames("batch-card","shipment-card",batch.exceptions.some((row:Row)=>row.level==="red")&&"stalled",batch.exceptions.length>0&&"has-warning")} key={batch.id}>
         <header><div><span>{batch.batch_no}</span><h4>{batch.series_name}</h4><p>{fmt(batch.visibleSkuCount)} 个SKU｜{fmt(batch.visibleShippedQty)} 件｜{fmt(batch.destinationCount)} 个目的站点渠道</p></div><div><Pill tone={batch.stage==="on_shelf"?"green":batch.exceptions.some((row:Row)=>row.level==="red")?"red":batch.exceptions.length?"amber":"blue"}>{BATCH_LABEL[batch.stage]||batch.stage}</Pill>{batch.exceptions.length>0&&<small>{batch.exceptions.length} 项异常</small>}</div></header>
@@ -962,7 +966,7 @@ function Batches({data,act,busy}:{data:Snapshot;act:Act;busy:boolean}) {
         </div>}
       </article>)}</div>}
     </Panel>
-    {data.batches.length>0&&<Panel collapsible title="历史单SKU批次" desc="旧版本产生的批次继续保留并可完成原流程；新计划不再生成此类记录">
+    {data.batches.length>0&&<Panel collapsible title="历史单SKU批次" desc="旧版本产生的批次继续保留并可完成原流程；到仓签收由供应链登记，新计划不再生成此类记录">
       <div className="table-wrap"><table><thead><tr><th>批次</th><th>SKU</th><th className="num">数量</th><th>节点</th><th>负责人</th><th>更新时间</th><th></th></tr></thead><tbody>{data.batches.map(batch=><tr key={batch.id}><td>{batch.id}</td><td><SkuLabel sku={batch.sku}/> · {batch.name}</td><td className="num">{fmt(batch.qty)}</td><td><Pill tone={batch.stalled?"red":"blue"}>{BATCH_LABEL[batch.stage]||batch.stage}</Pill></td><td>{batch.stage_owner}</td><td>{readableDate(batch.updated_at)}</td><td><div style={{display:"flex",gap:5,flexWrap:"wrap"}}>{["supply_confirm","factory_production","channel_allocation","sea_freight","port_arrived","last_mile_delivery"].includes(batch.stage)&&<button className="btn" disabled={busy||!(data.actor.role===batch.stage_owner||data.actor.role==="管理员")} onClick={()=>advanceLegacy(batch)}>继续原流程</button>}{batch.stage==="shelf_pending"&&batch.allocations.filter((allocation:Row)=>canConfirm(allocation)&&!legacyConfirmed(batch,allocation)).map((allocation:Row)=><button className="btn" key={`${allocation.site}-${allocation.channel}`} disabled={busy} onClick={()=>confirmLegacy(batch,allocation)}>{allocation.site}上架</button>)}</div></td></tr>)}</tbody></table></div>
     </Panel>}
   </>;
@@ -1002,7 +1006,7 @@ const ROLE_BOUNDARY:Record<string,string>={
   运营:"仅本人绑定的站点＋渠道：销售导入、盘点差异提交、月度需求和上架确认",
   供应链:"主数据、系列汇总、供应商接单、生产质检、跨系列发运、到仓与盘点复核",
   工厂:"仅处理分配给本账号的生产单：接单、进度、完工和新品打板",
-  海运:"仅处理分配给本账号的目的地运输分腿：海运、到港、清关、派送与ETA",
+  海运:"仅处理分配给本账号的目的地运输分腿：海运、到港、清关、派送、ETA及仓库签收；上架由站点运营确认",
   运营主管:"运营调研统筹、新品测试关口和样品运营确认，不代替站点运营上架",
   新品开发:"候选款提交及样品开发确认",
   财务:"新品成本、售价、毛利和盈亏平衡测算",
