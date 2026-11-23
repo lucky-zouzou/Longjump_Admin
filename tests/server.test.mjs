@@ -50,6 +50,16 @@ test('独立服务器：公司登录、禁止伪造身份、岗位隔离、出�
  const assistantPath='/api/employee-assistant';
  const guideHome=await request('finance',assistantPath);
  assert.equal(guideHome.status,200);assert.ok(guideHome.body.guides.some(g=>g.id==='finance-day'));
+ for(const who of ['admin','finance']){
+  const daily=await request(who,assistantPath,{question:'昨天销售怎么样？帮我总结一下',mode:'internal'});
+  assert.equal(daily.status,200);assert.equal(daily.body.source,'ledger');assert.equal(daily.body.salesContext.range,'yesterday');
+  assert.match(daily.body.answer,/还没有收到销售数据/);
+  const follow=await request(who,assistantPath,{question:'那印尼呢',salesContext:daily.body.salesContext,mode:'internal'});
+  assert.deepEqual(follow.body.salesContext.sites,['印尼']);
+ }
+ const deniedDaily=await request('sales',assistantPath,{question:'昨天销售总结',mode:'internal',role:'管理员'});
+ assert.match(deniedDaily.body.answer,/没有.*权限/);assert.equal(deniedDaily.body.salesContext,undefined);
+ assert.equal((await request('admin',assistantPath,{question:'昨天销售总结',salesContext:{range:'dates',sites:['印尼'],channel:'TikTok',compare:'previous',from:'2026-02-30',to:'2026-03-01'}})).status,400);
  const selected=await request('finance',assistantPath,{question:'每日成本',guideId:'finance-day'});
  assert.equal(selected.status,200);assert.equal(selected.body.source,'handbook');
  assert.equal((await request('sales',assistantPath,{question:'成本',role:'财务',guideId:'finance-day'})).body.guide,null);

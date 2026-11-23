@@ -11,11 +11,12 @@ type Mode='auto'|'internal'|'public';
 type Home={edition?:string;revision?:string;role:string;intro:string;dailyGuide?:string;suggestions?:Entry[];guides:Entry[];recent:Topic[]};
 type Citation={start:number;end:number;url:string;title:string};
 type DecisionContext={month:string;channel:string;site:string;metric:string;order:string;selectedSites?:string[];aggregate?:boolean;byPlatform?:boolean;targetRanking?:boolean};
+type SalesContext={range:string;sites:string[];channel:string;compare:string;from?:string;to?:string};
 type PlanContext={site:string;channel:string;month:string};
 type ProductionContext={site:string;channel:string;sku:string};
-type Answer={learnable?:boolean;personalMatch?:boolean;planContext?:PlanContext;brief?:{period:string;details:string[]};productionContext?:ProductionContext;decisionContext?:DecisionContext;ledger?:{page:string;label:string;view?:string;month?:string;entity?:string}|null;questions?:string[];topic?:Topic;saved?:boolean;verifiedAt?:string;citations?:Citation[];choices?:Entry[];step?:number;answer:string;notice:string;source:string;intent:string;guide:(Entry & {steps:string[];next:string;page:string})|null};
+type Answer={salesContext?:SalesContext;learnable?:boolean;personalMatch?:boolean;planContext?:PlanContext;brief?:{period:string;details:string[]};productionContext?:ProductionContext;decisionContext?:DecisionContext;ledger?:{page:string;label:string;view?:string;month?:string;entity?:string}|null;questions?:string[];topic?:Topic;saved?:boolean;verifiedAt?:string;citations?:Citation[];choices?:Entry[];step?:number;answer:string;notice:string;source:string;intent:string;guide:(Entry & {steps:string[];next:string;page:string})|null};
 type Turn={id:string;question:string;reply:Answer;encouragement:string};
-type AskOptions={planContext?:PlanContext;productionContext?:ProductionContext;decisionContext?:DecisionContext;previous?:string;previousStep?:number;guideId?:string;mode?:Mode;knowledgeId?:string};
+type AskOptions={salesContext?:SalesContext;planContext?:PlanContext;productionContext?:ProductionContext;decisionContext?:DecisionContext;previous?:string;previousStep?:number;guideId?:string;mode?:Mode;knowledgeId?:string};
 const sources:Record<string,string>={'learned-guide':'学过的问法 · 岗位手册','ledger':'业务台账','conversation':'小品同学','unavailable':'小品同学','knowledge':'公司知识库','openai':'模型匹配 · 岗位手册','public-data':'公开数据源','public-web':'公开网页检索','public-unavailable':'外部资料查询'};
 function currentStep(reply?:Answer){
   if(reply?.intent!=='step'||!reply.guide)return 0;
@@ -172,13 +173,13 @@ export default function EmployeeAssistant({initialQuestion,page,pageTitle,close,
   }
   function ask() {
     const q=(wakeQuestion(draft)??draft).trim()||(wakeQuestion(draft)===''?'在吗？':'');
-    void submit(q,{planContext:last?.planContext,decisionContext:last?.decisionContext,productionContext:last?.productionContext,previous:last?.guide?.id||(last?.ledger?.page==='suggestions'?'production-basis':undefined),previousStep:currentStep(last),mode});
+    void submit(q,{salesContext:last?.salesContext,planContext:last?.planContext,decisionContext:last?.decisionContext,productionContext:last?.productionContext,previous:last?.guide?.id||(last?.ledger?.page==='suggestions'?'production-basis':undefined),previousStep:currentStep(last),mode});
   }
   const suggestions=home?.suggestions?.length?home.suggestions:home?.guides.slice(0,2)||[];
   const query=guideSearch.trim().toLocaleLowerCase();
   const matches=home?.guides.filter(g=>g.title.toLocaleLowerCase().includes(query))||[];
   const openGuide=(g:Entry)=>void submit(guideQuestion(g.title),{guideId:g.id,mode:'internal'});
-  const follow=(question:string)=>void submit(question,{previous:last?.guide?.id||(last?.ledger?.page==='suggestions'?'production-basis':undefined),previousStep:currentStep(last),mode:'internal'});
+  const follow=(question:string)=>void submit(question,{salesContext:last?.salesContext,planContext:last?.planContext,decisionContext:last?.decisionContext,productionContext:last?.productionContext,previous:last?.guide?.id||(last?.ledger?.page==='suggestions'?'production-basis':undefined),previousStep:currentStep(last),mode:'internal'});
 
   return <dialog className="employee-dialog" ref={dialog} aria-labelledby="employee-title" onCancel={e=>{e.preventDefault();close();}}>
     <header className="employee-bar">
@@ -199,6 +200,7 @@ export default function EmployeeAssistant({initialQuestion,page,pageTitle,close,
           </button>)}</div>
           <div className="employee-picks">
             <button disabled={busy} onClick={()=>void submit('我刚来，从哪儿上手？',{mode:'internal'})}>我刚来，从哪儿上手？</button>
+            {['管理员','财务','运营主管','运营'].includes(home.role)&&<button disabled={busy} onClick={()=>void submit('昨天销售怎么样？帮我总结一下，有什么需要跟进？',{mode:'internal'})}>昨天卖得怎么样？</button>}
             {['管理员','财务','运营主管','运营'].includes(home.role)&&<button disabled={busy} onClick={()=>void submit(home.role==='运营'?'本站本月的销售额和广告投入是多少？':'本月哪个站点的销售贡献小，广告投入占比却高？',{mode:'internal'})}>{home.role==='运营'?'本站的销售和投放怎么样？':'哪站投入多、贡献少？'}</button>}
             {['管理员','财务','运营主管'].includes(home.role)&&<button disabled={busy} onClick={()=>void submit('今天最该盯哪件事？',{mode:'internal'})}>今天最该盯哪件事？</button>}
             {['monthly','fulfillment','suggestions'].includes(page)&&['管理员','供应链','运营','运营主管'].includes(home.role)&&<button disabled={busy} onClick={()=>void submit('本月备货计划到哪一步了？',{mode:'internal'})}>本月备货到哪了？</button>}
