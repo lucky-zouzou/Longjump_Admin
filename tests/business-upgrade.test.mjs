@@ -93,3 +93,14 @@ test('内容关联覆盖按权限范围统计，分页筛选不漏未关联视�
  const unmatched=await readPlatformReports(f.db,f.users.malaysia,'',0,'all',Date.now(),'','unmatched');assert.equal(unmatched.rows.length,1);assert.equal(unmatched.rows[0].video_id,'987654321002');assert.equal(unmatched.coverage.total,2);
  await assert.rejects(readPlatformReports(f.db,f.users.malaysia,'印尼'),/无权|权限/);
 });
+
+test('性能采样区分页面首屏和导航待办，只记录白名单模块而不保留查询内容',()=>{
+ const metrics=createRequestMetrics();
+ metrics.record('/api/system',1400,200,new URLSearchParams({module:'overview',navigation:'page',token:'private',search:'客户名字'}));
+ metrics.record('/api/system',10,200,new URLSearchParams({module:'inventory',navigation:'page'}));
+ metrics.record('/api/system',7,200,new URLSearchParams({module:'inventory',navigation:'tasks'}));
+ metrics.record('/api/system',2,200,new URLSearchParams({module:'private-account',navigation:'token'}));
+ const result=metrics.snapshot();assert.equal(result.rows.length,4);assert.equal(result.rows[0].module,'overview');assert.equal(result.rows[0].p95,1400);
+ assert.ok(result.rows.some(r=>r.module==='inventory'&&r.navigation==='tasks'));
+ assert.doesNotMatch(JSON.stringify(result),/private|客户名字|token/);
+});

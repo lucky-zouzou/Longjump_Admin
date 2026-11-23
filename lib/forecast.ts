@@ -38,7 +38,15 @@ export async function loadForecast(db:any,actor:any,asOf?:string,focusKey?:strin
     const cutoff28 = chinaDate(-56);
     const [salesDaily, importCoverage] = await Promise.all([
       all(`SELECT business_date,site,channel,sku,SUM(qty) qty FROM sales_records${scope.clause ? scope.clause + " AND " : " WHERE "}reversed_at IS NULL AND business_date>=? AND business_date<=? AND qty>0 ${keys?" AND "+skuFilter:""} GROUP BY business_date,site,channel,sku`, [...scope.args,cutoff28,chinaDate(-1),...skuArgs]),
-      all(`SELECT site,channel,COUNT(DISTINCT business_date) data_days,MAX(business_date) last_sale_date,GROUP_CONCAT(DISTINCT business_date) imported_dates FROM sales_imports${scope.clause ? scope.clause + " AND " : " WHERE "}reversed_at IS NULL AND report_kind IN ('complete','zero') AND NOT EXISTS(SELECT 1 FROM sales_records r WHERE r.site=sales_imports.site AND r.channel=sales_imports.channel AND r.business_date=sales_imports.business_date AND r.qty>0 AND r.reversed_at IS NULL GROUP BY r.sku HAVING COUNT(DISTINCT r.import_id)>1) AND business_date>=? AND business_date<=? GROUP BY site,channel`, [...scope.args,cutoff28,chinaDate(-1)]),
+      all(`WITH overlapping AS (
+        SELECT DISTINCT site,channel,business_date FROM (
+          SELECT site,channel,business_date,sku FROM sales_records${scope.clause ? scope.clause + " AND " : " WHERE "}qty>0 AND reversed_at IS NULL AND business_date BETWEEN ? AND ?
+          GROUP BY site,channel,business_date,sku HAVING COUNT(DISTINCT import_id)>1
+        )
+      ), eligible AS (SELECT * FROM sales_imports${scope.clause ? scope.clause + " AND " : " WHERE "}reversed_at IS NULL AND report_kind IN ('complete','zero') AND business_date BETWEEN ? AND ?)
+      SELECT i.site,i.channel,COUNT(DISTINCT i.business_date) data_days,MAX(i.business_date) last_sale_date,GROUP_CONCAT(DISTINCT i.business_date) imported_dates
+      FROM eligible i LEFT JOIN overlapping o ON o.site=i.site AND o.channel=i.channel AND o.business_date=i.business_date
+      WHERE o.business_date IS NULL GROUP BY i.site,i.channel`, [...scope.args,cutoff28,chinaDate(-1),...scope.args,cutoff28,chinaDate(-1)]),
     ]);
     const dayKeys = Array.from({length:56},(_,index)=>chinaDate(index-56));
     const dayIndex = new Map(dayKeys.map((date,index)=>[date,index]));

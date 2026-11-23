@@ -1,3 +1,4 @@
+import {validSalesContext} from '../../../lib/employee-sales-brief.mjs';
 import {validPlanContext} from '../../../lib/employee-plan-progress.mjs';
 import {validDecisionContext,validProductionContext} from '../../../lib/employee-decisions.mjs';
 import {database} from '../../../lib/database';
@@ -76,7 +77,8 @@ export async function POST(request:Request) {
     if(!input || typeof input.question!=='string' || !input.question.trim() || input.question.length>600 ||
       ['guideId','previous','page'].some(k=>input[k]!==undefined && (typeof input[k]!=='string'||input[k].length>80)))
       throw new HttpError(400,'请输入 1 至 600 字的问题');
-    if((input.planContext!==undefined&&!validPlanContext(input.planContext))||
+    if((input.salesContext!==undefined&&!validSalesContext(input.salesContext))||
+      (input.planContext!==undefined&&!validPlanContext(input.planContext))||
       (input.decisionContext!==undefined&&!validDecisionContext(input.decisionContext))||
       (input.productionContext!==undefined&&!validProductionContext(input.productionContext))||
       (input.previousStep!==undefined&&(!Number.isInteger(input.previousStep)||input.previousStep<0||input.previousStep>4))||

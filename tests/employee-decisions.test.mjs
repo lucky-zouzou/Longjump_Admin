@@ -75,7 +75,8 @@ test('利润从财务账读取，销售金额不冒充利润，岗位权限和�
   const profit=await ask(f,'各站点的贡献利润排名',{},f.users.finance);
   assert.equal(profit.ledger.view,'finance');assert.equal(profit.ledger.month,'2026-11');assert.match(profit.answer,/暂无已核金额/);assert.doesNotMatch(profit.answer,/¥600/);
   assert.match((await ask(f,'各站点的贡献利润排名',{},f.users.indonesia)).answer,/财务月结账册权限/);
-  assert.match((await ask(f,'近7天哪个站点销售额最高')).answer,/自然月/);
+  const daily=await ask(f,'近7天哪个站点销售额最高');
+  assert.equal(daily.salesContext.range,'last7');assert.match(daily.answer,/尚未全部齐备/);
 });
 test('生产依据与大促来自驾驶舱，追问具体货品能区分缺报和预计零需求',async t=>{
   const f=environment(t);
