@@ -87,7 +87,7 @@ test('性能窗口有界、剔除查询参数及过期样本',()=>{
 
 test('内容关联覆盖按权限范围统计，分页筛选不漏未关联视频',async()=>{
  const f=contentFixture();await original(f);
- const insert=f.sqlite.prepare('INSERT INTO content_platform_reports VALUES(?,?,?,?,?,?,?,?,?,?)');
+ const insert=f.sqlite.prepare('INSERT INTO content_platform_reports(site,start_day,end_day,video_id,revision,currency,metrics_json,source_file,actor_id,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)');
  for(const [site,id] of [['马来西亚','987654321001'],['马来西亚','987654321002'],['印尼','987654321003']])insert.run(site,'2026-11-01','2026-11-02',id,1,site==='印尼'?'IDR':'MYR','{}','TEST ONLY','admin-1',new Date().toISOString());
  const all=await readPlatformReports(f.db,f.users.malaysia,'',0,'all',Date.now(),'','all');assert.equal(all.coverage.total,2);assert.equal(all.coverage.matched,1);
  const unmatched=await readPlatformReports(f.db,f.users.malaysia,'',0,'all',Date.now(),'','unmatched');assert.equal(unmatched.rows.length,1);assert.equal(unmatched.rows[0].video_id,'987654321002');assert.equal(unmatched.coverage.total,2);
