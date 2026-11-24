@@ -80,6 +80,14 @@
 .cc-compass-fx summary {cursor:pointer;color:#284e77;font-weight:600}
 .cc-compass-fx td {white-space:nowrap}
 .cc-report-video-link {color:#245ba8;text-decoration:underline;text-underline-offset:3px;overflow-wrap:anywhere}
+.cc-report-manage {white-space:nowrap;color:#245ba8}
+.cc-report-management {scroll-margin-top:90px;border-radius:12px}
+.cc-report-management:focus-visible {outline:2px solid var(--blue);outline-offset:4px}
+.cc-platform-reports .cc-report-help {margin-top:10px}
+.cc-platform-reports>label {display:inline-grid;gap:5px;margin-top:12px}
+.cc-platform-reports .cc-report-operation {position:sticky;left:0;z-index:1;min-width:64px;text-align:center;background:var(--paper,#fff);border-right:1px solid var(--line,#dce4ee);white-space:nowrap}
+.cc-platform-reports th.cc-report-operation {background:var(--canvas,#f3f7fb)}
+.cc-platform-reports .cc-report-operation .btn {padding:7px 12px}
 @media(max-width:640px){.cc-compass-cards{grid-template-columns:1fr}.cc-compass-cards article{padding:12px}.cc-compass-filters{gap:8px}}
 
 .cc-reference-upload label{display:grid;gap:6px}.cc-reference-upload .btn{justify-self:start;margin-top:6px}

@@ -52,21 +52,23 @@ export function PlatformReports({site,period,range='',refreshKey,onChanged}:{sit
      .catch(e=>{if(!ctl.signal.aborted)setError(e.message);});
    return ()=>ctl.abort();
  },[site,refreshKey,offset,period,range,matching,attempt]);
- return <section className="cc-card"><h3>{period?'创作者视频明细':site+' · 平台报表记录'}</h3>
+ return <section className="cc-card cc-platform-reports"><h3>{period?'创作者视频明细 · 报表管理':site+' · 平台报表管理'}</h3>
   {deleting&&<DeleteReport row={deleting} onClose={()=>setDeleting(null)} onDeleted={()=>{setDeleting(null);setHistory('');setNotice('已删除，历史记录已保留。');if(data?.rows.length===1&&offset>0)setOffset(n=>Math.max(0,n-50));retry(n=>n+1);onChanged?.();}}/>}
   {notice&&<p role="status">{notice}</p>}
   {period&&<p>按报表结束日筛选。每行是一条视频在该报表期间的表现，金额为站点原币。</p>}
+  <p className="cc-report-help">填错了？点击每行左侧的“删除”，核对视频和报表期间后确认。删除仅影响这条导入记录，播放量、订单量和 GMV 会重新统计。</p>
+  <small>运营可删除本人提交的记录；显示“只读”时，请联系原填报人、管理员或运营主管核对处理。</small>
   <label>发布关联<select value={matching} onChange={e=>{setMatching(e.target.value);setOffset(0);}}><option value="all">全部报表</option><option value="unmatched">待关联发布</option><option value="matched">已关联发布</option></select></label>
   {data?.coverage&&<p>当前范围 {data.coverage.total} 条最新报表，已关联 {data.coverage.matched} 条，待关联 {data.coverage.total-data.coverage.matched} 条。按站点＋Video ID 精确匹配；报表结果不自动归功于内部拍摄人员。<small>未关联时，请在对应发布记录核对视频链接。</small></p>}
-  {error?<p role="alert">{error}</p>:!data?<p>正在读取…</p>:!data.rows.length?<p>本页暂无记录。</p>:<div className="cc-table-scroll"><table><thead><tr>
-    {['站点','报表期间','播放量','归属订单',...(period?amountFields.slice(0,1):amountFields).map(([,l])=>l),'指标明细','Creator name','Video ID','操作'].map(l=><th key={l}>{l}</th>)}
+  {error?<p role="alert">{error}</p>:!data?<p>正在读取…</p>:!data.rows.length?<p>当前页暂无导入记录，可切换期间、站点或返回上一页查看。</p>:<div className="cc-table-scroll"><table><thead><tr>
+    <th className="cc-report-operation" scope="col">操作</th>{['站点','报表期间','播放量','归属订单',...(period?amountFields.slice(0,1):amountFields).map(([,l])=>l),'指标明细','Creator name','Video ID'].map(l=><th key={l}>{l}</th>)}
   </tr></thead><tbody>{data.rows.map((r:Row)=><tr key={[r.site,r.video_id,r.start_day,r.end_day].join('/')}>
-    <td>{r.site}</td><td>{r.start_day} 至 {r.end_day}<small>{r.currency} · V{r.revision}</small></td>
+    <td className="cc-report-operation">{r.canDelete?<button type="button" className="btn cc-report-delete" aria-label={'删除报表 '+r.video_id} onClick={()=>{setNotice('');setDeleting(r);}}>删除</button>:<small title="请联系原填报人、管理员或运营主管核对处理">只读</small>}</td>
+    <td>{r.site}</td><td>{r.start_day} 至 {r.end_day}<small>{r.currency} · V{r.revision}</small><small>{r.source_file}</small></td>
     <td>{r.metrics.views?.toLocaleString()??'—'}</td><td>{r.metrics.orders?.toLocaleString()??'—'}</td>
     {(period?amountFields.slice(0,1):amountFields).map(([k])=><td key={k}>{r.metrics[k]?.toLocaleString()??'—'}</td>)}
     <td><details><summary>查看</summary><small>{r.source_file}</small><p>Creator name · {r.metrics.creatorName??'未提供'}</p><p>Video ID · <VideoLink row={r}/></p>{reportFields.filter(([k])=>k!=='creatorName'&&r.metrics[k]!=null).map(([k,label])=><p key={k}>{label} · {r.metrics[k]}{['ctr','liveRate','finishRate','ctor'].includes(k)?'%':''}</p>)}</details>{r.revision>1&&<><button className="btn" onClick={()=>setHistory(history===[r.site,r.video_id,r.start_day,r.end_day].join('/')?'':[r.site,r.video_id,r.start_day,r.end_day].join('/'))}>修订历史</button>{history===[r.site,r.video_id,r.start_day,r.end_day].join('/')&&<RevisionHistory site={r.site} row={r}/>}</>}</td>
     <td>{r.metrics.creatorName??'未提供'}</td><td><VideoLink row={r}/><small>{r.matched?'已关联发布':'待关联发布'}</small></td>
-    <td>{r.canDelete?<button type="button" className="btn cc-report-delete" aria-label={'删除报表 '+r.video_id} onClick={()=>{setNotice('');setDeleting(r);}}>删除</button>:<small>只读</small>}</td>
   </tr>)}</tbody></table></div>}
   {(offset>0||data?.more)&&<div className="cc-actions"><button className="btn" disabled={!offset} onClick={()=>setOffset(n=>n-50)}>上一页</button><button className="btn" disabled={!data?.more} onClick={()=>setOffset(n=>n+50)}>下一页</button></div>}
  </section>;

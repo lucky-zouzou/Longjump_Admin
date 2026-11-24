@@ -1,5 +1,5 @@
 "use client";
-import {useEffect,useState} from 'react';
+import {useEffect,useId,useRef,useState} from 'react';
 import {PlatformReports} from './content-platform-reports';
 import {parseWorkspaceResponse} from '../lib/workspace-response.mjs';
 
@@ -30,6 +30,7 @@ function Measure({rows,metric,empty}:{rows:SiteRow[];metric:typeof indicators[nu
 }
 
 export function ContentCompass({sites,reportSites,refreshKey,initial}:{sites:string[];reportSites:string[];refreshKey:number;initial?:CompassSelection}){
+  const reportList=useRef<HTMLDivElement>(null),reportListId=useId();
   const [period,setPeriod]=useState(initial?'all':'month'),[site,setSite]=useState(initial?.site||'');
   const [range,setRange]=useState(initial?.range||''),[source,setSource]=useState(initial?.source),[attempt,retry]=useState(0);
   const [result,setResult]=useState<Result|null>(null),[error,setError]=useState('');
@@ -62,7 +63,8 @@ export function ContentCompass({sites,reportSites,refreshKey,initial}:{sites:str
       <label>站点<select value={site} onChange={e=>{setSite(e.target.value);setRange('');setSource(imported?'reports':'published');}}>
         <option value="">全部站点</option>{visibleSites.map(s=><option key={s}>{s}</option>)}</select></label>
       {imported&&(ranges.length>1||range)&&<label>报表起止日期<select value={range} onChange={e=>setRange(e.target.value)}>
-        <option value="">合计</option>{range&&!ranges.includes(range)&&<option value={range}>{range.replace('~',' 至 ')}</option>}{ranges.map(r=><option key={r} value={r}>{r.replace('~',' 至 ')}</option>)}</select></label>}</div></header>
+        <option value="">合计</option>{range&&!ranges.includes(range)&&<option value={range}>{range.replace('~',' 至 ')}</option>}{ranges.map(r=><option key={r} value={r}>{r.replace('~',' 至 ')}</option>)}</select></label>}
+      {imported&&<button type="button" className="btn cc-report-manage" aria-controls={reportListId} onClick={()=>{reportList.current?.focus({preventScroll:true});reportList.current?.scrollIntoView({block:'start',behavior:'smooth'});}}>管理 / 删除报表 ↓</button>}</div></header>
     {notice&&<p role="status">{notice}</p>}
     {error?<div role="alert">{error} <button className="btn" onClick={()=>retry(n=>n+1)}>重试</button></div>:
       !ready?<p role="status">正在读取罗盘数据…</p>:<>
@@ -81,6 +83,6 @@ export function ContentCompass({sites,reportSites,refreshKey,initial}:{sites:str
       </details>}
       <p>{imported?'出单取归属订单，GMV 取视频归属 GMV。同一视频取最新修订，日期分开的报表可累加，日期完全包含时取覆盖整个区间的报表。':'每条视频取已录入的最长累计窗口，同一窗口取最新修订。'}</p>
     </>}
-    {imported&&<PlatformReports key={[period,site,range].join('/')} site={site} period={period} range={range} refreshKey={refreshKey} onChanged={()=>{setSource('reports');setNotice('报表已删除，汇总按剩余有效记录重新计算。');setResult(null);retry(n=>n+1);}}/>}
+    {imported&&<div ref={reportList} id={reportListId} className="cc-report-management" tabIndex={-1} role="region" aria-label="导入报表管理"><PlatformReports key={[period,site,range].join('/')} site={site} period={period} range={range} refreshKey={refreshKey} onChanged={()=>{setSource('reports');setNotice('报表已删除，汇总按剩余有效记录重新计算。');setResult(null);retry(n=>n+1);}}/></div>}
   </section>;
 }
