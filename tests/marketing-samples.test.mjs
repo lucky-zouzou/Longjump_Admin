@@ -10,6 +10,22 @@ const now=()=>new Date().toISOString(),day=()=>new Date(Date.now()+7*3600000).to
 const photo={name:'package.png',base64:Buffer.from('\x89PNG\r\n\x1a\nTEST','binary').toString('base64')};
 
 async function sent(f,qty=4){const {id}=await f.create();await f.approve(id);await f.assign(id);await f.ship(id,qty);return id;}
+test('mine filter matches real role tasks and clears completed costs without hiding ongoing content',async()=>{
+ const f=setup();try{
+  const {id}=await f.create();
+  const work=async actor=>(await readMarketingSamples(f.db,actor)).orders.find(o=>o.id===id)?.workKinds||[];
+  assert.deepEqual(await work(f.users.bd),['content']);assert.deepEqual(await work(f.users.supply),['review']);
+  await f.approve(id);assert.deepEqual(await work(f.users.supply),['assign']);await f.assign(id);
+  assert.deepEqual(await work(f.users.supply),[]);assert.deepEqual(await work(f.users.supply2),['ship']);
+  await f.ship(id);assert.deepEqual(await work(f.users.supply2),[]);assert.deepEqual(await work(f.users.bd),['receipt','content']);
+  await f.change(f.users.bd,id,'receipt',{shipmentId:f.shipment(id).id,receivedAt:now(),receiver:'客户',proofRef:'TEST 签收'});
+  assert.deepEqual(await work(f.users.bd),['content']);assert.equal(f.sqlite.prepare("SELECT status FROM creator_rounds WHERE id='sample-round'").get().status,'executing');
+  assert.deepEqual(await work(f.users.finance),['cost']);await f.cost(id);assert.deepEqual(await work(f.users.finance),['cost']);await f.cost(id,'freight');
+  assert.deepEqual(await work(f.users.finance),[]);assert.equal((await readMarketingSamples(f.db,f.users.finance)).orders[0].capabilities.cost,true);
+  for(const actor of [f.users.bd,f.users.supply,f.users.supply2,f.users.finance])assert.deepEqual((await work(actor)).sort(),(await marketingSampleTasks(f.db,actor)).filter(t=>t.detail.startsWith(f.row(id).order_no)).map(t=>t.kind).sort());
+  assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM wholesale_orders').get().n,0);
+ }finally{f.sqlite.close();}
+});
 test('marketing sample applies agreement, reserves only Indonesia TikTok, dispatches with photos and receives independently of content',async()=>{
  const f=setup();await assert.rejects(()=>f.create({agreementRef:''}),/协议/);const {id}=await f.create();assert.match(f.row(id).order_no,/^ID-[A-Z0-9]{6}$/);assert.equal((await marketingSampleCostSummary(f.db)).shipmentCount,0);
  assert.equal(f.stock().qty,10);assert.equal(f.stock().reserved_qty,0);await f.approve(id);assert.equal(f.stock().reserved_qty,4);await f.assign(id);await f.ship(id,2);

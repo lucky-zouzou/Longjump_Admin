@@ -61,7 +61,7 @@ test('小品库存明确口径、原币台账入口及权限，库存实时读�
  f.sqlite.prepare("UPDATE inventory_balances SET qty=60 WHERE site='印尼' AND channel='TikTok' AND sku='BAG-A'").run();
  assert.match((await ask(indonesia,'印尼 TikTok SKU BAG-A 可售库存有多少件？')).answer,/51 件/);
  assert.match((await ask(malaysia,'印尼可售库存有多少件？')).answer,/你的账号可以查马来西亚/);
- assert.equal((await ask(finance,'这个月平台回款多少？')).ledger.view,'finance');
+ const cash=await ask(finance,'这个月平台回款多少？');assert.equal(cash.ledger.page,'finance-workbench');assert.equal(cash.ledger.view,'expenses');assert.match(cash.answer,/登记银行到账/);assert.match(cash.answer,/依据/);
  assert.equal((await ask(admin,'这月利润多少？')).ledger.view,'evidence');
  assert.equal((await ask(indonesia,'昨天销量是多少？')).ledger.page,'sales');
 });

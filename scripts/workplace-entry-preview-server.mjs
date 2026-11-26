@@ -18,7 +18,7 @@ env.readEmployeeAssistantKey=()=>'';env.readExchangeRateKey=()=>'';
 env.readFeishuCredentials=()=>null;env.startFeishuSync=()=>{throw Object.assign(Error('TEST 预览不连接飞书，仅展示合成同步记录'),{status:503});};
 const originalFetch=globalThis.fetch;
 globalThis.fetch=(input,init)=>{const target=new URL(typeof input==='string'||input instanceof URL?input:input.url,origin);if(target.origin!==origin)throw Error('External network calls are disabled in the TEST preview');return originalFetch(input,init);};
-const roles={operator:'id-ops',unconfigured:'my-ops',manager:'manager',finance:'finance-1',hr:'hr',admin:'admin-1'};
+const roles={studio:'studio',operator:'id-ops',unconfigured:'my-ops',manager:'manager',finance:'finance-1',hr:'hr',admin:'admin-1'};
 for(const id of Object.values(roles))if(!env.DB.sqlite.prepare("SELECT id FROM users WHERE id=? AND name LIKE 'TEST-ONLY %' AND email LIKE '%@example.test'").get(id))throw Error('A synthetic preview actor is missing');
 const built=await importServerEntryModule(resolve('dist-node/server/index.js')),handler=built.default;
 const allowed=['/','/api/system','/api/workplace','/api/workplace/feishu','/api/advertising-trend'];
@@ -39,7 +39,7 @@ const server=http.createServer(async(req,res)=>{
   if(!['GET','HEAD','POST'].includes(req.method)||req.method==='POST'&&(req.headers.origin!==origin||!['/api/workplace','/api/workplace/feishu'].includes(url.pathname))){res.writeHead(403).end();return;}
   if(req.method!=='POST'&&await tryServeStatic(req,res,resolve('dist-node/client'),url.pathname,true))return;
   if(!allowed.includes(url.pathname)){res.writeHead(404).end();return;}
-  const role=String(req.headers.cookie||'').match(/(?:^|;\s*)workplace-preview=(operator|unconfigured|manager|finance|hr|admin)(?:;|$)/)?.[1]||'operator';
+  const role=String(req.headers.cookie||'').match(/(?:^|;\s*)workplace-preview=(studio|operator|unconfigured|manager|finance|hr|admin)(?:;|$)/)?.[1]||'operator';
   const person=env.DB.sqlite.prepare('SELECT id,email,name FROM users WHERE id=?').get(roles[role]);
   const headers=new Headers();for(const [k,v] of Object.entries(req.headers))if(!k.startsWith('oai-')&&!k.startsWith('x-local-')&&!['host','connection','transfer-encoding','x-forwarded-host','x-forwarded-proto'].includes(k)&&v!=null)headers.set(k,Array.isArray(v)?v.join(','):v);
   headers.set('host',host);headers.set('oai-authenticated-user-id',person.id);headers.set('oai-authenticated-user-email',person.email);headers.set('oai-authenticated-user-full-name',encodeURIComponent(person.name));headers.set('oai-authenticated-user-full-name-encoding','percent-encoded-utf-8');

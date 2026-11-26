@@ -8,6 +8,7 @@ import {openDatabase,fileBucket} from '../server/storage.mjs';
 import {fixture} from './fixtures.mjs';
 import {mutateDomesticDistribution as mutate,readDomesticDistribution as read,domesticDistributionTasks,domesticFinancialSummary,cnyMinor,domesticToday} from '../lib/domestic-distribution.mjs';
 import {uploadDomesticFile,readDomesticFile} from '../lib/domestic-distribution-files.mjs';
+import {domesticActions,domesticStage} from '../lib/distribution-workflow-view.mjs';
 
 function domesticFixture(){
  const f=fixture(),factory={id:'dom-factory',name:'国内工厂甲',role:'工厂'},factory2={id:'dom-factory2',name:'国内工厂乙',role:'工厂'};
@@ -26,6 +27,21 @@ function domesticFixture(){
  const view=async(id,actor=users.admin)=>(await read(f.db,actor)).orders.find(o=>o.id===id);
  return {...f,users,row,items,call,change,proof,bucket,files,create,contract,pack,finance,release,ship,receive,view};
 }
+
+test('role action guidance follows actual remainder and keeps delivered credit open for finance',async()=>{
+ const f=domesticFixture();try{
+  const id=await f.create();await f.contract(id,{mode:'credit'});
+  const actions=async actor=>{const d=await read(f.db,actor);return domesticActions(d.orders.find(o=>o.id===id),d.capabilities,d.actor);};
+  assert.deepEqual(await actions(f.users.factory),['pack']);
+  await f.pack(id);assert.deepEqual(await actions(f.users.factory),[]);assert.equal(domesticStage(await f.view(id)),'release');
+  await f.release(id);assert.deepEqual(await actions(f.users.factory),['ship']);
+  const shipment=await f.ship(id);assert.deepEqual(await actions(f.users.factory),[]);
+  assert((await actions(f.users.supply)).includes('receive'));await f.receive(id,shipment,5);
+  assert(!(await actions(f.users.supply)).includes('receive'));assert.equal(domesticStage(await f.view(id)),'collection');
+  assert((await actions(f.users.finance)).includes('financeConfirm'));await f.finance(id);
+  assert(!(await actions(f.users.finance)).includes('financeConfirm'));assert.equal(domesticStage(await f.view(id)),'delivered');
+ }finally{f.sqlite.close();}
+});
 
 test('CNY decimal input is parsed exactly as integer cents and rejects foreign precision or non-numbers',()=>{
  assert.equal(cnyMinor('0.01'),1);assert.equal(cnyMinor('123.45'),12345);assert.equal(cnyMinor('10.2'),1020);
@@ -149,4 +165,60 @@ test('国内资金摘要按截止日还原审批和事实，跨月收款、冲�
   const feb=await domesticFinancialSummary(f.db,{month:'2026-02'});assert.equal(feb.period.receiptsMinor,3125);assert.equal(feb.period.receiptReversalsMinor,2000);assert.equal(feb.period.netCashMinor,1125);assert.equal(feb.balances.contractMinor,10250);assert.equal(feb.balances.contractOutstandingMinor,3050);assert.equal(feb.balances.consignmentUnsettledQty,3);assert.equal(feb.rows.find(r=>r.id===a).paidMinor,3125);assert.equal(feb.rows.find(r=>r.id===b).receivableMinor,1050);
   await assert.rejects(domesticFinancialSummary(f.db,{month:'2026-13'}),/月份/);await assert.rejects(domesticFinancialSummary(f.db,{month:'2026-03'}),/月份/);
  }finally{globalThis.Date=RealDate;f?.sqlite.close();}
+});
+
+const submitPayment=(f,id,extra={},actor=f.users.supply)=>uploadDomesticFile(f.db,f.bucket,actor,{orderId:id,purpose:'customer_payment',operationId:crypto.randomUUID(),file:new File(['%PDF-1.4\nTEST customer transfer'], 'TEST-payment.pdf',{type:'application/pdf'}),amount:'20.00',claimedDate:'2026-01-02',customerReference:'TEST-CUSTOMER-REFERENCE',note:'TEST ONLY 待银行核对',...extra});
+
+test('国内批量商品导入保留两位人民币与草稿账期，不自动批准或生成回款',async()=>{
+ const f=domesticFixture();try{
+  const {parseImportGrid}=await import('../lib/tabular-import.mjs');const parsed=parseImportGrid('domesticOrder',[['SKU','数量','人民币单价'],['bag-a',200,'10.25'],['BAG-B',10,'0.01']]);assert.equal(parsed.errors.length,0);
+  const customer=await f.call(f.users.supply,'customerCreate',{companyName:'TEST IMPORT',companyShortName:'TEST',contact:'TEST',phone:'TEST',address:'TEST'});
+  const p={action:'orderCreate',customerId:customer.id,businessDate:'2026-01-01',settlementMode:'credit',dueDate:'2026-02-01',items:parsed.rows,operationId:crypto.randomUUID(),importSource:{fileName:'TEST.xlsx',rowCount:2}};
+  const created=await mutate(f.db,f.users.supply,p);assert.equal((await mutate(f.db,f.users.supply,p)).replayed,true);const o=await f.view(created.id);assert.equal(o.total_minor,205010);assert.equal(o.total_qty,210);assert.equal(o.settlement_mode,'credit');assert.equal(o.due_date,'2026-02-01');assert.equal(o.status,'draft');assert.equal(o.financial.paidMinor,0);assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM domestic_orders').get().n,1);
+  await assert.rejects(f.call(f.users.supply,'orderCreate',{...p,items:[...parsed.rows,{sku:'UNKNOWN',qty:1,unitPrice:1}]}),/商品档案/);assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM domestic_orders').get().n,1);
+  await assert.rejects(f.call(f.users.supply,'orderCreate',{...p,dueDate:''}),/日期/);
+  await assert.rejects(f.call(f.users.supply,'orderCreate',{...p,settlementMode:'credit',dueDate:'2025-12-31'}),/早于/);
+  await f.change(f.users.supply,created.id,'orderRevise',{items:parsed.rows,settlementMode:'prepaid',dueDate:'2026-01-05',reason:'TEST现金结算重新报价'});assert.equal(f.row(created.id).settlement_mode,'prepaid');assert.equal(f.row(created.id).release_amount_minor,205010);assert.equal(f.row(created.id).due_date,'2026-01-05');
+ }finally{f.sqlite.close();}
+});
+
+test('客户付款截图只进待核；财务核实后一次入账，管理员统一查看、工厂和其他供应链不可读',async()=>{
+ const f=domesticFixture();try{
+  const id=await f.create();await f.contract(id);await f.pack(id);
+  const token=crypto.randomUUID(),submission=await submitPayment(f,id,{operationId:token});assert.equal((await submitPayment(f,id,{operationId:token})).replayed,true);await assert.rejects(submitPayment(f,id),/已提交/);
+  for(const a of [f.users.finance,f.users.factory,f.users.supply2])await assert.rejects(submitPayment(f,id,{},a));
+  let view=await f.view(id);assert.equal(view.financial.paidMinor,0);assert.equal(view.canShip,false);assert.equal(view.paymentSubmissions[0].status,'pending');await assert.rejects(f.release(id),/未达到/);
+  for(const a of [f.users.admin,f.users.finance,f.users.supply]){assert.ok(await readDomesticFile(f.db,f.bucket,a,submission.id));}
+  for(const a of [f.users.factory,f.users.supply2])await assert.rejects(readDomesticFile(f.db,f.bucket,a,submission.id));
+  assert.equal((await f.view(id,f.users.factory)).paymentSubmissions,undefined);
+  for(const a of [f.users.admin,f.users.finance])assert.ok((await domesticDistributionTasks(f.db,a)).some(t=>t.kind==='payment-proof'&&t.entity===id));
+  const {readFinanceHub}=await import('../lib/finance-hub.mjs');const hub=await readFinanceHub(f.db,f.users.finance,{month:'2026-01'});assert.equal(hub.domesticPayments.count,1);assert.equal(hub.domesticPayments.rows[0].amount_minor,2000);assert.match(hub.domesticPayments.rows[0].href,/entity=/);assert.equal(hub.domestic.period.receiptsMinor,0);
+  const actualProof=await f.proof(id,'finance',f.users.finance),payload={amount:'19.00',submissionId:submission.id,proofId:actualProof.id,businessDate:'2026-01-03',bankReference:'TEST-BANK-RECON',bankAccount:'TEST BANK',reason:'TEST 实际到账19元，客户截图20元差异已核对',actualConfirmed:true};
+  await assert.rejects(f.change(f.users.supply,id,'financeConfirm',payload),/无权/);await assert.rejects(f.change(f.users.finance,id,'financeConfirm',{...payload,proofId:submission.id}),/凭证/);
+  await f.change(f.users.finance,id,'financeConfirm',payload);view=await f.view(id);assert.equal(view.financial.paidMinor,1900);assert.equal(view.paymentSubmissions[0].status,'confirmed');assert.equal(view.paymentSubmissions[0].amount_minor,2000);assert.equal(view.entries[0].business_date,'2026-01-03');assert.equal(view.entries[0].proof_id,actualProof.id);
+  await assert.rejects(f.change(f.users.finance,id,'financeConfirm',{...payload,bankReference:'ANOTHER'}),/已核对/);assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM domestic_finance_entries').get().n,1);
+  assert.equal((await readFinanceHub(f.db,f.users.admin,{month:'2026-01'})).domesticPayments.count,0);
+  const original=view.entries[0];await f.change(f.users.finance,id,'financeReverse',{entryId:original.id,proofId:actualProof.id,businessDate:'2026-01-04',bankReference:'TEST-REVERSAL',bankAccount:'TEST BANK',reason:'TEST 原核销有误',actualConfirmed:true});assert.equal((await f.view(id)).paymentSubmissions[0].reversed,1);
+ }finally{f.sqlite.close();}
+});
+
+test('付款凭证退回、跨单及自审防护，关账失败不留下半笔核销',async()=>{
+ const f=domesticFixture();try{
+  const id=await f.create(),other=await f.create();await f.contract(id,{mode:'credit'});const p=await submitPayment(f,id);
+  await assert.rejects(f.change(f.users.admin,id,'paymentProofReject',{submissionId:p.id,reason:'TEST'}),/无权/);
+  await assert.rejects(f.change(f.users.finance,other,'paymentProofReject',{submissionId:p.id,reason:'TEST'}),/不存在/);
+  f.sqlite.prepare("UPDATE users SET role='财务' WHERE id=?").run(f.users.supply.id);
+  try{await assert.rejects(f.change({...f.users.supply,role:'财务'},id,'paymentProofReject',{submissionId:p.id,reason:'TEST 调岗后仍不能自审'}),/自己|本人|独立/);}finally{f.sqlite.prepare("UPDATE users SET role='供应链' WHERE id=?").run(f.users.supply.id);}
+  const fp=await f.proof(id,'finance',f.users.finance);closeDomesticMonth(f);
+  await assert.rejects(f.change(f.users.finance,id,'financeConfirm',{submissionId:p.id,amount:'20',proofId:fp.id,businessDate:'2026-01-03',bankReference:'CLOSED',bankAccount:'TEST',reason:'TEST',actualConfirmed:true}),/关账/);
+  assert.equal((await f.view(id)).paymentSubmissions[0].status,'pending');assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM domestic_finance_entries').get().n,0);
+  await f.change(f.users.finance,id,'paymentProofReject',{submissionId:p.id,reason:'TEST 未见实际到账，请重新核实'});assert.equal((await f.view(id)).paymentSubmissions[0].status,'rejected');assert.equal((await f.view(id)).financial.paidMinor,0);await assert.rejects(f.change(f.users.finance,id,'paymentProofReject',{submissionId:p.id,reason:'TEST duplicate'}),/已核对/);
+  assert.throws(()=>f.sqlite.prepare("UPDATE domestic_payment_submissions SET amount_minor=1 WHERE id=?").run(p.id),/immutable/);assert.throws(()=>f.sqlite.prepare('DELETE FROM domestic_payment_reviews').run(),/immutable/);
+ }finally{f.sqlite.close();}
+});
+
+test('客户付款凭证及复核记录随完整备份还原，原文件可读取',async()=>{
+ const f=domesticFixture(),root=mkdtempSync(join(tmpdir(),'lj-domestic-payment-backup-'));let restored;
+ try{const id=await f.create(),p=await submitPayment(f,id);await f.change(f.users.finance,id,'paymentProofReject',{submissionId:p.id,reason:'TEST 退回核实'});const before=await f.view(id),archive=join(root,'backup.tar');await createBackup({DB:f.db,WHOLESALE_FILES:f.bucket},archive);const manifest=await verifyArchive(archive);assert.ok(manifest.tables.some(t=>t.name==='domestic_payment_submissions'&&t.count===1));assert.equal(manifest.files.length,f.files.size);const target=join(root,'restored');await restoreBackup(archive,target);restored=openDatabase(join(target,'business.sqlite'));assert.deepEqual((await read(restored,f.users.admin)).orders.find(o=>o.id===id),before);const result=await readDomesticFile(restored,fileBucket(join(target,'files')),f.users.admin,p.id);assert.match(await new Response(result.body).text(),/TEST customer transfer/);
+ }finally{restored?.sqlite.close();f.sqlite.close();rmSync(root,{recursive:true,force:true});}
 });

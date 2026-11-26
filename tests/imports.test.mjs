@@ -128,3 +128,11 @@ test('订单及发货导入使用当前单据SKU上限，超过20与200行不截
   assert.equal(validateImportRows('order',[input[0],input[0]],{}, {maxRows:205}).errors.length,1);
   assert.throws(()=>validateImportRows('order',[input[0]],{}, {maxRows:0}),/最多导入0行/);
 });
+
+test('国内订单模板用人民币小数，重复SKU、负数、公式与印尼单价列不混入',()=>{
+ const parsed=parseImportGrid('domesticOrder',[['商品编码','数量','单价CNY'],['bag-a','200','10.25']]);assert.equal(parsed.errors.length,0);assert.equal(parsed.rows[0].sku,'BAG-A');assert.equal(parsed.rows[0].unitPrice,10.25);
+ for(const price of ['0','-1','1.001'])assert.equal(validateImportRows('domesticOrder',[{sku:'A',qty:1,unitPrice:price}]).errors.length,1);
+ assert.equal(validateImportRows('domesticOrder',[{sku:'A',qty:1,unitPrice:1},{sku:'a',qty:2,unitPrice:1}]).errors.length,1);
+ assert.throws(()=>parseImportGrid('domesticOrder',[['SKU','数量','成交单价IDR'],['A',1,10000]]),/人民币单价/);
+ const ws=XLSX.utils.aoa_to_sheet([['SKU','数量','人民币单价'],['A',1,1]]);ws.C2.f='1+1';assert.throws(()=>readImportSheet(XLSX,'domesticOrder',{Sheets:{data:ws},SheetNames:['data']},'data'),/公式/);
+});

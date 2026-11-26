@@ -16,10 +16,10 @@ test('广告预算：运营申请、主管审批、财务核减闭环，预算�
  time(t);const f=await workplaceFixture();try{
   const before=Object.fromEntries(['finance_documents','workplace_payment_links','workplace_bank_checks','sales_ad_spend','cost_records','sales_monthly_targets'].map(k=>[k,count(f,k)]));
   const id=await create(f),draft=await expenseRequest(f.db,id);assert.equal(draft.status,'submitted');assert.equal(draft.data.channel,'TikTok');assert.equal(draft.data.unit.site,'印尼');
-  assert.ok((await workplaceTasks(f.db,f.users.manager)).some(x=>x.entity===id&&x.title==='审批广告预算申请'&&x.view==='advertising'));
+  assert.ok((await workplaceTasks(f.db,f.users.manager)).some(x=>x.entity===id&&x.title==='审批广告预算申请'&&x.view==='advertising-approvals'));
   await f.change(f.users.manager,id,'managerApprove');
   const review=(await readExpenses(f.db,f.users.finance,{month:'2026-11'})).requests.find(x=>x.id===id);assert.equal(review.canBudgetApprove,true);assert.equal(review.canFinance,false);assert.equal(review.canFinanceReject,true);
-  assert.ok((await workplaceTasks(f.db,f.users.finance)).some(x=>x.entity===id&&x.title==='核定广告预算'&&x.view==='advertising'));
+  assert.ok((await workplaceTasks(f.db,f.users.finance)).some(x=>x.entity===id&&x.title==='核定广告预算'&&x.view==='advertising-approvals'));
   await f.change(f.users.finance,id,'advertisingApprove',{approvedAmount:80});
   const r=await expenseRequest(f.db,id);assert.equal(r.status,'approved');assert.equal(r.data.amountMinor,10000);assert.equal(r.data.budget.approvedAmountMinor,8000);assert.equal(r.data.budget.approvedBy,f.users.finance.id);assert.equal(r.data.rate.rate,1);
   const view=await readExpenses(f.db,f.users.indonesia,{month:'2026-11'});assert.equal(view.serverTime,'2026-11-23T05:00:00.000Z');assert.equal(new Intl.DateTimeFormat('en-CA',{timeZone:view.configuration.units[0].timezone}).format(new Date(view.serverTime)),'2026-11-23');assert.equal(view.summary.length,0);assert.deepEqual(view.budgetSummary[0],{entity:'TEST ENTITY ID',site:'印尼',currency:'CNY',requested:10000,approved:8000,approvedCny:8000,fxMissing:0,count:1});

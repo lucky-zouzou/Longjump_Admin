@@ -13,6 +13,7 @@ import LoginTaskReminder from "./login-task-reminder";
 import {forgetTabReminder} from "../lib/login-task-reminder.mjs";
 import WorkspaceIcon from "./workspace-icons";
 import {WorkspaceGuard,useWorkspaceRoute,useVisibleRefresh} from "./workspace-hooks";
+import {personalWorkplaceEntries,workplaceSection} from "../lib/role-workplace.mjs";
 import {NAV_GROUPS,mobileModules,hasIndependentLedger,workspaceUrl} from "../lib/workspace-model.mjs";
 import {createWorkspaceLoader} from "../lib/workspace-loader.mjs";
 import {parseWorkspaceResponse} from "../lib/workspace-response.mjs";
@@ -260,12 +261,16 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
   const actor=data.actor;
   const roleNav=navigationForActor(actor);
   const tab=roleNav.includes(selectedTab)?selectedTab:roleNav[0];
-  const visibleNav = navItems.filter(([key]) => roleNav.includes(key)&&key!=="after-sales");
+  const visibleNav = navItems.filter(([key]) => roleNav.includes(key)&&key!=="after-sales"&&(key!=="attendance"||["管理员","运营主管"].includes(actor.role)||(data.myTasks||[]).some((task:Row)=>task.tab==="attendance")));
+  const personalEntries=personalWorkplaceEntries(actor);
+  const workSection=workplaceSection(actor,tab,route.view||"");
+  const activePersonal=personalEntries.find(entry=>entry.page===tab&&entry.view===workSection);
+  const personalNav=personalEntries.filter(entry=>`${entry.label} ${entry.page==="attendance"?"飞书":""} ${entry.view}`.toLowerCase().includes(navQuery.trim().toLowerCase()));
   const taskCount=(key:string)=>key==="overview"?data.myTasks.length:data.myTasks.filter(task=>task.tab===key).length;
   const taskBadge=(key:string)=>taskCount(key)>0?<span className="nav-task-count" aria-label={`${taskCount(key)}项待办`}>{taskCount(key)>99?"99+":taskCount(key)}</span>:null;
   const shellT=(key:string)=>translateWholesale(["wholesale","distribution","domestic-distribution","marketing-samples"].includes(tab)?wholesaleLocale.language:"zh",key);
 
-  const navLabel=(key:string,label:string)=>shellT(key==="sales"?(actor.role==="运营"?"每日销售导入":"销售看板"):label);
+  const navLabel=(key:string,label:string)=>shellT(key==="sales"?(actor.role==="运营"?"每日销售导入":"销售看板"):key==="attendance"?"出勤记录与审批":key==="finance-workbench"?(["管理员","财务","运营主管"].includes(actor.role)?"审批与费用":"费用申请与进度"):label);
   const activeItem=visibleNav.find(([key])=>key===tab);
   const activeGroup=NAV_GROUPS.find(group=>group.keys.includes(tab));
   const filteredNav=visibleNav.filter(([key,label])=>`${navLabel(key,label)} ${label} ${key} ${key==="attendance"?"打卡 签到 签退 请假":key==="finance-workbench"?"广告申请 广告趋势 预算 费用":""}`.toLowerCase().includes(navQuery.trim().toLowerCase()));
@@ -277,16 +282,18 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
     go={setTab}/>;
   const navigation=(surface:string)=><>
     <div className="nav-search"><WorkspaceIcon name="search"/><input aria-label={shellT("搜索工作区")} placeholder={shellT("搜索工作区")} value={navQuery} onChange={event=>setNavQuery(event.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&!e.nativeEvent.isComposing&&e.nativeEvent.keyCode!==229&&wake!==null){e.preventDefault();openAssistant(wake);}}}/>{navQuery&&<button aria-label={shellT("清除搜索")} onClick={()=>setNavQuery("")}><WorkspaceIcon name="close"/></button>}</div>
-    <div className="nav-work-shortcuts" aria-label="我的工作快捷入口"><button onClick={()=>setTab("attendance")}>每日打卡</button><button onClick={()=>setTab("attendance",{view:"leave"})}>请假申请</button>{["运营","财务","运营主管","管理员"].includes(actor.role)&&<button onClick={()=>setTab("finance-workbench",{view:"advertising"})}>广告申请</button>}{["运营","运营主管","供应链","管理员"].includes(actor.role)&&<button onClick={()=>setTab("finance-workbench",{view:"advertising-trend"})}>广告趋势</button>}</div>
+    {personalNav.length>0&&<div className="nav-group nav-personal-work"><div className="nav-personal-title">{shellT("我的工作")}<small>{shellT(actor.role)}</small></div>{personalNav.map(entry=><button key={entry.view} className={classNames("nav-button",activePersonal?.view===entry.view&&"active")} aria-current={activePersonal?.view===entry.view?"page":undefined} onClick={()=>setTab(entry.page,{view:entry.view})}><span className="nav-icon"><WorkspaceIcon name={entry.icon}/></span><span className="nav-label">{shellT(entry.label)}</span></button>)}</div>}
+
     <div className="nav-sections">{NAV_GROUPS.filter(group=>filteredNav.some(([key])=>group.keys.includes(key))).map((group,index)=>{
       const expanded=Boolean(navQuery.trim())||!collapsedGroups[group.label];
       const groupId=`nav-${surface}-${index}`;
       return <div className="nav-group" key={group.label}><button className="nav-group-toggle" aria-expanded={expanded} aria-controls={groupId} onClick={()=>setCollapsedGroups(old=>({...old,[group.label]:!old[group.label]}))} disabled={Boolean(navQuery.trim())}><span>{shellT(group.label)}</span><WorkspaceIcon name="chevron"/></button>
-        <div id={groupId} hidden={!expanded}>{filteredNav.filter(([key])=>group.keys.includes(key)).map(([key,label])=><button key={key} className={classNames("nav-button",tab===key&&"active")} aria-current={tab===key?"page":undefined} onClick={()=>setTab(key)}><span className="nav-icon"><WorkspaceIcon name={key}/></span><span className="nav-label">{navLabel(key,label)}</span>{taskBadge(key)}</button>)}</div></div>;
-    })}{wake!==null?<button className="nav-button" onClick={()=>openAssistant(wake)}>询问{assistantName} ↗</button>:!filteredNav.length&&<div className="nav-no-results">{shellT("没有匹配的工作区")}<button onClick={()=>setNavQuery("")}>{shellT("清除搜索")}</button></div>}</div>
+        <div id={groupId} hidden={!expanded}>{filteredNav.filter(([key])=>group.keys.includes(key)).map(([key,label])=><button key={key} className={classNames("nav-button",tab===key&&!activePersonal&&"active")} aria-current={tab===key&&!activePersonal?"page":undefined} onClick={()=>setTab(key,{view:key==="attendance"?"management":key==="finance-workbench"?(["管理员","财务","运营主管"].includes(actor.role)?"advertising-approvals":"expenses"):""})}><span className="nav-icon"><WorkspaceIcon name={key}/></span><span className="nav-label">{navLabel(key,label)}</span>{taskBadge(key)}</button>)}</div></div>;
+    })}{wake!==null?<button className="nav-button" onClick={()=>openAssistant(wake)}>询问{assistantName} ↗</button>:!filteredNav.length&&!personalNav.length&&<div className="nav-no-results">{shellT("没有匹配的工作区")}<button onClick={()=>setNavQuery("")}>{shellT("清除搜索")}</button></div>}</div>
   </>;
 
-  return <SkuImagesProvider key={`${actor.id}|${actor.role}|${actor.site}|${actor.channel}`} role={actor.role}><div className="app-shell" lang={["wholesale","distribution","domestic-distribution","marketing-samples"].includes(tab)&&wholesaleLocale.language==="id"?"id":"zh-CN"}>
+  return <SkuImagesProvider key={`${actor.id}|${actor.role}|${actor.site}|${actor.channel}`} role={actor.role}><div className="app-shell" data-workspace={tab} lang={["wholesale","distribution","domestic-distribution","marketing-samples"].includes(tab)&&wholesaleLocale.language==="id"?"id":"zh-CN"}>
+    <a className="workspace-skip" href="#workspace-content">{shellT("跳到工作内容")}</a>
     <aside className="sidebar">
       <div className="brand"><img className="brand-logo" src="/loong-jump-logo-white.png" alt="LOONG JUMP"/><p>{shellT("品牌出海供应链控制塔")}</p><span className="brand-workspace">WORKSPACE</span></div>
       <nav className="nav" aria-label={shellT("系统导航")}>{navigation("desktop")}</nav>
@@ -296,22 +303,22 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
     </aside>
     <main className="main">
       <header className="topbar">
-        <div className="workspace-breadcrumb"><span className="breadcrumb-section">{shellT(activeGroup?.label||"工作台")}</span><WorkspaceIcon name="chevron"/><h2>{activeItem?navLabel(activeItem[0],activeItem[1]):shellT("全链路可视化协同")}</h2></div>
+        <div className="workspace-breadcrumb"><span className="breadcrumb-section">{shellT(activePersonal?"我的工作":activeGroup?.label||"工作台")}</span><WorkspaceIcon name="chevron"/><h2>{activePersonal?shellT(activePersonal.label):activeItem?navLabel(activeItem[0],activeItem[1]):shellT("全链路可视化协同")}</h2></div>
         <div className="workspace-top-actions">
           <button type="button" className="btn employee-launch" aria-haspopup="dialog" onClick={()=>openAssistant()}>{assistantName}</button>
           {hasPermission(actor.role,"backup.export")&&<button className="btn" onClick={exportBackup}>{shellT("导出备份")}</button>}
           <span className={`status-pill ${connectionError?"connection-failed":""}`} role="status">{connectionError?shellT("更新失败 · 数据可能已过时"):data.tasksDeferred?shellT("正在更新导航待办"):`${shellT(hasIndependentLedger(selectedTab)?"导航已更新":"工作区已更新")} ${lastSync||"—"}`}</span>{connectionError&&<button className="btn danger" onClick={()=>void refresh().catch(()=>{})}>{shellT("重新连接")}</button>}
         </div>
       </header>
-      {assistant && assistant.scope===actorScope(actor) && <Suspense fallback={<p role="status">正在打开小品同学…</p>}><EmployeeAssistant key={tab} initialQuestion={assistant.question} page={tab} pageTitle={activeItem?navLabel(activeItem[0],activeItem[1]):''} close={()=>setAssistant(null)} go={(page,view,month,entity)=>{if(roleNav.includes(page)){setAssistant(null);setTab(page,{view,month,entity});}}}/></Suspense>}
-      <div className="content">{tab!=="overview" && reminder}<Suspense fallback={<div className="panel" role="status">正在打开工作区…</div>}>{data.module&&data.module!==tab&&!(tab===selectedTab&&hasIndependentLedger(tab))?<div className="panel" role="status">正在读取当前工作区…{connectionError&&<p>{connectionError}</p>}</div>:<>
+      {assistant && assistant.scope===actorScope(actor) && <Suspense fallback={<p role="status">正在打开小品同学…</p>}><EmployeeAssistant key={tab} initialQuestion={assistant.question} page={tab} pageTitle={activePersonal?shellT(activePersonal.label):activeItem?navLabel(activeItem[0],activeItem[1]):''} close={()=>setAssistant(null)} go={(page,view,month,entity)=>{if(roleNav.includes(page)){setAssistant(null);setTab(page,{view,month,entity});}}}/></Suspense>}
+      <div className="content" id="workspace-content" tabIndex={-1}>{tab!=="overview" && reminder}<Suspense fallback={<div className="panel workspace-loading" role="status"><span>正在打开工作区…</span><div aria-hidden="true"><i/><i/><i/></div></div>}>{data.module&&data.module!==tab&&!(tab===selectedTab&&hasIndependentLedger(tab))?<div className="panel workspace-loading" role="status"><span>正在读取当前工作区…</span>{connectionError?<p>{connectionError}</p>:<div aria-hidden="true"><i/><i/><i/></div>}</div>:<>
         {actor.role==="运营" && (!actor.site || !actor.channel) && <div className="notice warn">当前账号尚未绑定站点和渠道，请联系管理员在“用户管理”中完成分配后再录入业务数据。</div>}
         {tab==="domestic-distribution" && <WholesaleLanguageContext.Provider value={wholesaleLocale}><DomesticDistribution initialOrderId={route.entity} onChanged={()=>refresh(true)}/></WholesaleLanguageContext.Provider>}
         {tab==="marketing-samples" && <WholesaleLanguageContext.Provider value={wholesaleLocale}><MarketingSamples onChanged={()=>refresh(true)}/></WholesaleLanguageContext.Provider>}
         {tab==="distribution" && <WholesaleLanguageContext.Provider value={wholesaleLocale}><Distribution route={route} navigate={navigate} onChanged={()=>refresh(true)}/></WholesaleLanguageContext.Provider>}
         {tab==="wholesale" && <WholesaleLanguageContext.Provider value={wholesaleLocale}><Wholesale onChanged={()=>refresh(true)} route={route} navigate={navigate}/></WholesaleLanguageContext.Provider>}
         {tab==="reviews" && <BusinessReviews initialView={route.view} initialDate={route.entity}/>}
-        {["attendance","finance-workbench"].includes(tab) && <WholesaleLanguageContext.Provider value={wholesaleLocale}><PeopleWorkplace key={tab} section={route.view||""} onSectionChange={section=>setTab(tab,{view:section})} view={tab==="attendance"?"attendance":"finance"}/></WholesaleLanguageContext.Provider>}
+        {["attendance","finance-workbench"].includes(tab) && <WholesaleLanguageContext.Provider value={wholesaleLocale}><PeopleWorkplace key={tab} requestId={route.entity} section={workSection} onSectionChange={section=>setTab(tab,{view:section})} view={tab==="attendance"?"attendance":"finance"}/></WholesaleLanguageContext.Provider>}
         {tab==="content-center" && <ContentCenter key={route.entity} initialId={route.entity} tasks={data.myTasks.filter(t=>t.tab===tab)}/>}
         {tab==="creators" && <CreatorWorkspace initialId={route.entity}/>}
         {tab==="cost-profit" && <CostProfit key={route.view+route.entity+route.month} role={actor.role} initialView={route.view} initialSku={route.entity} initialMonth={route.month}/>}
@@ -343,7 +350,7 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
     {more&&<div className="mobile-more" role="dialog" aria-label={shellT("更多工作区")}><div className="panel-head"><h3>{shellT("全部工作区")}</h3><button className="btn" aria-label={shellT("关闭导航")} onClick={()=>setMore(false)}><WorkspaceIcon name="close"/>{shellT("关闭")}</button></div>{navigation("mobile")}</div>}
     <nav className="mobile-nav workspace-mobile-nav" aria-label={shellT("移动端导航")}>
       {mobileModules(actor.role).map((key:string)=>{const [,label]=navItems.find(row=>row[0]===key)!;return <button key={key} className={classNames("nav-button",tab===key&&"active")} aria-current={tab===key?"page":undefined} onClick={()=>setTab(key)}><WorkspaceIcon name={key}/><span>{shellT(key==="sales"?(actor.role==="运营"?"销售导入":"销售看板"):label)}</span>{taskBadge(key)}</button>})}
-      {visibleNav.length>mobileModules(actor.role).length&&<button className={classNames("nav-button",more&&"active")} aria-expanded={more} onClick={()=>setMore(!more)}><WorkspaceIcon name="more"/><span>{shellT("更多")}</span></button>}
+      {visibleNav.length+personalEntries.length>mobileModules(actor.role).length&&<button className={classNames("nav-button",more&&"active")} aria-expanded={more} onClick={()=>setMore(!more)}><WorkspaceIcon name="more"/><span>{shellT("更多")}</span></button>}
     </nav>
     {toast && <div className="toast">{shellT(toast)}</div>}
   </div></SkuImagesProvider>;

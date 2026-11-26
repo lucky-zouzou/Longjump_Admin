@@ -1,3 +1,4 @@
+import {deliveryQuantityChain} from "../../../lib/delivery-quantity-chain.mjs";
 import {forecastChanges} from "../../../lib/forecast-observations.mjs";
 import {transportSummary} from "../../../lib/supply-diagnostics.mjs";
 import {transportReceiptOwner} from "../../../lib/transport-workflow.mjs";
@@ -139,6 +140,7 @@ export async function GET(request:Request) {
       const result=await readHistory(database(),actor,Object.fromEntries(requestUrl.searchParams));
       return requestUrl.searchParams.get("export")==="1"?new Response(historyCsv(result),{headers:{"content-type":"text/csv; charset=utf-8","content-disposition":`attachment; filename="${result.kind}-history.csv"`,"cache-control":"no-store"}}):Response.json(result);
     }
+    if(actor.financeMode==='scoped')return Response.json({actor,module:requestUrl.searchParams.get('module')==='attendance'?'attendance':'finance-workbench',currentMonth:monthKey(),generatedAt:nowIso(),metrics:{},myTasks:await workspaceTasks(database(),actor)},{headers:{'Cache-Control':'private,no-store'}});
     const requestedModule=requestUrl.searchParams.get("module")||(actor.role==="员工"?"attendance":actor.role==="达人BD"?"creators":actor.role==="拍摄剪辑"?"content-center":"");
     const module=requestedModule==="home"?(mobileModules(actor.role)[0]||"overview"):requestedModule;
     if(module&&!navigationForRole(actor.role).includes(module))throw new HttpError(403,"当前账号无权打开此工作区");
@@ -343,11 +345,12 @@ export async function GET(request:Request) {
     const shipmentReceipts:AnyRow[]=shipmentReceiptRows.map((receipt):AnyRow=>({...receipt,items:shipmentReceiptItemRows.filter((item)=>item.receipt_id===receipt.id).map((item)=>({...item,allocations:scopedAllocations(item.allocations_json)})).filter((item)=>actor.role!=="运营"||item.allocations.length)})).filter((receipt)=>actor.role!=="运营"||receipt.items.length);
 
     const transportBatchItemById=new Map<string,AnyRow>(transportItemRows.map((row)=>[row.id,row]));
-    const transportLegItemsByLeg=new Map<string,AnyRow[]>();
+    const transportLegItemsByLeg=new Map<string,AnyRow[]>();const purchaseById=new Map<string,AnyRow>(purchaseOrderRows.map(p=>[p.id,p]));
     for(const item of transportLegItemRows){
       const source=transportBatchItemById.get(item.batch_item_id)??{};
       const rows=transportLegItemsByLeg.get(item.leg_id)??[];
-      rows.push({...item,name:source.name||"",seriesName:source.series_name||"",productionOrderId:source.production_order_id||"",shelfConfirmations:transportShelfRows.filter((row)=>row.leg_item_id===item.id)});
+      const production=productionItemById.get(source.production_order_item_id),purchase=purchaseItemById.get(production?.purchase_order_item_id),order=purchaseById.get(purchase?.purchase_order_id),leg=transportLegRows.find(l=>l.id===item.leg_id);
+      rows.push({...item,quantityChain:deliveryQuantityChain({leg:leg||{},item,production,purchase,document:order?.document_json,effectiveDocument:order?.quantity_document_json||order?.document_json}),name:source.name||"",seriesName:source.series_name||"",productionOrderId:source.production_order_id||"",shelfConfirmations:transportShelfRows.filter((row)=>row.leg_item_id===item.id)});
       transportLegItemsByLeg.set(item.leg_id,rows);
     }
     const roleVisibleTransportLegs=transportLegRows.filter((leg)=>{

@@ -218,3 +218,20 @@ test('读取期间人事授权被撤回，不返回旧授权下的员工明细',
   assert.equal((await readFeishuAttendance(f.db,f.users.hr,{month:'2026-11'})).records.length,0);
  }finally{f.close();}
 });
+
+
+test('个人飞书范围在服务端过滤明细和汇总，管理员个人入口不返回员工绑定',async()=>{
+ const f=await prepared();try{
+  await f.sync();
+  const team=await readFeishuAttendance(f.db,f.users.admin,{month:'2026-11'});
+  assert.equal(team.records.length,2);assert.ok(team.configuration);
+  const mine=await readAttendance(f.db,f.users.admin,{month:'2026-11',scope:'mine'});
+  assert.deepEqual(mine.feishu.records,[]);assert.deepEqual(mine.feishu.summary,[]);assert.equal(mine.feishu.configuration,undefined);
+  assert.doesNotMatch(workplaceCsv(mine,'attendance'),/TEST-ID-OPS/);
+  const owner=await readAttendance(f.db,f.users.indonesia,{month:'2026-11',scope:'mine'});
+  assert.equal(owner.feishu.records.length,2);assert.equal(owner.feishu.summary.reduce((n,r)=>n+r.count,0),2);
+  assert.equal(owner.feishu.isManaged,true);assert.equal(owner.readiness.canPunch,false);assert.equal(owner.readiness.canLeave,false);
+  const manager=await readFeishuAttendance(f.db,f.users.manager,{month:'2026-11',scope:'mine'});
+  assert.deepEqual(manager.records,[]);assert.deepEqual(manager.summary,[]);
+ }finally{f.close();}
+});

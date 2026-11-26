@@ -40,7 +40,7 @@ try{
  f.sqlite.exec('CREATE TABLE local_migrations(name TEXT PRIMARY KEY,sha256 TEXT NOT NULL,applied_at TEXT NOT NULL)');
  for(const m of releaseMigrations)f.sqlite.prepare('INSERT INTO local_migrations VALUES(?,?,?)').run(m.name,m.sha256,stamp);
  f.sqlite.exec("VACUUM INTO '"+target.replaceAll("'","''")+"'");
- const roles={operator:'id-ops',unconfigured:'my-ops',manager:'manager',finance:'finance-1',hr:'hr',admin:'admin-1'};
+ const roles={studio:'studio',operator:'id-ops',unconfigured:'my-ops',manager:'manager',finance:'finance-1',hr:'hr',admin:'admin-1'};
  writeFileSync(root+'/preview.json',JSON.stringify({testOnly:true,createdAt:stamp,today,leaveDate,reviewDate,origin:'http://127.0.0.1:57339',roles},null,2),{mode:0o600});
  console.log('TEST-ONLY workplace preview fixture ready: '+root);
  console.log('Current-month advertising requests and expenses, leave approvals, and scoped trend facts are synthetic.');

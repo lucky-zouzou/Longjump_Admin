@@ -22,7 +22,7 @@ export async function GET(request:Request) {
   try {
     const actor={...await requireActor(request),handbook:await currentHandbook(database())};
     if(new URL(request.url).searchParams.has('actionCounts')) {
-      if(!canReadActions(actor)) throw new HttpError(403,'你这个岗位看不到经营行动单。');
+      if(actor.financeMode==='scoped'||!canReadActions(actor)) throw new HttpError(403,'你这个岗位看不到经营行动单。');
       return Response.json(await employeeActionCounts(database(),actor),{headers});
     }
     const page=new URL(request.url).searchParams.get('page')||'';

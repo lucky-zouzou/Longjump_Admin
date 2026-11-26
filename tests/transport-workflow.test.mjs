@@ -124,3 +124,9 @@ test('无负责人分腿不给任意海运开放签收，供应链仍可处理',
   assert.equal(f.sqlite.prepare('SELECT stage_owner FROM transport_legs').get().stage_owner,'供应链');
  }finally{f.sqlite.close();}
 });
+
+test('运输数量链区分本站整单与单票，原需求缺失不猜零或泄露别站金额',async()=>{
+ const {deliveryQuantityChain}=await import('../lib/delivery-quantity-chain.mjs');const q=deliveryQuantityChain({leg:{site:'泰国',channel:'TikTok'},item:{sku:'TEST',qty:105,received_qty:100,sellable_qty:80,pending_shelf_qty:18,quarantine_qty:2},production:{dispatch_allocations_json:JSON.stringify([{site:'泰国',channel:'TikTok',qty:210}])},document:{items:[{sku:'TEST',demandAllocations:[{site:'泰国',channel:'TikTok',qty:200},{site:'印尼',channel:'TikTok',qty:999}],price:12345}]},effectiveDocument:{items:[{sku:'TEST',cartonQty:30}]}});
+ assert.equal(q.demandQty,200);assert.equal(q.factoryQty,210);assert.equal(q.ticketQty,105);assert.equal(q.adjustment,10);assert.equal(q.unreceivedQty,5);assert.doesNotMatch(JSON.stringify(q),/12345|999/);
+ assert.equal(deliveryQuantityChain({leg:{},item:{}}).demandQty,null);
+});

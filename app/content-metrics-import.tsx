@@ -66,9 +66,9 @@ export function ContentMetricsImport({sites,posts,refresh,openCompass}:{sites:st
   setBusy(true);setError('');
   try{
    const payload=batch.platform?{action:'importPlatformReport',site,start,end,currency,file:batch.name,clearMissing}:{action:'importMetrics'};
-   await parseWorkspaceResponse(await fetch('/api/content-center',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...payload,operationId:batch.id,rows:batch.rows.map((row,i)=>differences?{...row,expectedRevision:differences[i].revision}:row)})}));
+   const saved=await parseWorkspaceResponse(await fetch('/api/content-center',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...payload,operationId:batch.id,rows:batch.rows.map((row,i)=>differences?{...row,expectedRevision:differences[i].revision}:row)})}));
    setReceipt({site,source:batch.platform?'reports':'published',range:batch.platform?start+'~'+end:''});
-   setNotice('已核对 '+batch.rows.length+' 行，相同记录自动跳过。');setBatch(null);next(n=>n+1);await refresh();
+   setNotice(saved.receipt?`已保存 ${saved.receipt.written} 行，相同跳过 ${saved.receipt.unchanged} 行；已关联内部发布 ${saved.receipt.matched} 行，待关联 ${saved.receipt.unmatched} 行。待关联记录已进入运营报表罗盘，暂不计员工内容贡献。`:'已核对 '+batch.rows.length+' 行，相同记录自动跳过。');setBatch(null);next(n=>n+1);await refresh();
   }catch(e){setError(e instanceof Error?e.message:'导入失败');}finally{setBusy(false);}
  }
  return <><section className="cc-card cc-metric-import"><header className="cc-row"><h3>运营效果数据导入</h3><button className="btn" type="button" onClick={()=>void template()}>下载运营视频数据反馈模板</button></header>
