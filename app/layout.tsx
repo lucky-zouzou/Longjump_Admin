@@ -4,6 +4,7 @@ import "./globals.css";
 import "./workspace-layout.css";
 import "./overview-workspace.css";
 import "./workspace-theme.css";
+import "./workspace-navigation.css";
 
 const title = "LOONG JUMP · 品牌出海供应链控制塔";
 const description = "销售、库存、备货、生产与跨境运输的一体化协同系统";
