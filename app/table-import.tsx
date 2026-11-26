@@ -50,7 +50,7 @@ export default function TableImport({kind,busy=false,maxRows,defaults={},context
       const ws=XLSX.utils.aoa_to_sheet([schema.columns.map(c=>t(c.label)),...values.map(row=>schema.columns.map(c=>row[c.key]??''))]);
       ws['!cols']=schema.columns.map(()=>({wch:22}));
       XLSX.utils.book_append_sheet(workbook,ws,'导入数据');
-      XLSX.utils.book_append_sheet(workbook,XLSX.utils.aoa_to_sheet([['使用说明'],['请填写“导入数据”工作表，保留表头。只保留本次需要处理的行，删除其余明细。'],[description||'导入后预览并确认，再提交业务单据。'],['数量必须为整数；SKU及单号建议使用文本格式；不接受公式。'],['允许空白行，不会跳过错误行。'],['到仓单支持一单多SKU；同一单号的站点、日期、凭证和说明须一致。同SKU按渠道分配数量，合计为实际收到的数量。']]),'填写说明');
+      XLSX.utils.book_append_sheet(workbook,XLSX.utils.aoa_to_sheet([['使用说明'],['请填写“导入数据”工作表，保留表头。只保留本次需要处理的行，删除其余明细。'],[description||'导入后预览并确认，再提交业务单据。'],['数量必须为整数；SKU及单号建议使用文本格式；不接受公式。'],['允许空白行，不会跳过错误行。'],[kind==='domesticOrder'?'一份文件导入一张国内订单的商品明细；人民币单价最多两位小数，同一 SKU 合并一行。客户、结算方式及回款日期在订单表单填写。':kind==='inbound'?'到仓单支持一单多SKU；同一单号的站点、日期、凭证和说明须一致。同SKU按渠道分配数量，合计为实际收到的数量。':'确认导入后请核对业务表单，再提交。']]),'填写说明');
       XLSX.writeFile(workbook,`LOONG-JUMP-${kind}-import-template.xlsx`);
     }catch(error){setMessage(error instanceof Error?error.message:'模板下载失败');}
   };
