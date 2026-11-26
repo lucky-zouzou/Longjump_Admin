@@ -292,7 +292,8 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
     })}{wake!==null?<button className="nav-button" onClick={()=>openAssistant(wake)}>询问{assistantName} ↗</button>:!filteredNav.length&&!personalNav.length&&<div className="nav-no-results">{shellT("没有匹配的工作区")}<button onClick={()=>setNavQuery("")}>{shellT("清除搜索")}</button></div>}</div>
   </>;
 
-  return <SkuImagesProvider key={`${actor.id}|${actor.role}|${actor.site}|${actor.channel}`} role={actor.role}><div className="app-shell" lang={["wholesale","distribution","domestic-distribution","marketing-samples"].includes(tab)&&wholesaleLocale.language==="id"?"id":"zh-CN"}>
+  return <SkuImagesProvider key={`${actor.id}|${actor.role}|${actor.site}|${actor.channel}`} role={actor.role}><div className="app-shell" data-workspace={tab} lang={["wholesale","distribution","domestic-distribution","marketing-samples"].includes(tab)&&wholesaleLocale.language==="id"?"id":"zh-CN"}>
+    <a className="workspace-skip" href="#workspace-content">{shellT("跳到工作内容")}</a>
     <aside className="sidebar">
       <div className="brand"><img className="brand-logo" src="/loong-jump-logo-white.png" alt="LOONG JUMP"/><p>{shellT("品牌出海供应链控制塔")}</p><span className="brand-workspace">WORKSPACE</span></div>
       <nav className="nav" aria-label={shellT("系统导航")}>{navigation("desktop")}</nav>
@@ -310,7 +311,7 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
         </div>
       </header>
       {assistant && assistant.scope===actorScope(actor) && <Suspense fallback={<p role="status">正在打开小品同学…</p>}><EmployeeAssistant key={tab} initialQuestion={assistant.question} page={tab} pageTitle={activePersonal?shellT(activePersonal.label):activeItem?navLabel(activeItem[0],activeItem[1]):''} close={()=>setAssistant(null)} go={(page,view,month,entity)=>{if(roleNav.includes(page)){setAssistant(null);setTab(page,{view,month,entity});}}}/></Suspense>}
-      <div className="content">{tab!=="overview" && reminder}<Suspense fallback={<div className="panel" role="status">正在打开工作区…</div>}>{data.module&&data.module!==tab&&!(tab===selectedTab&&hasIndependentLedger(tab))?<div className="panel" role="status">正在读取当前工作区…{connectionError&&<p>{connectionError}</p>}</div>:<>
+      <div className="content" id="workspace-content" tabIndex={-1}>{tab!=="overview" && reminder}<Suspense fallback={<div className="panel workspace-loading" role="status"><span>正在打开工作区…</span><div aria-hidden="true"><i/><i/><i/></div></div>}>{data.module&&data.module!==tab&&!(tab===selectedTab&&hasIndependentLedger(tab))?<div className="panel workspace-loading" role="status"><span>正在读取当前工作区…</span>{connectionError?<p>{connectionError}</p>:<div aria-hidden="true"><i/><i/><i/></div>}</div>:<>
         {actor.role==="运营" && (!actor.site || !actor.channel) && <div className="notice warn">当前账号尚未绑定站点和渠道，请联系管理员在“用户管理”中完成分配后再录入业务数据。</div>}
         {tab==="domestic-distribution" && <WholesaleLanguageContext.Provider value={wholesaleLocale}><DomesticDistribution initialOrderId={route.entity} onChanged={()=>refresh(true)}/></WholesaleLanguageContext.Provider>}
         {tab==="marketing-samples" && <WholesaleLanguageContext.Provider value={wholesaleLocale}><MarketingSamples onChanged={()=>refresh(true)}/></WholesaleLanguageContext.Provider>}

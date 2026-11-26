@@ -17,6 +17,8 @@ export function useWorkspaceRoute(){
     const value={...latest.current,...next};
     if(['page','entity','view','month'].some(k=>value[k as keyof Route]!==latest.current[k as keyof Route])&&!guard.confirm())return false;
     const url=workspaceUrl(value);if(url!==window.location.pathname+window.location.search)window.history[replace?'replaceState':'pushState'](null,'',url);
+    // Start a different workspace at its heading. In-page detail links keep their own scroll target.
+    if(value.page!==latest.current.page)window.scrollTo({top:0,left:0,behavior:'instant'});
     latest.current=value;setRoute(value);return true;
   },[guard]);
   useEffect(()=>{const pop=()=>{if(!guard.confirm()){window.history.pushState(null,'',workspaceUrl(latest.current));return;}setRoute(readWorkspaceRoute(window.location.search));};window.addEventListener('popstate',pop);return()=>window.removeEventListener('popstate',pop);},[guard]);
