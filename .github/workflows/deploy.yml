@@ -109,6 +109,14 @@ jobs:
             printf '%s' "$EXCHANGERATE_API_KEY" | ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes root@47.238.71.113 'cd /root/loong-jump-v17 && python3 scripts/configure-exchangerate-key.py'
           fi
 
+      - name: Configure optional Feishu attendance credentials
+        env:
+          FEISHU_ATTENDANCE_CREDENTIALS: ${{ secrets.FEISHU_ATTENDANCE_CREDENTIALS }}
+        run: |
+          if [ -n "$FEISHU_ATTENDANCE_CREDENTIALS" ]; then
+            printf '%s' "$FEISHU_ATTENDANCE_CREDENTIALS" | ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes root@47.238.71.113 'cd /root/loong-jump-v17 && python3 scripts/configure-feishu-credentials.py'
+          fi
+
       - name: Activate verified image without compiling on production
         timeout-minutes: 5
         run: |

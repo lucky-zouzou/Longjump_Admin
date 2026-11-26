@@ -1,0 +1,9 @@
+services:
+  app:
+    environment:
+      LOONGJUMP_FEISHU_CREDENTIALS_FILE: /run/secrets/feishu_credentials
+    secrets:
+      - feishu_credentials
+secrets:
+  feishu_credentials:
+    file: ./secrets/feishu/credentials.json

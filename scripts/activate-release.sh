@@ -6,7 +6,7 @@ attempt=${2:?Expected run attempt}
 [[ "$release" =~ ^[0-9a-f]{40}$ && "$attempt" =~ ^[0-9]+$ ]] || { echo 'Invalid release identity' >&2; exit 1; }
 source_image="loongjump-release:$release"
 compose=(docker compose)
-if [ -f compose.inquiry-sync.yaml ] || [ -f secrets/best-tracking/credentials.json ] || [ -f secrets/employee-assistant/api_key ] || [ -f secrets/exchangerate/api_key ]; then
+if [ -f compose.inquiry-sync.yaml ] || [ -f secrets/best-tracking/credentials.json ] || [ -f secrets/employee-assistant/api_key ] || [ -f secrets/exchangerate/api_key ] || [ -f secrets/feishu/credentials.json ]; then
   if [ -n "${COMPOSE_FILE:-}" ]; then
     IFS="${COMPOSE_PATH_SEPARATOR:-:}" read -r -a configured_files <<< "$COMPOSE_FILE"
     for file in "${configured_files[@]}"; do compose+=(-f "$file"); done
@@ -19,6 +19,7 @@ if [ -f compose.inquiry-sync.yaml ] || [ -f secrets/best-tracking/credentials.js
   if [ -f secrets/employee-assistant/api_key ]; then compose+=(-f compose.employee-assistant.yaml); fi
   if [ -f secrets/best-tracking/credentials.json ]; then compose+=(-f compose.best-tracking.yaml); fi
   if [ -f secrets/exchangerate/api_key ]; then compose+=(-f compose.exchangerate.yaml); fi
+  if [ -f secrets/feishu/credentials.json ]; then compose+=(-f compose.feishu.yaml); fi
 fi
 docker image inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$source_image" | grep -Fxq "LOONGJUMP_RELEASE=$release"
 app_image=$("${compose[@]}" config --images app)

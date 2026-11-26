@@ -7,7 +7,7 @@ import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 
 const release='a'.repeat(40),script=fileURLToPath(new URL('../scripts/activate-release.sh',import.meta.url));
-function activate(overrides={},withSync=false,withOverride=false,withBest=false,withEmployee=false,withFx=false){
+function activate(overrides={},withSync=false,withOverride=false,withBest=false,withEmployee=false,withFx=false,withFeishu=false){
  const dir=mkdtempSync(join(tmpdir(),'lj-deploy-'));
  try{
   writeFileSync(join(dir,'docker'),`#!/bin/bash
@@ -25,6 +25,10 @@ esac
   if(withEmployee){
     mkdirSync(join(dir,'secrets/employee-assistant'),{recursive:true});
     writeFileSync(join(dir,'secrets/employee-assistant/api_key'),'synthetic');
+  }
+  if(withFeishu){
+    mkdirSync(join(dir,'secrets/feishu'),{recursive:true});
+    writeFileSync(join(dir,'secrets/feishu/credentials.json'),'{}');
   }
   if(withFx){
     mkdirSync(join(dir,'secrets/exchangerate'),{recursive:true});
@@ -78,4 +82,13 @@ test('专用汇率密钥单独挂载，保留其他服务配置并支持单独�
  const only=activate({},false,false,false,false,true);
  assert.equal(only.status,0,only.stderr);
  assert.equal(only.calls.at(-1),'compose -f compose.yaml -f compose.exchangerate.yaml up -d --no-build --pull never app');
+});
+
+test('飞书凭据挂载随发布保留，兼容独立启用和现有全部私密服务配置',()=>{
+ const only=activate({},false,false,false,false,false,true);
+ assert.equal(only.status,0,only.stderr);
+ assert.equal(only.calls.at(-1),'compose -f compose.yaml -f compose.feishu.yaml up -d --no-build --pull never app');
+ const all=activate({COMPOSE_FILE:'compose.yaml:custom.yaml'},true,false,true,true,true,true);
+ assert.equal(all.status,0,all.stderr);
+ assert.equal(all.calls.at(-1),'compose -f compose.yaml -f custom.yaml -f compose.inquiry-sync.yaml -f compose.employee-assistant.yaml -f compose.best-tracking.yaml -f compose.exchangerate.yaml -f compose.feishu.yaml up -d --no-build --pull never app');
 });
