@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { canReadDomain, hasPermission, navigationForRole, PERMISSION_LABELS, ROLE_PERMISSIONS } from "../lib/permissions.mjs";
+import { canReadDomain, hasPermission, navigationForRole, navigationForActor, PERMISSION_LABELS, ROLE_PERMISSIONS } from "../lib/permissions.mjs";
 
 test("管理员审批与供应链送审分工，销售导入保持运营专属", () => {
   for (const permission of Object.keys(PERMISSION_LABELS)) {
@@ -58,4 +58,13 @@ test("只有管理员能查看全量审计和管理账号", () => {
 test("海运菜单包含共享生产动态，不出现收货与新品入口", () => {
   assert.deepEqual(navigationForRole("海运"),["production-tracking","overview","batches","attendance","finance-workbench"]);
   assert.equal(navigationForRole("供应链").includes("audit"),false);
+});
+
+test('分销与寄样入口按实际岗位和运营站点开放，生产岗位不继承商业入口',()=>{
+ for(const role of ['管理员','财务','供应链','达人BD'])assert.ok(navigationForActor({role}).includes('marketing-samples'),role);
+ for(const role of ['工厂','海运','拍摄剪辑','员工','销售'])assert.equal(navigationForActor({role}).includes('marketing-samples'),false,role);
+ assert.ok(navigationForActor({role:'运营',site:'印尼',channel:'TikTok'}).includes('marketing-samples'));
+ for(const [site,channel] of [['印尼','Shopee'],['泰国','TikTok'],['菲律宾','TikTok']])assert.equal(navigationForActor({role:'运营',site,channel}).includes('marketing-samples'),false,site+channel);
+ for(const role of ['管理员','财务','供应链','工厂'])assert.ok(navigationForActor({role}).includes('domestic-distribution'),role);
+ for(const role of ['运营','海运','拍摄剪辑','员工','销售','达人BD'])assert.equal(navigationForActor({role}).includes('domestic-distribution'),false,role);
 });

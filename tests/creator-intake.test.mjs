@@ -27,6 +27,9 @@ async function setup(){
  f.follow={nextOwner:f.users.indonesia.id,nextAt:future(),nextAction:'核实合作排期'};
  return f;
 }
+// Non-Indonesia-TikTok legacy logistics keeps its original non-posting behavior.
+async function legacySetup(){const f=await setup();f.sqlite.prepare("UPDATE creator_scopes SET platform='Shopee' WHERE id=?").run(f.scope);return f;}
+
 
 test('intake review allows an omitted follow-up date for every decision and keeps undated work visible',async t=>{
  for(const decision of ['accepted','queued','returned']){
@@ -193,7 +196,7 @@ test('different resource requests share the same profile, preserve original oper
 });
 
 test('accepted handoff proceeds directly to BD proposal, approval and fulfillment without fake contact or reply',async()=>{
- const f=await setup(),row=await f.submit();await f.review(row);const id=(await readCreators(f.db,f.users.admin)).profiles[0].id;
+ const f=await legacySetup(),row=await f.submit();await f.review(row);const id=(await readCreators(f.db,f.users.admin)).profiles[0].id;
  const proposal={recipient:'测试收件人 / 0812 / TEST-ONLY地址',method:'commission',submissionId:row.id,items:[{sku:'BAG-A',sampleQty:1}],videos:1,lives:0,currency:'CNY',budget:30,commission:'佣金待双方批准协议执行',requirements:'视频展示容量',rights:'未授予二次投流权限',stockCheck:'核对真实仓库库存',zone:'Asia/Jakarta',dueAt:future(),evidence:proof};
  await f.change(f.users.bd,id,'round',proposal);const round=f.sqlite.prepare('SELECT * FROM creator_rounds').get();assert.equal(round.status,'pending');assert.equal(round.author_id,f.users.bd.id);
  await assert.rejects(()=>f.change(f.users.indonesia,id,'round',proposal),/已关联合作/);
@@ -340,7 +343,7 @@ test('pending handoff can pause before acceptance and resume without losing its 
 });
 
 test('运营发起、BD批量接收、修订确认与履约独立留痕',async()=>{
- const f=await setup(),handover=await f.submit(),creatorId=handover.creator_id,ops=f.users.indonesia,bd=f.users.bd;
+ const f=await legacySetup(),handover=await f.submit(),creatorId=handover.creator_id,ops=f.users.indonesia,bd=f.users.bd;
  const proposal={creatorId,requestId:crypto.randomUUID(),contact:'合作测试',dueAt:future(),items:[{sku:'BAG-A',sampleQty:1}],method:'commission',commission:'12.5',videos:1,lives:0};
  const count=()=>f.sqlite.prepare('SELECT COUNT(*) n FROM creator_rounds').get().n;
  const requests=async actor=>(await readCreators(f.db,actor)).requests;
@@ -417,7 +420,7 @@ test('BD姓名按唯一登录邮箱绑定账号，保留原达人归属，重复
 
 test('BD 批量视频交付无需签收、截图按达人权限读取并随备份恢复，效果证据可选',async()=>{
  const {readCreatorEvidence}=await import('../lib/creator-evidence.mjs');
- const f=await setup(),row=await f.submit(),creatorId=row.creator_id,bd=f.users.bd;
+ const f=await legacySetup(),row=await f.submit(),creatorId=row.creator_id,bd=f.users.bd;
  const requestId=crypto.randomUUID();await f.act(bd,'requestCreate',{creatorId,requestId,contact:'不可覆盖档案',dueAt:future(),items:[{sku:'BAG-A',sampleQty:1}],method:'commission',commission:'10',videos:3,lives:0});
  const pending=(await readCreators(f.db,bd)).requests.find(r=>r.id===requestId);assert.equal(pending.terms.contact,'test@example.test');
  await f.act(bd,'requestConfirm',{requestId,version:1,confirmed:true});
@@ -459,7 +462,7 @@ test('跟进记录已完成沟通且不强制未来日期，后续待办可空�
 });
 
 test('寄样与视频时间按表单秒精度核对，确认同一秒允许而更早一秒拒绝',async()=>{
- const f=await setup(),row=await f.submit(),creatorId=row.creator_id,bd=f.users.bd,requestId=crypto.randomUUID();
+ const f=await legacySetup(),row=await f.submit(),creatorId=row.creator_id,bd=f.users.bd,requestId=crypto.randomUUID();
  await f.act(bd,'requestCreate',{creatorId,requestId,dueAt:future(),items:[{sku:'BAG-A',sampleQty:1}],method:'commission',commission:'10',videos:1,lives:0});
  await f.act(bd,'requestConfirm',{requestId,version:1,confirmed:true});
  const r=f.sqlite.prepare('SELECT * FROM creator_rounds').get(),second=Math.floor((Date.now()-1000)/1000)*1000;

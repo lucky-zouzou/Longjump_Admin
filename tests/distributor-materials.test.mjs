@@ -11,7 +11,7 @@ const env={MATERIALS_ENABLED:'1',MATERIALS_S3_ENDPOINT:'https://test-only.r2.clo
 const origin='https://mitra.example.test',password='TEST-ONLY-Materials-1120';
 const req=(a,path='/api/distributor?materials=1',body)=>new Request(origin+path,{method:body?'POST':'GET',headers:{cookie:a?.cookie||'',origin,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});
 async function account(f,mode='full'){
- const c=await mutateDistribution(f.db,f.users.indonesia,{action:'create',operationId:crypto.randomUUID(),name:'TEST ONLY '+crypto.randomUUID(),contact:'Rani',phone:'0812345678',city:'Jakarta',address:'TEST ONLY',salesUserId:f.users.indonesia.id});
+ const c=await mutateDistribution(f.db,f.users.indonesia,{action:'create',companyShortName:'TEST 简称',operationId:crypto.randomUUID(),name:'TEST ONLY '+crypto.randomUUID(),contact:'Rani',phone:'0812345678',city:'Jakarta',address:'TEST ONLY',salesUserId:f.users.indonesia.id});
  if(mode==='materials')await mutateMaterialAdmin(f.db,f.users.admin,{action:'mode',customerId:c.id,version:1,mode},{});
  const s=f.sqlite.prepare('SELECT * FROM distributor_stores WHERE customer_id=?').get(c.id),invite=await manageStore(f.db,f.users.admin,{action:'approve',customerId:c.id,version:s.version,reason:'TEST ONLY 审核'});
  const login=await authenticateDistributor(f.db,{username:invite.username,password,activation:new URLSearchParams(invite.activationPath.split('#')[1]).get('activate')});return {id:c.id,...login,cookie:'lj_distributor='+login.token};

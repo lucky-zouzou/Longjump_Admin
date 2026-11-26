@@ -58,7 +58,8 @@ test('生产协作岗位共享脱敏动态，专用拍摄账号与工厂业务�
  await f.export();
  f.sqlite.prepare("UPDATE series_production_orders SET evidence_json=?").run(JSON.stringify([{stage:'factory_accepted',at:new Date().toISOString(),by:'工厂甲',reference:'PRIVATE-REPORT',note:'PRIVATE-NOTE'}]));
  for(const role of Object.keys(ROLE_PERMISSIONS)){
-  const actor=role==='工厂'?{...f.factory,id:'other-factory'}:role==='运营'?f.users.indonesia:{...f.users.sales,role};
+  const actor=role==='工厂'?{...f.factory,id:'other-factory'}:role==='运营'?f.users.indonesia:{...f.users.sales,id:'production-role-'+Object.keys(ROLE_PERMISSIONS).indexOf(role),role};
+  if(!f.sqlite.prepare('SELECT id FROM users WHERE id=?').get(actor.id))f.sqlite.prepare('INSERT INTO users(id,email,name,role,site,channel,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)').run(actor.id,actor.id+'@example.test',actor.name,role,actor.site||null,actor.channel||null,'2026-01-01','2026-01-01');
   if(['拍摄剪辑','员工'].includes(role)){
     assert.equal(canReadDomain(role,'production_tracking'),false);assert.equal(navigationForRole(role).includes('production-tracking'),false);
     assert.ok((await read(actor,'production-tracking')).error);continue;

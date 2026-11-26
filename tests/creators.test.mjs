@@ -190,6 +190,7 @@ test('business approval, multi-SKU samples, content acceptance form a complete n
  const f=await setup(),id=await f.create();await f.accept(id);const r=await f.round(id);const stock=f.sqlite.prepare('SELECT SUM(qty) AS n FROM inventory_balances').get().n;
  await assert.rejects(()=>f.change(f.users.bd,id,'approve',{roundId:r,note:'自审'}),/岗位不能/);
  await assert.rejects(()=>f.change(f.users.indonesia,id,'dispatch',{roundId:r}),/审批/);
+ f.sqlite.prepare("UPDATE creator_scopes SET platform='Shopee' WHERE id=?").run(f.scope); // Legacy non-posting logistics outside Indonesia TikTok.
  await f.approve(id,r);
  await assert.rejects(()=>f.change(f.users.indonesia,id,'dispatch',{roundId:r,qty:1}),/全部发出/);
  await f.change(f.users.indonesia,id,'dispatch',{roundId:r,qty:2,at:now(),warehouseRef:'WH-TEST-001',carrier:'测试物流',tracking:'TRACK',evidence:proof});

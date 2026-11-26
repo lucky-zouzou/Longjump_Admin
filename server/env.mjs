@@ -2,9 +2,13 @@ import {readFileSync} from 'node:fs';
 import {openDatabase,fileBucket} from './storage.mjs';
 import {createCompanyAccount} from './create-account.mjs';
 import {readExchangeRateKey} from './exchangerate-config.mjs';
+import {readFeishuCredentials} from './feishu-config.mjs';
+import {startFeishuSync} from '../lib/feishu-sync.mjs';
 const key=Symbol.for('loongjump.node.storage');
 export const env=globalThis[key]||(globalThis[key]={DB:openDatabase(),WHOLESALE_FILES:fileBucket()});
 env.readExchangeRateKey=readExchangeRateKey;
+env.readFeishuCredentials=readFeishuCredentials;
+env.startFeishuSync=(actor,input)=>startFeishuSync(env.DB,readFeishuCredentials(),input,{trigger:'manual',actorId:actor.id});
 // Keep private file access in Node. Worker deployments use an OPENAI_API_KEY secret.
 env.readEmployeeAssistantKey = () => {
   if(process.env.OPENAI_API_KEY) return process.env.OPENAI_API_KEY;

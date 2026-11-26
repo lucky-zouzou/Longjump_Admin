@@ -1,7 +1,7 @@
 import {storeInsert} from '../lib/distributor-accounts.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {fixture} from './fixtures.mjs';
+import {fixture,historicalWholesaleOrder} from './fixtures.mjs';
 import {manageDistributorLink,distributorIdentity,submitDistributorOrder} from '../lib/distributor-ordering.mjs';
 import {handleDistributor} from '../lib/distributor-http.mjs';
 import {indonesiaDate,readWholesale} from '../lib/wholesale.mjs';
@@ -29,6 +29,7 @@ test('客户从专属链接复购，销售归属、财务回款、库存锁定�
   const req=basket(),first=await (await send(req)).json(),second=await (await send(req)).json();
   assert.ok(first.orderNo);assert.equal(second.orderNo,first.orderNo);assert.equal(second.replayed,true);
   const order=f.sqlite.prepare('SELECT * FROM wholesale_orders').get();
+  historicalWholesaleOrder(f,order.id); // Existing pre-upgrade order fulfillment remains compatible.
   assert.equal(order.sales_user_id,f.users.sales.id);assert.equal(order.creator_id,'distributor:'+id);
   assert.equal(order.status,'pending');assert.equal(order.sale_type,'cash');assert.equal(order.currency,'IDR');
   assert.equal(order.total_amount,300000);assert.equal(order.payment_terms,'prepaid');

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {fixture} from './fixtures.mjs';
+import {fixture,historicalWholesaleOrder} from './fixtures.mjs';
 import {manageStore,authenticateDistributor,distributorSession} from '../lib/distributor-accounts.mjs';
 import {readDistribution,mutateDistribution,distributionTasks} from '../lib/distribution-management.mjs';
 import {handleDistributor} from '../lib/distributor-http.mjs';
@@ -9,12 +9,12 @@ import {submitDistributorPayment,distributorPayments} from '../lib/distributor-p
 import {indonesiaDate} from '../lib/wholesale.mjs';
 const root='https://mitra.example.test',password='Synthetic-only-passphrase-1113';
 const store=(f,id)=>f.sqlite.prepare('SELECT * FROM distributor_stores WHERE customer_id=?').get(id);
-async function enroll(f,a=f.users.indonesia){return (await mutateDistribution(f.db,a,{action:'create',operationId:crypto.randomUUID(),name:'Test '+crypto.randomUUID(),contact:'Rani',phone:'0812345678',city:'Jakarta',address:'TEST ONLY Jl. 1',salesUserId:a.id})).id;}
+async function enroll(f,a=f.users.indonesia){return (await mutateDistribution(f.db,a,{action:'create',companyShortName:'TEST 简称',operationId:crypto.randomUUID(),name:'Test '+crypto.randomUUID(),contact:'Rani',phone:'0812345678',city:'Jakarta',address:'TEST ONLY Jl. 1',salesUserId:a.id})).id;}
 async function activate(f,id){const s=store(f,id),invite=await manageStore(f.db,f.users.admin,{action:'approve',customerId:id,version:s.version,reason:'TEST ONLY 审核真实资料'}),q=new URLSearchParams(invite.activationPath.split('#')[1]);const auth=await authenticateDistributor(f.db,{username:invite.username,password,activation:q.get('activate')});return {...auth,invite,cookie:'lj_distributor='+auth.token,identity:await distributorSession(f.db,new Request(root+'/api/distributor',{headers:{cookie:'lj_distributor='+auth.token}}))};}
 function request(auth,path='/api/distributor',body,extra={}){return new Request(root+path,{method:body?'POST':'GET',headers:{cookie:auth?.cookie||'',origin:root,...(body instanceof FormData?{}:{'Content-Type':'application/json'}),...extra},...(body?{body:body instanceof FormData?body:JSON.stringify(body)}:{})});}
 const basket=(qty=3)=>({requestId:crypto.randomUUID(),items:[{sku:'BAG-A',qty,version:1}]});
 const bucket=()=>{const objects=new Map();return {objects,put:async(k,v)=>objects.set(k,v),delete:async k=>objects.delete(k),get:async k=>objects.has(k)?{body:objects.get(k)}:null};};
-async function order(f,auth){const result=await submitDistributorOrder(f.db,auth.identity,basket());return f.sqlite.prepare('SELECT * FROM wholesale_orders WHERE order_no=?').get(result.orderNo);}
+async function order(f,auth){const result=await submitDistributorOrder(f.db,auth.identity,basket());const o=f.sqlite.prepare('SELECT * FROM wholesale_orders WHERE order_no=?').get(result.orderNo);historicalWholesaleOrder(f,o.id);return o;}
 const proof=(no,requestId=crypto.randomUUID())=>{const f=new FormData();for(const [k,v] of Object.entries({orderNo:no,amount:'300000',reference:'TEST BANK 1113',businessDate:indonesiaDate(),requestId}))f.set(k,v);f.set('evidence',new File(['%PDF-1.7 TEST ONLY'],'proof.pdf',{type:'application/pdf'}));return f;};
 
 test('运营建档自动产生独立账号，管理员审核后一次激活；密码与会话不出现在管理返回中',async()=>{

@@ -118,7 +118,7 @@ export async function loadForecast(db:any,actor:any,asOf?:string,focusKey?:strin
     const transportBatchItemSourceById=new Map<string,AnyRow>(transportItemRows.map((row)=>[row.id,row]));
     for(const item of transportLegItemRows){
       const leg=transportLegById.get(item.leg_id),source=transportBatchItemSourceById.get(item.batch_item_id);
-      if(!leg||!source||leg.stage==="on_shelf") continue;
+      if(!leg||!source||["on_shelf","voided"].includes(leg.stage)) continue;
       const key=`${leg.site}|${leg.channel}|${item.sku}`;
       const remainingTransit=Math.max(0,Number(item.qty||0)-Number(item.received_qty||0));
       if(leg.stage==="booking") productionPipeline.set(key,(productionPipeline.get(key)??0)+remainingTransit);

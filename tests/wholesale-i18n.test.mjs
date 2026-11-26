@@ -36,7 +36,7 @@ function compileComponent(file,extra="",overrides={}){
   const url=new URL(file,import.meta.url),require=createRequire(url),module={exports:{}};
   const source=readFileSync(url,"utf8")+extra;
   const compiled=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX,esModuleInterop:true}}).outputText;
-  new Function("require","module","exports",compiled)(name=>name.endsWith(".css")?{}:overrides[name]??(name==="./sku-label"?compileComponent("../app/sku-label.tsx","",overrides):name==="./wholesale-customer-profiles"?compileComponent("../app/wholesale-customer-profiles.tsx","",overrides):name==="./distributor-link"?compileComponent("../app/distributor-link.tsx","",overrides):name==="./website-leads"?compileComponent("../app/website-leads.tsx","",overrides):name==="./wholesale-catalog"?compileComponent("../app/wholesale-catalog.tsx","",overrides):name==="./workspace-hooks"?compileComponent("../app/workspace-hooks.tsx","",overrides):name==="./wholesale-receipts"?compileComponent("../app/wholesale-receipts.tsx","",overrides):name==="./field-sales"?compileComponent("../app/field-sales.tsx","",overrides):name==="./wholesale-management-ui"?compileComponent("../app/wholesale-management-ui.tsx","",overrides):name==="./table-import"?compileComponent("../app/table-import.tsx","",overrides):require(name)),module,module.exports);
+  new Function("require","module","exports",compiled)(name=>name.endsWith(".css")?{}:overrides[name]??(name==="./wholesale-workflow"?compileComponent("../app/wholesale-workflow.tsx","",overrides):name==="./sku-label"?compileComponent("../app/sku-label.tsx","",overrides):name==="./wholesale-customer-profiles"?compileComponent("../app/wholesale-customer-profiles.tsx","",overrides):name==="./distributor-link"?compileComponent("../app/distributor-link.tsx","",overrides):name==="./website-leads"?compileComponent("../app/website-leads.tsx","",overrides):name==="./wholesale-catalog"?compileComponent("../app/wholesale-catalog.tsx","",overrides):name==="./workspace-hooks"?compileComponent("../app/workspace-hooks.tsx","",overrides):name==="./wholesale-receipts"?compileComponent("../app/wholesale-receipts.tsx","",overrides):name==="./field-sales"?compileComponent("../app/field-sales.tsx","",overrides):name==="./wholesale-management-ui"?compileComponent("../app/wholesale-management-ui.tsx","",overrides):name==="./table-import"?compileComponent("../app/table-import.tsx","",overrides):require(name)),module,module.exports);
   return module.exports;
 }
 test("所有线下表单和对账组件使用印尼语渲染，选项值保持业务编码",()=>{
@@ -80,4 +80,32 @@ test('库存目录、核价、特批表单使用真实印尼语渲染，销售�
  const common={data,busy:false,mutate:async()=>true,close:()=>{},startOrder:()=>{}};
  const html=render(ui.default,common);assert.ok(!html.includes('Kelola harga'));assert.ok(html.includes('17'));assert.ok(!/[\u3400-\u9fff]/.test(html));
  for(const [C,props] of [[ui.PriceEditor,{product,history:[]}],[ui.PriceRequestForm,{sku:'TEST-A'}],[ui.PriceDecision,{product,request:{id:'r',sku:'TEST-A',customer_name:'TEST',qty:2,requested_price:90000,requested_reason:'TEST'}}]])assert.ok(!/[\u3400-\u9fff]/.test(render(C,{...common,...props})));
+});
+
+test("新版印尼流程各岗位操作完整双语，正式指令与付款确认单分开",()=>{
+ const locale=compileComponent("../app/wholesale-language.tsx"),ui=compileComponent("../app/wholesale-workflow.tsx","",{"./wholesale-language":locale});
+ const o=order();o.approved_at="2026-08-01T00:00:00Z";o.workflow={mode:"credit",phase:"supply_review",contractReference:"TEST-CONTRACT",releaseReason:"",releaseInstruction:{no:"ID-123456-OUT-01"}};o.capabilities={review:true,customerConfirm:true,release:true,assignWarehouse:true,pack:true,returnToSales:true,resubmit:true};
+ const props={order:o,data:{actor:{id:"u1",role:"供应链"},users:[{id:"u1",name:"Budi",role:"供应链"}],skus:[{sku:"BAG-01"}]},busy:false,mutate:async()=>true,refresh:async()=>{},notice:()=>{}};
+ for(const language of ["zh","id"]){const html=renderToStaticMarkup(React.createElement(locale.WholesaleLanguageContext.Provider,{value:{language,setLanguage:()=>{}}},React.createElement(ui.default,props)));assert.ok(html.includes("mode=confirmation"));assert.ok(html.includes("mode=instruction"));if(language==="id")assert.ok(!/[\u3400-\u9fff]/.test(html),html.match(/[\u3400-\u9fff][^<]*/g)?.join(" | "));}
+});
+
+test('新版取消入口遵守后台岗位及履约边界，已收款提示人工核对退款',()=>{
+ const locale=compileComponent('../app/wholesale-language.tsx'),ui=compileComponent('../app/wholesale-workflow.tsx','',{'./wholesale-language':locale});
+ for(const [role,status,cancel,remainder] of [['管理员','pending',true,false],['财务','pending',true,false],['销售','pending',true,false],['运营','pending',true,false],['供应链','pending',false,false],['管理员','approved',true,false],['财务','approved',false,false],['销售','approved',false,false],['管理员','partial',false,true],['财务','partial',false,true],['供应链','partial',false,false],['销售','partial',false,false],['管理员','completed',false,false]]){
+  const o=order();o.status=status;o.items[0].shipped_qty=['partial','completed'].includes(status)?2:0;o.workflow={mode:'credit',phase:status};o.capabilities={};
+  const props={order:o,data:{actor:{id:'reviewer',role},users:[],skus:[]},busy:false,mutate:async()=>true,refresh:async()=>{},notice:()=>{}};
+  const render=language=>renderToStaticMarkup(React.createElement(locale.WholesaleLanguageContext.Provider,{value:{language,setLanguage:()=>{}}},React.createElement(ui.default,props)));
+  const zh=render('zh');assert.equal(zh.includes('取消整单并释放预留'),cancel,role+'/'+status);assert.equal(zh.includes('取消未发余量并结单'),remainder,role+'/'+status);
+  if(cancel||remainder){assert.ok(zh.includes('此操作不会自动退款'));assert.ok(zh.includes('minLength="4"'));}
+  assert.doesNotMatch(render('id'),/[\u3400-\u9fff]/,role+'/'+status);
+ }
+});
+
+test('退回重提表单不继承已使用的特批编号，并明确重新核价',()=>{
+ const locale=compileComponent('../app/wholesale-language.tsx');let initializedItems;
+ const observedReact={...React,useState:initial=>{const value=React.useState(initial);if(Array.isArray(value[0])&&value[0][0]?.sku)initializedItems=value[0];return value;}};
+ const ui=compileComponent('../app/wholesale-workflow.tsx','',{'./wholesale-language':locale,react:observedReact}),o=order();o.status='rejected';o.items[0].price_request_id='used-special-price';o.workflow={mode:'prepaid',phase:'rejected'};o.capabilities={resubmit:true};
+ const props={order:o,data:{actor:{id:'sales1',role:'销售'},users:[],skus:[{sku:'BAG-01'}]},busy:false,mutate:async()=>true,refresh:async()=>{},notice:()=>{}};
+ const html=renderToStaticMarkup(React.createElement(locale.WholesaleLanguageContext.Provider,{value:{language:'zh',setLanguage:()=>{}}},React.createElement(ui.default,props)));
+ assert.equal(initializedItems[0].priceRequestId,'');assert.equal(initializedItems[0].unitPrice,'100000');assert.equal(o.items[0].price_request_id,'used-special-price');assert.ok(html.includes('重提按当前报价重新审核'));
 });

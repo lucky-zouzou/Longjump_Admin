@@ -1,7 +1,7 @@
 import {storeInsert} from '../lib/distributor-accounts.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {fixture} from './fixtures.mjs';
+import {fixture,historicalWholesaleOrder} from './fixtures.mjs';
 import {manageDistributorLink,distributorIdentity,submitDistributorOrder} from '../lib/distributor-ordering.mjs';
 import {handleDistributor} from '../lib/distributor-http.mjs';
 import {afterRecord,afterTasks,mutateAfterSales,readAfterSales} from '../lib/after-sales.mjs';
@@ -20,6 +20,7 @@ async function setup(qty=3){
  const f=fixture(),client=await partner(f),identity=await distributorIdentity(f.db,client.auth);
  const placed=await submitDistributorOrder(f.db,identity,{requestId:crypto.randomUUID(),items:[{sku:'BAG-A',qty,version:1}]});
  const order=f.sqlite.prepare('SELECT id FROM wholesale_orders WHERE order_no=?').get(placed.orderNo).id;
+ historicalWholesaleOrder(f,order); // Pre-upgrade fulfilled order used for service regressions.
  const item=f.sqlite.prepare('SELECT id FROM wholesale_order_items WHERE order_id=?').get(order).id;
  const objects=new Map(),bucket={put:async(k,v)=>objects.set(k,v),delete:async k=>objects.delete(k)};
  const api=async(form,auth=client.auth)=>handleDistributor(new Request(origin+'/api/distributor?service=1',{headers:{authorization:auth,origin},...(form?{method:'POST',body:form}:{})}),f.db,bucket);
