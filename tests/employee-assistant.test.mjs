@@ -34,7 +34,7 @@ test('出勤和广告操作问句命中已实现入口，预算与实耗保持�
   for(const role of Object.keys(NAVIGATION_BY_ROLE)){
     const result=await ask(role,'在哪里签到和申请请假？');
     assert.equal(result.guide?.id,'employee-attendance');
-    assert.match(result.guide.steps.join(''),/我的出勤配置.*组织、班次与授权配置/);
+    assert.match(result.guide.steps.join(''),/我的工作.*飞书.*空白不表示/);
   }
   const application=await ask('运营','广告申请没有入口怎么办？');
   assert.equal(application.guide?.id,'advertising-budget');
@@ -45,6 +45,9 @@ test('出勤和广告操作问句命中已实现入口，预算与实耗保持�
   assert.match(approval.guide.steps.join(''),/独立财务.*金额不能超过申请额/);
   const trend=await ask('运营','广告费用趋势在哪里看？');
   assert.equal(trend.guide?.id,'advertising-trend');
+  assert.equal(trend.guide?.view,'advertising-trend');
+  assert.equal(application.guide?.view,'advertising');
+  assert.ok(!guidesFor(actor('管理员')).some(g=>g.id==='advertising-trend'));
   assert.match(trend.guide.steps.join(''),/明确登记0才代表零费用/);
   assert.match(trend.guide.next,/广告申请和付款不计入/);
   const feishu=await ask('运营','飞书请假还要再填吗？');

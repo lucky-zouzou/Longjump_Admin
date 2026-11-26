@@ -14,7 +14,7 @@ type DecisionContext={month:string;channel:string;site:string;metric:string;orde
 type SalesContext={range:string;sites:string[];channel:string;compare:string;from?:string;to?:string};
 type PlanContext={site:string;channel:string;month:string};
 type ProductionContext={site:string;channel:string;sku:string};
-type Answer={salesContext?:SalesContext;learnable?:boolean;personalMatch?:boolean;planContext?:PlanContext;brief?:{period:string;details:string[]};productionContext?:ProductionContext;decisionContext?:DecisionContext;ledger?:{page:string;label:string;view?:string;month?:string;entity?:string}|null;questions?:string[];topic?:Topic;saved?:boolean;verifiedAt?:string;citations?:Citation[];choices?:Entry[];step?:number;answer:string;notice:string;source:string;intent:string;guide:(Entry & {steps:string[];next:string;page:string})|null};
+type Answer={salesContext?:SalesContext;learnable?:boolean;personalMatch?:boolean;planContext?:PlanContext;brief?:{period:string;details:string[]};productionContext?:ProductionContext;decisionContext?:DecisionContext;ledger?:{page:string;label:string;view?:string;month?:string;entity?:string}|null;questions?:string[];topic?:Topic;saved?:boolean;verifiedAt?:string;citations?:Citation[];choices?:Entry[];step?:number;answer:string;notice:string;source:string;intent:string;guide:(Entry & {steps:string[];next:string;page:string;view?:string})|null};
 type Turn={id:string;question:string;reply:Answer;encouragement:string};
 type AskOptions={salesContext?:SalesContext;planContext?:PlanContext;productionContext?:ProductionContext;decisionContext?:DecisionContext;previous?:string;previousStep?:number;guideId?:string;mode?:Mode;knowledgeId?:string};
 const sources:Record<string,string>={'learned-guide':'学过的问法 · 岗位手册','ledger':'业务台账','conversation':'小品同学','unavailable':'小品同学','knowledge':'公司知识库','openai':'模型匹配 · 岗位手册','public-data':'公开数据源','public-web':'公开网页检索','public-unavailable':'外部资料查询'};
@@ -240,7 +240,7 @@ export default function EmployeeAssistant({initialQuestion,page,pageTitle,close,
             <p className="employee-handoff"><b>接下来谁接手</b>　{reply.guide.next}</p></>}
           {reply.guide.id==='action-review'&&<ActionCounts/>}
           <div className="employee-turn-actions">
-            <button className="employee-link" onClick={()=>go(reply.guide!.page)}>带我去工作区 <WorkspaceIcon name="arrow"/></button>
+            <button className="employee-link" onClick={()=>go(reply.guide!.page,reply.guide!.view)}>带我去工作区 <WorkspaceIcon name="arrow"/></button>
             {reply===last&&reply.intent!=='handoff'&&<div className="employee-picks">
               {currentStep(reply)<reply.guide.steps.length&&<button disabled={busy} onClick={()=>follow('下一步怎么做？')}>{currentStep(reply)?'接着往下看':'带我从头走一遍'}</button>}
               <button disabled={busy} onClick={()=>follow('谁来接手？')}>谁来接手？</button>

@@ -702,4 +702,6 @@ tr:hover td { background:#fbfcff; }
 .best-tracking .production-timeline { margin:8px 0; }
 .best-tracking form { align-items:flex-end; }
 
-.nav-work-shortcuts{display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;padding:0 12px 14px;border-bottom:1px solid #ffffff15;margin-bottom:12px}.nav-work-shortcuts button{font:inherit;font-size:13px;color:#b7cae2;border:0;background:none;padding:6px 0;text-align:left;cursor:pointer}.nav-work-shortcuts button:hover,.nav-work-shortcuts button:focus-visible{color:#fff;text-decoration:underline}
+.nav-personal-work{padding-bottom:12px;margin-bottom:8px;border-bottom:1px solid #ffffff15}.nav-personal-title{display:flex;align-items:center;justify-content:space-between;padding:10px 16px 8px;color:#91a8c5;font-size:12px;letter-spacing:.04em}.nav-personal-title small{font-size:11px;color:#a9bdd5}
+
+.mobile-more .nav-personal-title,.mobile-more .nav-personal-title small{color:#536c88}.mobile-more .nav-personal-work{border-bottom-color:#dce4ee}
