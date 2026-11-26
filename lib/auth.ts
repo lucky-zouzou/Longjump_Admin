@@ -1,9 +1,10 @@
+import {financeMode,scopedFinanceRequestAllowed} from './finance-scope.mjs';
 import { getChatGPTUser } from "../app/chatgpt-auth";
 import { database, ensureSchema, nowIso } from "./database";
 
 export const ROLES = ["管理员", "销售", "运营", "运营主管", "新品开发", "达人BD", "拍摄剪辑", "财务", "供应链", "工厂", "海运", "员工"] as const;
 export type Role = (typeof ROLES)[number];
-export type Actor = { id:string; email:string; name:string; role:Role; site:string|null; channel:string|null; active:boolean };
+export type Actor = { id:string; email:string; name:string; role:Role; site:string|null; channel:string|null; active:boolean; financeMode?:string|null };
 
 export async function requireActor(request: Request): Promise<Actor> {
   await ensureSchema();
@@ -37,7 +38,8 @@ export async function requireActor(request: Request): Promise<Actor> {
     throw new HttpError(403,'拍摄剪辑账号仅可进入 TikTok 内容中心');
   const marketingSamples = url.pathname === '/api/marketing-samples' && ['GET','POST'].includes(request.method);
   if(!staffGuide && row.role==='达人BD'&&url.pathname.startsWith('/api/')&&!(url.pathname==='/api/creators'||marketingSamples||url.pathname==='/api/system'&&request.method==='GET'))throw new HttpError(403,'达人BD账号仅可访问已分配的达人协作及脱敏生产动态');
-  return { id:String(row.id), email:String(row.email), name:String(row.name), role:row.role as Role, site:row.site ? String(row.site) : null, channel:row.channel ? String(row.channel) : null, active:true };
+  const mode=await financeMode(db,row);if(mode==='scoped'&&!scopedFinanceRequestAllowed(request))throw new HttpError(403,'范围财务仅可访问已授权组织的费用与审批，中央账册由总部财务管理');
+  return { financeMode:mode,id:String(row.id), email:String(row.email), name:String(row.name), role:row.role as Role, site:row.site ? String(row.site) : null, channel:row.channel ? String(row.channel) : null, active:true };
 }
 
 export function requireRole(actor: Actor, roles: Role[]) {

@@ -116,3 +116,9 @@ test('指定待审测试单作废留痕；已批准单、同达人其他待办�
   }finally{f.sqlite.close();}
  }
 });
+
+test('导入回执区分写入、重复与未关联发布，并在重试时返回原回执',async()=>{
+ const f=contentFixture(),p={site:'马来西亚',currency:'MYR',start:ago(2).slice(0,10),end:date(),file:'TEST receipt.csv',rows:[{line:4,videoId:'987654321001',creatorName:'TEST',views:123}]};
+ const r=await f.act(f.users.malaysia,'importPlatformReport',p);assert.equal(r.receipt.written,1);assert.equal(r.receipt.unmatched,1);assert.equal(r.receipt.rows[0].line,4);assert.match(r.receipt.rows[0].reason,/已保存并进入/);
+ const same=await f.act(f.users.malaysia,'importPlatformReport',p);assert.equal(same.receipt.written,0);assert.equal(same.receipt.unchanged,1);assert.equal(same.receipt.unmatched,1);
+});
