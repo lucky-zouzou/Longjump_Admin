@@ -8,6 +8,7 @@ import {openDatabase,fileBucket} from '../server/storage.mjs';
 import {fixture} from './fixtures.mjs';
 import {mutateDomesticDistribution as mutate,readDomesticDistribution as read,domesticDistributionTasks,domesticFinancialSummary,cnyMinor,domesticToday} from '../lib/domestic-distribution.mjs';
 import {uploadDomesticFile,readDomesticFile} from '../lib/domestic-distribution-files.mjs';
+import {domesticActions,domesticStage} from '../lib/distribution-workflow-view.mjs';
 
 function domesticFixture(){
  const f=fixture(),factory={id:'dom-factory',name:'国内工厂甲',role:'工厂'},factory2={id:'dom-factory2',name:'国内工厂乙',role:'工厂'};
@@ -26,6 +27,21 @@ function domesticFixture(){
  const view=async(id,actor=users.admin)=>(await read(f.db,actor)).orders.find(o=>o.id===id);
  return {...f,users,row,items,call,change,proof,bucket,files,create,contract,pack,finance,release,ship,receive,view};
 }
+
+test('role action guidance follows actual remainder and keeps delivered credit open for finance',async()=>{
+ const f=domesticFixture();try{
+  const id=await f.create();await f.contract(id,{mode:'credit'});
+  const actions=async actor=>{const d=await read(f.db,actor);return domesticActions(d.orders.find(o=>o.id===id),d.capabilities,d.actor);};
+  assert.deepEqual(await actions(f.users.factory),['pack']);
+  await f.pack(id);assert.deepEqual(await actions(f.users.factory),[]);assert.equal(domesticStage(await f.view(id)),'release');
+  await f.release(id);assert.deepEqual(await actions(f.users.factory),['ship']);
+  const shipment=await f.ship(id);assert.deepEqual(await actions(f.users.factory),[]);
+  assert((await actions(f.users.supply)).includes('receive'));await f.receive(id,shipment,5);
+  assert(!(await actions(f.users.supply)).includes('receive'));assert.equal(domesticStage(await f.view(id)),'collection');
+  assert((await actions(f.users.finance)).includes('financeConfirm'));await f.finance(id);
+  assert(!(await actions(f.users.finance)).includes('financeConfirm'));assert.equal(domesticStage(await f.view(id)),'delivered');
+ }finally{f.sqlite.close();}
+});
 
 test('CNY decimal input is parsed exactly as integer cents and rejects foreign precision or non-numbers',()=>{
  assert.equal(cnyMinor('0.01'),1);assert.equal(cnyMinor('123.45'),12345);assert.equal(cnyMinor('10.2'),1020);

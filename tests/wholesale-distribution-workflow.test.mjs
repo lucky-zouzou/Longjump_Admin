@@ -277,3 +277,35 @@ test('reversed funds move phase and precise tasks back to release verification u
  await f.receipt();assert.equal((await view()).workflow.phase,'shipping');assert.equal((await view()).workflow.releaseValid,true);
  assert((await wholesaleTasks(f.db,f.users.supply2)).some(t=>t.entity===f.id&&t.title==='核对照片与运单后确认实际发货'));
 });
+
+test('sales reminders follow real payment and each shipment receipt, including revoked receipt',async()=>{
+ const f=await setup();try{
+  const reminders=async actor=>(await wholesaleTasks(f.db,actor)).filter(t=>t.entity===f.id);
+  await f.approve();await f.confirm();
+  assert((await reminders(f.users.sales)).some(t=>t.title==='跟进客户付款及财务到账核销'));
+  assert(!(await reminders(f.users.sales2)).length);
+  await f.receipt();assert(!(await reminders(f.users.sales)).some(t=>/跟进客户付款/.test(t.title)));
+  await f.assign();await f.pack();await f.ship();
+  const stock=f.sqlite.prepare('SELECT * FROM inventory_balances').all(),order=f.orderRow(f.id);
+  assert((await reminders(f.users.sales)).some(t=>t.title==='确认线下订单客户签收'));
+  assert(!(await reminders(f.users.supply2)).some(t=>t.title==='确认线下订单客户签收'));
+  const shipment=f.sqlite.prepare('SELECT id FROM wholesale_shipments WHERE order_id=?').get(f.id);
+  await f.change(f.users.sales,f.id,'customerReceiptConfirm',{shipmentId:shipment.id,businessDate:indonesiaDate(),receiver:'TEST 收件人',proofRef:'TEST 客户确认收到',receivedConfirmed:true});
+  assert(!(await reminders(f.users.sales)).some(t=>t.title==='确认线下订单客户签收'));
+  assert.deepEqual(f.sqlite.prepare('SELECT * FROM inventory_balances').all(),stock);assert.equal(f.orderRow(f.id).status,order.status);
+  const received=f.sqlite.prepare('SELECT id FROM wholesale_customer_receipts WHERE order_id=?').get(f.id);
+  await f.change(f.users.sales,f.id,'customerReceiptRevoke',{receiptId:received.id,reason:'TEST 签收凭据选择错误'});
+  assert((await reminders(f.users.sales)).some(t=>t.title==='确认线下订单客户签收'));
+ }finally{f.sqlite.close();}
+});
+
+test('delivered credit keeps collection reminder until actual bank receipt',async()=>{
+ const f=await setup('credit');try{
+  await f.approve();await f.confirm();await f.release();await f.assign();await f.pack();await f.ship();
+  const shipment=f.sqlite.prepare('SELECT id FROM wholesale_shipments WHERE order_id=?').get(f.id);
+  await f.change(f.users.sales,f.id,'customerReceiptConfirm',{shipmentId:shipment.id,businessDate:indonesiaDate(),receiver:'TEST 收件人',proofRef:'TEST 签收',receivedConfirmed:true});
+  const reminders=async()=> (await wholesaleTasks(f.db,f.users.sales)).filter(t=>t.entity===f.id);
+  assert((await reminders()).some(t=>t.title==='跟进客户约定回款'));assert(!(await reminders()).some(t=>t.title==='确认线下订单客户签收'));
+  await f.receipt();assert(!(await reminders()).some(t=>t.title==='跟进客户约定回款'));
+ }finally{f.sqlite.close();}
+});
