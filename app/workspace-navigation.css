@@ -1,0 +1,65 @@
+/* Navigation owns its height budget. Only the menu body scrolls, on both surfaces. */
+.app-shell .sidebar { padding:18px 14px 0; }
+.app-shell .brand { padding:0 10px 14px; }
+.app-shell .brand-logo { width:112px; }
+.app-shell .brand p { margin:7px 0 0; font-size:10px; line-height:1.6; }
+.app-shell .nav { gap:0; padding:14px 0 0; overflow:hidden; }
+.app-shell .nav-search { margin:0 2px; min-height:40px; padding:8px 10px; }
+.nav-toolbar { flex:none; display:flex; align-items:center; justify-content:space-between; gap:8px; min-height:42px; padding:6px 10px; color:#9db5bb; font-size:11px; }
+.nav-toolbar button { padding:5px 0 5px 8px; border:0; background:none; color:#c8e3d9; font-size:11px; }
+.nav-toolbar button:hover { color:white; text-decoration:underline; text-underline-offset:4px; }
+.workspace-navigation-body { display:flex; flex-direction:column; flex:1; min-height:0; }
+.workspace-navigation-scroll { flex:1; min-height:0; overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; scrollbar-width:thin; scrollbar-gutter:stable; scrollbar-color:#799a9e80 #ffffff06; scroll-padding-block:10px; }
+.workspace-navigation-scroll::-webkit-scrollbar { width:6px; }
+.workspace-navigation-scroll::-webkit-scrollbar-track { background:#ffffff06; }
+.workspace-navigation-scroll::-webkit-scrollbar-thumb { background:#799a9e80; border-radius:6px; }
+.workspace-navigation-content { padding:0 4px 8px 0; }
+.workspace-navigation-content .nav-sections { min-height:initial; overflow:visible; flex:none; padding:0; }
+.app-shell .nav-personal-work { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:4px; padding:0 0 12px; margin:0 0 8px; }
+.app-shell .nav-personal-title { display:flex; grid-column:1/-1; padding:0 10px 4px; font-size:11px; }
+.app-shell .nav-personal-title small { font-size:10px; }
+.app-shell .nav-personal-work .nav-button { min-height:42px; padding:8px; margin:0; gap:6px; font-size:12px; }
+.app-shell .nav-personal-work .nav-icon,.app-shell .nav-personal-work .workspace-icon { width:16px; height:16px; }
+.app-shell .nav-group+.nav-group { margin-top:6px; }
+.app-shell .nav-group-toggle { min-height:38px; padding:8px 10px; font-size:12px; color:#acbfc3; }
+.app-shell .sidebar .nav-button { min-height:39px; margin:1px 0; padding:8px 10px; }
+.navigation-scroll-footer { flex:none; min-height:30px; display:flex; align-items:center; justify-content:center; font-size:10px; color:#91aaaf; }
+.navigation-scroll-footer button { display:flex; align-items:center; justify-content:center; gap:8px; width:100%; min-height:30px; border:0; background:transparent; color:#c5e1d7; font-size:11px; }
+.navigation-scroll-footer button:hover { background:#ffffff08; }
+.navigation-scroll-footer .workspace-icon { width:12px; height:12px; transform:rotate(90deg); }
+.navigation-scroll-footer .at-bottom .workspace-icon { transform:rotate(-90deg); }
+.app-shell .account { position:relative; margin:0; padding:0; }
+.account>summary { list-style:none; display:flex; align-items:center; justify-content:space-between; gap:8px; padding:12px 8px; cursor:pointer; }
+.account>summary::-webkit-details-marker { display:none; }
+.account>summary>.workspace-icon { width:13px; height:13px; color:#9cb5ba; transform:rotate(-90deg); }
+.account[open]>summary>.workspace-icon { transform:rotate(90deg); }
+.app-shell .account-profile { min-width:0; gap:9px; }
+.app-shell .account-profile strong { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.app-shell .account-avatar { width:32px; height:32px; border-radius:10px; }
+.account-popover { position:absolute; z-index:60; bottom:calc(100% + 5px); left:0; right:0; padding:16px; background:#24414b; border:1px solid #557078; border-radius:12px; box-shadow:0 8px 24px #0c202733; max-height:60dvh; overflow:auto; }
+.app-shell .account-popover .account-signout { min-height:36px; }
+.app-shell .sidebar :is(button,summary):focus-visible,.workspace-navigation-scroll:focus-visible { outline:2px solid #a9d8c7; outline-offset:-2px; }
+
+@media (min-width:761px) and (max-height:700px) {
+  .app-shell .sidebar { padding-top:12px; }
+  .app-shell .brand { display:flex; align-items:center; gap:12px; padding:0 8px 12px; }
+  .app-shell .brand-logo { width:88px; flex:none; }
+  .app-shell .brand p { margin:0; font-size:10px; max-width:10em; text-wrap:balance; }
+  .app-shell .nav { padding-top:10px; }
+  .account>summary { padding:9px 8px; }
+}
+@media (max-width:760px) {
+  .app-shell .mobile-more { inset:12px 10px calc(82px + env(safe-area-inset-bottom)); padding:14px 14px 0; }
+  .app-shell .mobile-more>.panel-head { flex:none; margin-bottom:10px; }
+  .app-shell .mobile-more .nav-search { margin:0 2px; }
+  .app-shell .mobile-more .nav-toolbar { color:#5e727b; }
+  .app-shell .mobile-more .nav-toolbar button { color:#28675f; }
+  .app-shell .mobile-more .nav-group-toggle { color:#536e75; }
+  .app-shell .mobile-more .nav-personal-work>.nav-personal-title { display:flex; padding:0 5px 4px; }
+  .app-shell .mobile-more .navigation-scroll-footer,.app-shell .mobile-more .navigation-scroll-footer button { color:#386b5d; }
+  .app-shell .mobile-more .navigation-scroll-footer { min-height:36px; }
+  .app-shell .mobile-more .workspace-navigation-scroll { scrollbar-color:#8aaba2 #e9efec; }
+  .app-shell .mobile-more .workspace-navigation-content { padding-bottom:10px; }
+  .app-shell .mobile-more .nav-personal-work .nav-button { min-height:44px; }
+}
+@media (forced-colors:active) { .workspace-navigation-scroll { scrollbar-color:auto; } .app-shell .sidebar :is(button,summary):focus-visible { outline-color:Highlight; } }

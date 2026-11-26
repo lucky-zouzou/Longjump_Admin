@@ -12,6 +12,7 @@ import Overview from "./overview";
 import LoginTaskReminder from "./login-task-reminder";
 import {forgetTabReminder} from "../lib/login-task-reminder.mjs";
 import WorkspaceIcon from "./workspace-icons";
+import WorkspaceNavigationScroll from "./workspace-navigation-scroll";
 import {WorkspaceGuard,useWorkspaceRoute,useVisibleRefresh} from "./workspace-hooks";
 import {personalWorkplaceEntries,workplaceSection} from "../lib/role-workplace.mjs";
 import {NAV_GROUPS,mobileModules,hasIndependentLedger,workspaceUrl} from "../lib/workspace-model.mjs";
@@ -138,8 +139,12 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
   const [more,setMore]=useState(false);
   const [assistant,setAssistant]=useState<{question:string;scope:string}|null>(null);
   const [navQuery,setNavQuery]=useState("");
-  const [collapsedGroups,setCollapsedGroups]=useState<Record<string,boolean>>({});
-  useEffect(()=>{const group=NAV_GROUPS.find(g=>g.keys.includes(selectedTab));if(group)setCollapsedGroups(old=>({...old,[group.label]:false}));},[selectedTab]);
+  const [collapsedGroups,setCollapsedGroups]=useState<Record<string,boolean>>(()=>Object.fromEntries(NAV_GROUPS.map(group=>[group.label,true])));
+  useEffect(()=>{
+    const personal=selectedTab==="attendance"&&!['management','approvals'].includes(route.view||"")||selectedTab==="finance-workbench"&&['advertising','advertising-trend'].includes(route.view||"");
+    if(personal)return;
+    const group=NAV_GROUPS.find(g=>g.keys.includes(selectedTab));if(group)setCollapsedGroups(old=>({...old,[group.label]:false}));
+  },[selectedTab,route.view]);
   useEffect(()=>{if(!more)return;const close=(event:KeyboardEvent)=>{if(event.key==="Escape")setMore(false);};window.addEventListener("keydown",close);return()=>window.removeEventListener("keydown",close);},[more]);
   const setTab=(page:string,task:Row={})=>{const moved=navigate({page,entity:task.entity||"",view:task.view||"",month:task.month||"",search:"",status:"all"});if(moved){setMore(false);setNavQuery("");}return moved;};
   const loader=useRef<ReturnType<typeof createWorkspaceLoader>|null>(null);
@@ -280,26 +285,34 @@ function ControlTowerWorkspace({ identity }: { identity:Identity }) {
     scope={actorScope(actor)} visit={identity.loginVisit} name={actor.name} allowed={roleNav} tasks={data.myTasks}
     ready={data.module===selectedTab && !data.tasksDeferred && !connectionError} failed={Boolean(connectionError)}
     go={setTab}/>;
+  const shownGroups=NAV_GROUPS.filter(group=>filteredNav.some(([key])=>group.keys.includes(key)));
+  const groupsExpanded=shownGroups.some(group=>!collapsedGroups[group.label]);
   const navigation=(surface:string)=><>
     <div className="nav-search"><WorkspaceIcon name="search"/><input aria-label={shellT("搜索工作区")} placeholder={shellT("搜索工作区")} value={navQuery} onChange={event=>setNavQuery(event.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&!e.nativeEvent.isComposing&&e.nativeEvent.keyCode!==229&&wake!==null){e.preventDefault();openAssistant(wake);}}}/>{navQuery&&<button aria-label={shellT("清除搜索")} onClick={()=>setNavQuery("")}><WorkspaceIcon name="close"/></button>}</div>
+    <div className="nav-toolbar"><span>{shellT("工作区导航")}</span>{!navQuery.trim()&&shownGroups.length>0&&<button type="button" onClick={()=>setCollapsedGroups(Object.fromEntries(NAV_GROUPS.map(group=>[group.label,groupsExpanded])))}>{shellT(groupsExpanded?"收起分组":"展开分组")}</button>}</div>
+    <WorkspaceNavigationScroll activeKey={`${tab}:${workSection}:${Boolean(collapsedGroups[activeGroup?.label||""])}`} query={navQuery} t={shellT}>
     {personalNav.length>0&&<div className="nav-group nav-personal-work"><div className="nav-personal-title">{shellT("我的工作")}<small>{shellT(actor.role)}</small></div>{personalNav.map(entry=><button key={entry.view} className={classNames("nav-button",activePersonal?.view===entry.view&&"active")} aria-current={activePersonal?.view===entry.view?"page":undefined} onClick={()=>setTab(entry.page,{view:entry.view})}><span className="nav-icon"><WorkspaceIcon name={entry.icon}/></span><span className="nav-label">{shellT(entry.label)}</span></button>)}</div>}
 
-    <div className="nav-sections">{NAV_GROUPS.filter(group=>filteredNav.some(([key])=>group.keys.includes(key))).map((group,index)=>{
+    <div className="nav-sections">{shownGroups.map((group,index)=>{
       const expanded=Boolean(navQuery.trim())||!collapsedGroups[group.label];
       const groupId=`nav-${surface}-${index}`;
       return <div className="nav-group" key={group.label}><button className="nav-group-toggle" aria-expanded={expanded} aria-controls={groupId} onClick={()=>setCollapsedGroups(old=>({...old,[group.label]:!old[group.label]}))} disabled={Boolean(navQuery.trim())}><span>{shellT(group.label)}</span><WorkspaceIcon name="chevron"/></button>
         <div id={groupId} hidden={!expanded}>{filteredNav.filter(([key])=>group.keys.includes(key)).map(([key,label])=><button key={key} className={classNames("nav-button",tab===key&&!activePersonal&&"active")} aria-current={tab===key&&!activePersonal?"page":undefined} onClick={()=>setTab(key,{view:key==="attendance"?"management":key==="finance-workbench"?(["管理员","财务","运营主管"].includes(actor.role)?"advertising-approvals":"expenses"):""})}><span className="nav-icon"><WorkspaceIcon name={key}/></span><span className="nav-label">{navLabel(key,label)}</span>{taskBadge(key)}</button>)}</div></div>;
     })}{wake!==null?<button className="nav-button" onClick={()=>openAssistant(wake)}>询问{assistantName} ↗</button>:!filteredNav.length&&!personalNav.length&&<div className="nav-no-results">{shellT("没有匹配的工作区")}<button onClick={()=>setNavQuery("")}>{shellT("清除搜索")}</button></div>}</div>
+    </WorkspaceNavigationScroll>
   </>;
 
   return <SkuImagesProvider key={`${actor.id}|${actor.role}|${actor.site}|${actor.channel}`} role={actor.role}><div className="app-shell" data-workspace={tab} lang={["wholesale","distribution","domestic-distribution","marketing-samples"].includes(tab)&&wholesaleLocale.language==="id"?"id":"zh-CN"}>
     <a className="workspace-skip" href="#workspace-content">{shellT("跳到工作内容")}</a>
     <aside className="sidebar">
-      <div className="brand"><img className="brand-logo" src="/loong-jump-logo-white.png" alt="LOONG JUMP"/><p>{shellT("品牌出海供应链控制塔")}</p><span className="brand-workspace">WORKSPACE</span></div>
+      <div className="brand"><img className="brand-logo" src="/loong-jump-logo-white.png" alt="LOONG JUMP"/><p>{shellT("品牌出海供应链控制塔")}</p></div>
       <nav className="nav" aria-label={shellT("系统导航")}>{navigation("desktop")}</nav>
-      <div className="account"><div className="account-profile"><div className="account-avatar" aria-hidden="true">{String(actor.name||"L").slice(0,1)}</div><div><strong>{actor.name}</strong><span>{shellT(actor.role)} · {actor.site ? `${shellT(actor.site)} / ${actor.channel||""}` : shellT(ROLE_LABEL[actor.role])}</span></div></div><span className="account-email">{identity.email}</span>
-        {identity.userId!=="local-admin" && <a className="account-signout" onClick={()=>forgetTabReminder(actorScope(actor))} href="/signout-with-chatgpt?return_to=%2F"><WorkspaceIcon name="logout"/>{shellT("退出登录")}</a>}
-      </div>
+      <details className="account" onBlur={event=>{if(!event.currentTarget.contains(event.relatedTarget))event.currentTarget.open=false;}} onKeyDown={event=>{if(event.key==="Escape"){event.currentTarget.open=false;event.currentTarget.querySelector('summary')?.focus();}}}>
+        <summary aria-label={shellT("账号信息")}><div className="account-profile"><div className="account-avatar" aria-hidden="true">{String(actor.name||"L").slice(0,1)}</div><div><strong title={actor.name}>{actor.name}</strong><span>{shellT(actor.role)}</span></div></div><WorkspaceIcon name="chevron"/></summary>
+        <div className="account-popover"><strong>{actor.name}</strong><span>{shellT(actor.role)} · {actor.site ? `${shellT(actor.site)} / ${actor.channel||""}` : shellT(ROLE_LABEL[actor.role])}</span><span className="account-email">{identity.email}</span>
+          {identity.userId!=="local-admin" && <a className="account-signout" onClick={()=>forgetTabReminder(actorScope(actor))} href="/signout-with-chatgpt?return_to=%2F"><WorkspaceIcon name="logout"/>{shellT("退出登录")}</a>}
+        </div>
+      </details>
     </aside>
     <main className="main">
       <header className="topbar">
