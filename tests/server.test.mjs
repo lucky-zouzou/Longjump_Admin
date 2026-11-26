@@ -8,7 +8,7 @@ import {parseWorkspaceResponse} from '../lib/workspace-response.mjs';
 // Production Node build is a required gate; do not silently skip this integration test.
 test('独立服务器：公司登录、禁止伪造身份、岗位隔离、出库销售和Excel导出',async()=>{
  assert.ok(existsSync('dist-node/server/index.js'),'Run pnpm build:server before tests');const root=mkdtempSync(join(tmpdir(),'lj-http-')),sqlite=openDatabase(join(root,'business.sqlite')).sqlite,password='test-only-'+crypto.randomUUID();
- for(const [id,role] of [['admin','管理员'],['sales','销售'],['supply','供应链'],['finance','财务']])setAccount(sqlite,{id,email:`${id}@example.test`,name:id,role,site:role==='销售'?'印尼':null,password});sqlite.prepare('INSERT INTO sku_settings(sku,name,updated_at) VALUES (?,?,?)').run('HTTP-BAG','bag',new Date().toISOString());for(const ch of ['TikTok','Shopee'])sqlite.prepare('INSERT INTO inventory_balances(site,channel,sku,qty,updated_at) VALUES (?,?,?,?,?)').run('印尼',ch,'HTTP-BAG',10,new Date().toISOString());assert.ok(!sqlite.prepare('SELECT password_hash FROM local_accounts').get().password_hash.includes(password));sqlite.close();
+ for(const [id,role] of [['admin','管理员'],['sales','销售'],['supply','供应链'],['warehouse','供应链'],['finance','财务']])setAccount(sqlite,{id,email:`${id}@example.test`,name:id,role,site:role==='销售'?'印尼':null,password});sqlite.prepare('INSERT INTO sku_settings(sku,name,updated_at) VALUES (?,?,?)').run('HTTP-BAG','bag',new Date().toISOString());for(const ch of ['TikTok','Shopee'])sqlite.prepare('INSERT INTO inventory_balances(site,channel,sku,qty,updated_at) VALUES (?,?,?,?,?)').run('印尼',ch,'HTTP-BAG',10,new Date().toISOString());assert.ok(!sqlite.prepare('SELECT password_hash FROM local_accounts').get().password_hash.includes(password));sqlite.close();
  const cleanFixture=openDatabase(join(root,'business.sqlite')).sqlite;
  for(const month of ['2026-09','2026-10']){
   cleanFixture.prepare("INSERT INTO new_product_projects(id,cycle_month,sku,stage_started_at,current_due_at,created_by,created_at,updated_at) VALUES(?,?,'HTTP-BAG','2026-09-01','2026-09-04','admin','2026-09-01','2026-09-01')").run(month,month);
@@ -44,7 +44,7 @@ test('独立服务器：公司登录、禁止伪造身份、岗位隔离、出�
  const login=async (who,remember=false)=>{const page=await fetch(origin+'/signin-with-chatgpt'),html=await page.text(),csrf=html.match(/name="csrf" value="([a-f0-9]+)"/)[1],pre=page.headers.getSetCookie()[0].split(';')[0];const r=await fetch(origin+'/signin-with-chatgpt',{method:'POST',redirect:'manual',headers:{origin,'content-type':'application/x-www-form-urlencoded',cookie:pre},body:new URLSearchParams({csrf,email:`${who}@example.test`,password,remember:remember?'1':'0'})});assert.equal(r.status,303,await r.text());const session=r.headers.getSetCookie().find(c=>c.startsWith('lj_session='));assert.match(session,new RegExp('Max-Age='+(remember?2592000:28800)));assert.match(session,/HttpOnly/);return session.split(';')[0]};
  assert.equal((await fetch(origin+'/api/employee-assistant')).status,401);
  const health=await fetch(origin+'/healthz');assert.equal(health.status,200);assert.deepEqual(await health.json(),{ok:true,release:'local'});
- const cookies={};for(const who of ['admin','sales','supply','finance'])cookies[who]=await login(who,who==='sales');
+ const cookies={};for(const who of ['admin','sales','supply','warehouse','finance'])cookies[who]=await login(who,who==='sales');
  const request=async(who,path,payload)=>{const r=await fetch(origin+path,{method:payload?'POST':'GET',headers:{cookie:cookies[who],origin,...(payload?{'content-type':'application/json'}:{})},...(payload?{body:JSON.stringify({...payload,operationId:crypto.randomUUID()})}:{})});const text=await r.text();let body;try{body=JSON.parse(text)}catch{body=text}return {status:r.status,body}};
 
  const assistantPath='/api/employee-assistant';
@@ -308,7 +308,7 @@ test('独立服务器：公司登录、禁止伪造身份、岗位隔离、出�
  const scopedCosts=await request('newops',productPath);assert.equal(scopedCosts.status,200);assert.equal(scopedCosts.body.costs.length,0);assert(!JSON.stringify(scopedCosts.body).includes('HTTP-TEST-ONLY.xlsx'));
  const badOrigin=await fetch(origin+productPath,{method:'POST',headers:{cookie:cookies.finance,origin:'https://attacker.test','content-type':'application/json'},body:JSON.stringify(productInput)});assert.equal(badOrigin.status,403);
  }
- const c=await request('sales','/api/wholesale',{action:'customerCreate',name:'HTTP客户',contact:'Sari',phone:'08123456',city:'Jakarta',address:'Warehouse 1'});assert.equal(c.status,200,JSON.stringify(c.body));const day=new Date(Date.now()+7*3600000).toISOString().slice(0,10);
+ const c=await request('sales','/api/wholesale',{action:'customerCreate',name:'HTTP客户',companyShortName:'HTTP测试',contact:'Sari',phone:'08123456',city:'Jakarta',address:'Warehouse 1'});assert.equal(c.status,200,JSON.stringify(c.body));const day=new Date(Date.now()+7*3600000).toISOString().slice(0,10);
  // Field workspace uses the real production router, authentication and file storage.
  assert.equal((await fetch(origin+'/api/field-sales')).status,401);
  assert.equal((await request('supply','/api/field-sales')).status,200);
@@ -320,24 +320,38 @@ test('独立服务器：公司登录、禁止伪造身份、岗位隔离、出�
  assert.equal((await fetch(origin+'/api/field-sales/files?id='+fileId)).status,401);assert.equal((await fetch(origin+'/api/field-sales/files?id='+fileId,{headers:{cookie:cookies.supply}})).status,200);
  let fieldView=await request('sales','/api/field-sales');assert.equal(fieldView.body.records[0].version,2);assert.equal((await request('sales','/api/field-sales',{action:'submit',id:fieldId,version:2,location:{latitude:-6.2,longitude:106.8,accuracy:15,capturedAt:Date.now()}})).status,200);
  assert.equal((await upload('sales')).status,409);fieldView=await request('finance','/api/field-sales');assert.equal(fieldView.body.records[0].status,'valid');assert.equal(fieldView.body.contributions.find(r=>r.id==='sales').visits,1);
- const o=await request('sales','/api/wholesale',{action:'orderCreate',saleType:'consignment',customerId:c.body.id,businessDate:day,paymentTerms:'credit',dueDate:'2027-01-01',items:[{sku:'HTTP-BAG',qty:5,unitPrice:100000}]});assert.equal(o.status,200);let view=await request('sales','/api/wholesale'),order=view.body.orders[0];
+ const dueDate=new Date(Date.now()+30*86400000).toISOString().slice(0,10);
+ const o=await request('sales','/api/wholesale',{action:'orderCreate',saleType:'consignment',settlementMode:'consignment',contractReference:'HTTP-TEST-CONSIGNMENT-CONTRACT',customerId:c.body.id,businessDate:day,dueDate,items:[{sku:'HTTP-BAG',qty:5,unitPrice:100000}]});assert.equal(o.status,200,JSON.stringify(o.body));let view=await request('sales','/api/wholesale'),order=view.body.orders[0];assert.equal(order.workflow_version,2);
  // Export unshipped order items through the real authenticated endpoint.
  const exportUrl='/api/wholesale/export?mode=filtered&month='+day.slice(0,7)+'&view=orders&status=pending&search=HTTP-BAG';
  assert.equal((await fetch(origin+exportUrl)).status,401);
  const exportBook=async who=>{const response=await fetch(origin+exportUrl,{headers:{cookie:cookies[who]}});assert.equal(response.status,200);assert.match(response.headers.get('content-type'),/spreadsheetml/);assert.match(response.headers.get('content-disposition'),/xlsx/);return XLSX.read(await response.arrayBuffer(),{type:'array'})};
  const pendingBook=await exportBook('sales'),pendingRows=XLSX.utils.sheet_to_json(pendingBook.Sheets['订单SKU明细']);
  assert.equal(pendingRows.length,1);assert.equal(pendingRows[0]['SKU'],'HTTP-BAG');assert.equal(pendingRows[0]['申请件数'],5);assert.equal(pendingRows[0]['订单商品金额IDR'],500000);assert.equal(pendingRows[0]['已出库件数'],0);
- const unassigned=await exportBook('supply');assert.equal(XLSX.utils.sheet_to_json(unassigned.Sheets['订单SKU明细']).length,0);
+ const unassigned=await exportBook('supply');assert.equal(XLSX.utils.sheet_to_json(unassigned.Sheets['订单SKU明细']).length,1);
  assert.equal((await request('sales','/api/wholesale/export?mode=filtered&status=not-a-status')).status,400);
- assert.equal((await request('sales','/api/wholesale',{action:'orderApprove',orderId:o.body.id,version:order.version,supplyUserId:'supply',stockBasisConfirmed:true,reason:'申请人不得自行审批'})).status,403);
- assert.equal((await request('finance','/api/wholesale',{action:'orderApprove',orderId:o.body.id,version:order.version,supplyUserId:'supply',stockBasisConfirmed:true,reason:'核对库存允许出库'})).status,200);
+ const approval={action:'orderApprove',orderId:o.body.id,version:order.version,supplyUserId:'supply',logisticsUserId:'supply',reservationExpiresAt:new Date(Date.now()+86400000).toISOString(),contractReference:'HTTP-TEST-CONSIGNMENT-CONTRACT',dueDate,stockBasisConfirmed:true,reason:'核对库存价格与寄售合同'};
+ for(const who of ['sales','finance'])assert.equal((await request(who,'/api/wholesale',approval)).status,403);
+ const approved=await request('supply','/api/wholesale',approval);assert.equal(approved.status,200,JSON.stringify(approved.body));
  view=await request('finance','/api/wholesale');order=view.body.orders[0];
  const prepareUrl='/api/wholesale/export?mode=prepare&orderId='+order.id+'&version='+order.version+'&lang=id';
  assert.equal((await fetch(origin+prepareUrl)).status,401);
  assert.equal((await request('sales',prepareUrl)).status,403);
  assert.equal((await request('finance',prepareUrl.replace('version='+order.version,'version=0'))).status,409);
  const prepResponse=await fetch(origin+prepareUrl,{headers:{cookie:cookies.finance}});assert.equal(prepResponse.status,200);const prepBook=XLSX.read(await prepResponse.arrayBuffer(),{type:'array'}),prepData=XLSX.utils.sheet_to_json(prepBook.Sheets[prepBook.SheetNames[0]],{header:1});assert.equal(prepData[2][4],'HTTP-BAG');assert.equal(prepData[2][8],5);assert.equal(prepData[2][17],'Konsinyasi');
- view=await request('supply','/api/wholesale');order=view.body.orders[0];assert.equal((await request('supply','/api/wholesale',{action:'orderShip',orderId:order.id,version:order.version,items:[{itemId:order.items[0].id,qty:5}],businessDate:day,warehouse:'印尼仓',carrier:'JNE',trackingNo:'HTTP001',handoverConfirmed:true})).status,200);
+ // Modern consignment: sales confirms the customer terms, supply issues the release,
+ // and only the explicitly assigned warehouse may upload real packing evidence and ship.
+ const changeOrder=async(who,action,payload={})=>{const current=await request(who,'/api/wholesale');assert.equal(current.status,200,JSON.stringify(current.body));order=current.body.orders.find(row=>row.id===o.body.id);assert.ok(order);return request(who,'/api/wholesale',{action,orderId:order.id,version:order.version,...payload});};
+ const confirmed=await changeOrder('sales','orderCustomerConfirm',{proofRef:'HTTP 客户确认寄售合同、价格和数量'});assert.equal(confirmed.status,200,JSON.stringify(confirmed.body));
+ const released=await changeOrder('supply','orderRelease');assert.equal(released.status,200,JSON.stringify(released.body));
+ const assigned=await changeOrder('supply','orderAssignWarehouse',{warehouseUserId:'warehouse',warehouse:'印尼仓',reason:'HTTP 指定仓库实际打包发货'});assert.equal(assigned.status,200,JSON.stringify(assigned.body));
+ const packingUpload=async who=>{const form=new FormData();form.set('orderId',o.body.id);form.set('purpose','shipment');form.set('file',new File([png],'HTTP-packing.png',{type:'image/png'}));return fetch(origin+'/api/wholesale/files',{method:'POST',headers:{origin,cookie:cookies[who]},body:form});};
+ for(const who of ['sales','finance','supply'])assert.equal((await packingUpload(who)).status,403);
+ const packingResponse=await packingUpload('warehouse');assert.equal(packingResponse.status,200,await packingResponse.clone().text());const packingFile=await packingResponse.json();
+ const packingImage=await fetch(origin+'/api/wholesale/files?id='+packingFile.id,{headers:{cookie:cookies.warehouse}});assert.equal(packingImage.status,200);assert.equal(packingImage.headers.get('content-type'),'image/png');assert.deepEqual(Buffer.from(await packingImage.arrayBuffer()),png);
+ const packed=await changeOrder('warehouse','orderPack',{proofIds:[packingFile.id]});assert.equal(packed.status,200,JSON.stringify(packed.body));
+ assert.equal(order.paid,0);assert.equal(order.workflow.mode,'consignment');assert.ok(order.workflow.releaseInstruction);
+ const shipped=await changeOrder('warehouse','orderShip',{items:[{itemId:order.items[0].id,qty:5}],businessDate:day,warehouse:'印尼仓',carrier:'JNE',trackingNo:'HTTP001',handoverConfirmed:true});assert.equal(shipped.status,200,JSON.stringify(shipped.body));
  // Customer receipt confirmation goes through the authenticated router and keeps finance independent.
  view=await request('sales','/api/wholesale');order=view.body.orders[0];assert.equal(order.customerReceipt.pending,1);
  const receiptPayload={action:'customerReceiptConfirm',orderId:order.id,version:order.version,shipmentId:order.shipments[0].id,businessDate:day,receiver:'HTTP recipient',proofRef:'Customer chat confirms all goods received',receivedConfirmed:true};

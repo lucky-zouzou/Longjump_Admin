@@ -10,7 +10,7 @@ import { wholesaleLanguage,wholesaleDownloadName,translateWholesale } from "../.
 
 export async function GET(request:Request){try{
   const actor=await requireActor(request),params=new URL(request.url).searchParams,mode=params.get("mode")||"all",month=params.get("month")||indonesiaDate().slice(0,7);
-  if(!["all","month","filtered","prepare","outbound"].includes(mode)||!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)||month>indonesiaDate().slice(0,7))throw new HttpError(400,"请选择有效的导出范围和月份");
+  if(!["all","month","filtered","prepare","outbound","confirmation","instruction"].includes(mode)||!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)||month>indonesiaDate().slice(0,7))throw new HttpError(400,"请选择有效的导出范围和月份");
   const view=params.get("view")||"orders",status=params.get("status")||"all",search=params.get("search")||"";
   if(mode==="filtered"&&(!["orders","completed"].includes(view)||(status!=="all"&&!Object.hasOwn(WHOLESALE_STATUS,status))))throw new HttpError(400,"请选择有效的导出范围和月份");
   const language=wholesaleLanguage(params.get("lang"));
@@ -20,7 +20,7 @@ export async function GET(request:Request){try{
     const period=await database().prepare("SELECT snapshot_json FROM wholesale_finance_periods WHERE month=? AND status='closed'").bind(month).first<{snapshot_json:string}>();
     if(period)snapshot={...JSON.parse(period.snapshot_json),actor};
   }
-  const sheets=["prepare","outbound"].includes(mode)?warehouseSheets(snapshot,{mode,month,orderId:params.get("orderId"),version:params.get("version"),language,exportedAt:new Date().toISOString()}):wholesaleExportSheets(snapshot,{mode,month,asOfDate:indonesiaDate(),exportedAt:new Date().toISOString(),language});
+  const sheets=["prepare","outbound","confirmation","instruction"].includes(mode)?warehouseSheets(snapshot,{mode,month,orderId:params.get("orderId"),version:params.get("version"),language,exportedAt:new Date().toISOString()}):wholesaleExportSheets(snapshot,{mode,month,asOfDate:indonesiaDate(),exportedAt:new Date().toISOString(),language});
   const workbook=toWholesaleWorkbook(XLSX,sheets,language);
   const bytes=XLSX.write(workbook,{type:"array",bookType:"xlsx",compression:true});
   const name=wholesaleDownloadName(language,mode,["month","outbound"].includes(mode)?month:indonesiaDate());

@@ -21,10 +21,42 @@ test('every staff role has an accessible starter and only navigable workspaces',
     assert.ok(assistantHome(a).guides.length);
     for(const g of guidesFor(a))assert.ok(nav.includes(g.page));
   }
-  assert.deepEqual(assistantHome(actor('拍摄剪辑')).guides.map(x=>x.id),['studio','unmatched-video','material-preview']);
+  const studioGuides=assistantHome(actor('拍摄剪辑')).guides;
+  for(const id of ['studio','unmatched-video','material-preview','employee-attendance'])assert.ok(studioGuides.some(g=>g.id===id));
+  assert.ok(guidesFor(actor('拍摄剪辑')).every(g=>['content-center','attendance'].includes(g.page)));
+  assert.ok(!studioGuides.some(g=>['advertising-budget','advertising-trend','finance-day'].includes(g.id)));
   assert.ok(!guidesFor(actor('运营','泰国')).some(g=>['wholesale','distribution'].includes(g.page)));
   assert.ok(!guidesFor(actor('工厂')).some(g=>g.id==='finance-day'));
   assert.ok(!guidesFor(actor('管理员')).some(g=>g.id==='sales-import'));
+});
+test('出勤和广告操作问句命中已实现入口，预算与实耗保持区分及岗位范围',async()=>{
+  const ask=(role,question)=>answerEmployee(actor(role),{question});
+  for(const role of Object.keys(NAVIGATION_BY_ROLE)){
+    const result=await ask(role,'在哪里签到和申请请假？');
+    assert.equal(result.guide?.id,'employee-attendance');
+    assert.match(result.guide.steps.join(''),/我的出勤配置.*组织、班次与授权配置/);
+  }
+  const application=await ask('运营','广告申请没有入口怎么办？');
+  assert.equal(application.guide?.id,'advertising-budget');
+  assert.match(application.guide.steps.join(''),/广告申请不要求配置打卡班次/);
+  assert.match(application.guide.next,/核定预算不等于充值、付款或实际广告消耗/);
+  const approval=await ask('财务','如何核定广告预算？');
+  assert.equal(approval.guide?.id,'advertising-budget');
+  assert.match(approval.guide.steps.join(''),/独立财务.*金额不能超过申请额/);
+  const trend=await ask('运营','广告费用趋势在哪里看？');
+  assert.equal(trend.guide?.id,'advertising-trend');
+  assert.match(trend.guide.steps.join(''),/明确登记0才代表零费用/);
+  assert.match(trend.guide.next,/广告申请和付款不计入/);
+  const feishu=await ask('运营','飞书请假还要再填吗？');
+  assert.equal(feishu.guide?.id,'feishu-attendance');
+  assert.match(feishu.guide.steps.join(''),/启用同步且已精确绑定/);
+  assert.match(feishu.guide.next,/不包含全部待审批或驳回记录/);
+  assert.equal((await ask('管理员','如何配置飞书连接？')).guide?.id,'feishu-setup');
+  assert.ok(!guidesFor(actor('运营')).some(g=>g.id==='feishu-setup'));
+  for(const role of ['员工','工厂','拍摄剪辑','财务','海运','销售','达人BD','新品开发']){
+    assert.ok(!guidesFor(actor(role)).some(g=>g.id==='advertising-trend'));
+    assert.equal((await answerEmployee(actor(role),{question:'广告费用趋势在哪里看？',guideId:'advertising-trend'})).guide,null);
+  }
 });
 test('new hire, incomplete day, contextual handoff, unknown question and foreign guide ID without upstream',async()=>{
   const a=actor();
@@ -82,4 +114,10 @@ test('action counts use the real queue scope, separate incomplete evidence and d
     assert.ok(!('profit' in f));assert.equal((await employeeActionCounts(d1,actor('运营','越南'))).total,0);
     await assert.rejects(employeeActionCounts(d1,actor('工厂')),err=>err.status===403);
   }finally{db.close();}
+});
+
+test('营销寄样手册明确仅寄样的选择与库存费用边界，不向不可进入岗位提供链接',()=>{
+ const guide=guidesFor(actor('达人BD')).find(g=>g.id==='indonesia-bd-samples');assert.ok(guide);const text=guide.steps.join('')+guide.next;
+ assert.match(text,/只寄样不承诺内容.*明确选择/);assert.match(text,/不能留空视频数量代替/);assert.match(text,/实际出库才扣库存/);assert.match(text,/签收不代替内容完成/);assert.match(text,/不生成客户应收/);assert.match(text,/缺成本或汇率.*不能按零/);
+ for(const a of [actor('运营','泰国'),actor('运营','印尼','Shopee'),actor('工厂'),actor('海运'),actor('销售')])assert.equal(guidesFor(a).some(g=>g.page==='marketing-samples'),false,a.role+'/'+a.site+'/'+a.channel);
 });

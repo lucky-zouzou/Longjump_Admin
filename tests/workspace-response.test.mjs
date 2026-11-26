@@ -16,10 +16,11 @@ test('异常200、代理HTML和缺失身份不能替换已可用的工作区快�
  await assert.rejects(parseWorkspaceResponse(Response.json(null,{status:500})),/操作失败/);
 });
 
-test('九种角色所有导航模块返回可渲染快照，禁止模块仍返回403',async()=>{
+test('各岗位所有导航模块返回可渲染快照，禁止模块仍返回403',async()=>{
  const f=systemFixture();try{
   for(const [role,modules] of Object.entries(NAVIGATION_BY_ROLE)){
-   const actor={...f.users.admin,role,site:'印尼',channel:'TikTok'};svc.setActor(actor);
+   const actor={...f.users.admin,id:'navigation-role-'+Object.keys(NAVIGATION_BY_ROLE).indexOf(role),role,site:'印尼',channel:'TikTok'};
+   f.sqlite.prepare('INSERT INTO users(id,email,name,role,site,channel,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)').run(actor.id,actor.id+'@example.test',actor.name,role,actor.site,actor.channel,'2026-01-01','2026-01-01');svc.setActor(actor);
    for(const module of modules){
     const response=await svc.GET(new Request(`http://localhost/api/system?module=${module}`));
     assert.equal(response.status,200,`${role}/${module}: ${await response.clone().text()}`);

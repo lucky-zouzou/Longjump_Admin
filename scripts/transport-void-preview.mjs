@@ -1,0 +1,21 @@
+// Isolated synthetic data only: do not point this script at a real database.
+import {transportFixture} from '../tests/transport-fixture.mjs';
+import {previewInbound,submitInbound} from '../lib/inbound.mjs';
+import {existsSync,mkdirSync,readdirSync,readFileSync,writeFileSync} from 'node:fs';
+import {createHash} from 'node:crypto';
+import {resolve} from 'node:path';
+const root=resolve('work/transport-void-preview'),target=root+'/business.sqlite';
+if(existsSync(target))throw Error('Existing TEST ONLY fixture is retained, not overwritten');mkdirSync(root,{recursive:true});
+globalThis.fetch=async()=>{throw Error('External calls disabled in preview fixture');};
+const f=await transportFixture();const result=await f.createTransport();if(result.status!==200)throw Error(result.error);
+f.sqlite.prepare("UPDATE transport_batches SET batch_no='TEST-OLD-SEA-001'").run();
+f.sqlite.prepare("UPDATE transport_legs SET leg_no='TEST-OLD-SEA-001-01',stage='awaiting_receipt',stage_owner='海运',etd='2026-10-01',eta='2026-10-11'").run();
+const preview=await previewInbound(f.db,f.users.admin,{rows:[{receiptNo:'TEST-HISTORY-001',businessDate:'2026-10-11',site:'印尼',channel:'TikTok',sku:'BAG-A',qty:10,warehouseCode:'W1',proofRef:'TEST-ONLY-SIGNED-PROOF',note:'合成数据：历史到仓已登记，本次预览不连接正式站'}]});
+await submitInbound(f.db,f.users.admin,{rows:preview.rows,previewToken:preview.token,confirmed:true});
+f.sqlite.prepare("UPDATE users SET name='TEST ONLY '||name").run();
+const leg=f.sqlite.prepare('SELECT id,leg_no FROM transport_legs').get(),now=new Date().toISOString();
+f.sqlite.exec('CREATE TABLE IF NOT EXISTS local_migrations(name TEXT PRIMARY KEY,sha256 TEXT NOT NULL,applied_at TEXT NOT NULL)');
+for(const name of readdirSync(resolve('drizzle')).filter(n=>n.endsWith('.sql')).sort())f.sqlite.prepare('INSERT INTO local_migrations VALUES(?,?,?)').run(name,createHash('sha256').update(readFileSync(resolve('drizzle',name))).digest('hex'),now);
+f.sqlite.exec("VACUUM INTO '"+target.replaceAll("'","''")+"'");f.sqlite.close();
+writeFileSync(root+'/fixture.json',JSON.stringify({source:'SYNTHETIC_ONLY_TRANSPORT_VOID',createdAt:now,leg},null,2),{mode:0o600});
+console.log('TEST ONLY transport preview fixture created.');

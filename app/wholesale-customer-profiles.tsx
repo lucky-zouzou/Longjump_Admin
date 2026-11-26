@@ -35,7 +35,7 @@ export default function CustomerProfiles({data, canManage, refresh}:{
     const c = row.customer;
     return (region === null || areaKey(c.region) === region) && (city === null || areaKey(c.city) === city)
       && (owner === null || c.sales_user_id === owner) && (!stage || row.segment === stage)
-      && [c.name,c.code,c.contact,c.phone].some(value => String(value ?? "").toLowerCase().includes(query.trim().toLowerCase()));
+      && [c.company_short_name,c.name,c.code,c.contact,c.phone].some(value => String(value ?? "").toLowerCase().includes(query.trim().toLowerCase()));
   }).sort((a,b) => b[sort] - a[sort] || a.customer.code.localeCompare(b.customer.code));
   const totals = portfolioTotals(scope);
   const grouped = new Map<string, typeof scope>();
@@ -89,7 +89,7 @@ export default function CustomerProfiles({data, canManage, refresh}:{
       {group==="customer" ? slice(scope).map(row=>{
         const c=row.customer, open=expanded===c.id;
         return <Fragment key={c.id}><tr>
-          <td><button type="button" className="wh-profile-name" aria-expanded={open} onClick={()=>setExpanded(open?"":c.id)}>{c.name}</button>
+          <td><button type="button" className="wh-profile-name" aria-expanded={open} onClick={()=>setExpanded(open?"":c.id)}>{c.company_short_name||c.name}</button>
             <small>{c.code} · {stages[row.segment]}{!c.active ? " · "+say("已停用","Nonaktif") : ""}</small></td>
           <td>{[c.region || unknownArea,c.city].filter(Boolean).join(" / ")}<small>{owners.get(c.sales_user_id)}</small></td>
           <td>{fmt(row.netSoldQty)}</td><td>{money(row.netSales)}</td><td>{share(row.netSales)}</td><td>{money(row.netReceipts)}</td>

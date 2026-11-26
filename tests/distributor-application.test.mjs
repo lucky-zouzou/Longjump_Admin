@@ -13,7 +13,7 @@ const count=(f,table)=>f.sqlite.prepare('SELECT count(*) n FROM '+table).get().n
 const change=(f,actor,action,fields)=>{const lead=leadOf(f);return mutateWebsiteLead(f.db,actor,{id:lead.id,version:lead.version,operationId:crypto.randomUUID(),action,...fields});};
 const note={identityConfirmed:true,reason:'Verified via synthetic WhatsApp follow-up'};
 const assign=f=>change(f,f.users.admin,'assign',{ownerId:f.users.sales.id,reason:'Indonesia creator enquiries'});
-const profile={name:'Toko Contoh',contact:'Contoh Mitra',phone:'+6281234567890',city:'Bandung',address:'Jl. Contoh 10'};
+const profile={companyShortName:'TEST Contoh',name:'Toko Contoh',contact:'Contoh Mitra',phone:'+6281234567890',city:'Bandung',address:'Jl. Contoh 10'};
 
 test('public registration accepts a creator as an unassigned lead; retries cannot change or expose the application',async()=>{
  const f=fixture();

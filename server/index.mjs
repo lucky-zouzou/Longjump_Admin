@@ -1,5 +1,7 @@
 import {createRequestMetrics} from './request-metrics.mjs';
+import {startWholesaleReservationMonitor} from './wholesale-reservation-monitor.mjs';
 import {scheduleForecastMonitor} from './forecast-monitor.mjs';
+import {scheduleFeishuAttendance} from './feishu-attendance-monitor.mjs';
 import http from 'node:http';
 import {readWorkplaceWeather} from '../lib/workplace-weather.mjs';
 import {handleDistributorApplication} from '../lib/distributor-application.mjs';
@@ -117,6 +119,10 @@ if(process.env.LOONGJUMP_BACKUP_DIR){const {scheduleBackups}=await import('./bac
 schedulePromotionMonitor(env.DB);
 scheduleBusinessActionMonitor(env.DB);
 scheduleForecastMonitor(env.DB);
+const wholesaleReservationMonitor=startWholesaleReservationMonitor(env.DB);
+const feishuMonitor=scheduleFeishuAttendance(env);
+server.on('close',()=>{wholesaleReservationMonitor.stop();feishuMonitor.stop();});
+
 for(const signal of ['SIGINT','SIGTERM'])process.on(signal,()=>server.close(()=>{db.close();process.exit(0)}));
 
 if (env.BEST_PARTNER_ID && env.BEST_API_SECRET) {

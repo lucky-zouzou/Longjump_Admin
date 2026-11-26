@@ -12,7 +12,7 @@ const row=(f,id)=>f.sqlite.prepare('SELECT * FROM website_leads WHERE id=?').get
 const count=(f,table)=>f.sqlite.prepare(`SELECT COUNT(*) n FROM ${table}`).get().n;
 const change=(f,actor,id,action,payload={})=>mutateWebsiteLead(f.db,actor,{id,version:row(f,id).version,action,operationId:crypto.randomUUID(),...payload});
 const assign=(f,id,extra={})=>change(f,f.users.admin,id,'assign',{ownerId:f.users.sales.id,reason:'核对两边销售账号',...extra});
-const complete=(f,id)=>change(f,f.users.sales,id,'follow',{profile:{...JSON.parse(row(f,id).profile_json),address:'Jl. Synthetic 10'},status:'following',note:'客户核实地址与数量',nextFollowUp:'2026-12-01'});
+const complete=(f,id)=>change(f,f.users.sales,id,'follow',{profile:{...JSON.parse(row(f,id).profile_json),address:'Jl. Synthetic 10',companyShortName:'TEST 简称'},status:'following',note:'客户核实地址与数量',nextFollowUp:'2026-12-01'});
 const convert=(f,id,extra={})=>change(f,f.users.sales,id,'convert',{identityConfirmed:true,reason:'电话核实真实客户身份',...extra});
 const signed=async(payload,{time=Date.now(),key=secret,headers={},method='POST'}={})=>{const raw=JSON.stringify(payload);return new Request('https://admin.example.test/api/integrations/website-inquiries',{method,headers:{'content-type':'application/json','x-loongjump-timestamp':String(time),'x-loongjump-signature':await signInquiry(key,String(time),raw),...headers},...(method==='POST'?{body:raw}:{})});};
 
@@ -144,5 +144,15 @@ test('stale changes and maintenance pause do not partially assign, convert or re
   await assert.rejects(change(f,f.users.admin,leadId,'assign',{version:v,ownerId:f.users.sales2.id,reason:'旧页面的分配操作'}),/已更新/);
   f.sqlite.prepare("INSERT OR REPLACE INTO system_maintenance(id,mode,expires_at,updated_at) VALUES('global','backup',?,'2026-11-02')").run(new Date(Date.now()+60000).toISOString());
   await assert.rejects(receiveWebsiteInquiry(f.db,sample({externalId:'LJ-PAUSED'})),/备份或迁移/);assert.equal(count(f,'website_leads'),1);
+ }finally{f.sqlite.close();}
+});
+test('new lead conversion requires an explicitly maintained short name and uses a country plus six digit code',async()=>{
+ const f=fixture();try{
+  const {leadId}=await receiveWebsiteInquiry(f.db,sample());await assign(f,leadId);
+  assert.equal(Object.hasOwn(JSON.parse(row(f,leadId).source_json).details,'companyShortName'),false,'old source payload hashing does not acquire a new empty field');
+  await change(f,f.users.sales,leadId,'follow',{profile:{...JSON.parse(row(f,leadId).profile_json),address:'TEST verified address'},status:'following',note:'TEST verified full profile'});
+  await assert.rejects(convert(f,leadId),/公司简称/);
+  const c=await convert(f,leadId,{companyShortName:'TEST Explicit'}),saved=f.sqlite.prepare('SELECT * FROM wholesale_customers WHERE id=?').get(c.customerId);
+  assert.match(saved.code,/^ID-[0-9]{6}$/);assert.equal(saved.company_short_name,'TEST Explicit');assert.equal(saved.name,'Toko Test');
  }finally{f.sqlite.close();}
 });

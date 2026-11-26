@@ -7,7 +7,7 @@ import { countStatements,reversalStatements } from "../lib/inventory-guard.mjs";
 import { loadWholesaleExportSnapshot } from "../lib/wholesale-export.mjs";
 import { wholesaleExportSheets } from "../lib/wholesale-finance.mjs";
 
-export function fixture({catalogPrices=true}={}){
+export function fixture({catalogPrices=true,workflowVersion=1}={}){
   const sqlite=new DatabaseSync(":memory:");sqlite.exec("PRAGMA foreign_keys=ON");
   for(const file of readdirSync(new URL("../drizzle/",import.meta.url)).filter(f=>f.endsWith(".sql")).sort())sqlite.exec(readFileSync(new URL(`../drizzle/${file}`,import.meta.url),"utf8"));
   class Statement{constructor(sql,args=[]){this.sql=sql;this.args=args;}bind(...args){return new Statement(this.sql,args);}async first(){return sqlite.prepare(this.sql).get(...this.args)??null;}async all(){return {results:sqlite.prepare(this.sql).all(...this.args),success:true,meta:{}};}async run(){const r=sqlite.prepare(this.sql).run(...this.args);return {success:true,meta:{changes:Number(r.changes)}};}}
@@ -19,7 +19,12 @@ export function fixture({catalogPrices=true}={}){
   if(catalogPrices)for(const sku of ["BAG-A","BAG-B"])sqlite.prepare("INSERT INTO wholesale_prices(id,sku,version,status,purchase_minor,freight_minor,tax_minor,inbound_minor,standard_markup_bp,minimum_markup_bp,rounding,standard_price,minimum_price,valid_until,cost_reference,reason,actor_id,actor_name,created_at) VALUES (?,?,1,'published',8000000,0,0,0,2500,1250,100,100000,90000,'2099-12-31','TEST-ONLY','测试核价记录','admin-1','管理员','2026-01-01')").run('test-price-'+sku,sku);
   const stock=(sku,a,b,site="印尼")=>{for(const [ch,n] of [["TikTok",a],["Shopee",b]])sqlite.prepare("INSERT INTO inventory_balances (site,channel,sku,qty,updated_at) VALUES (?,?,?,?,?) ON CONFLICT(site,channel,sku) DO UPDATE SET qty=excluded.qty").run(site,ch,sku,n,"2026-01-01");};
   stock("BAG-A",10,10);stock("BAG-B",10,10);stock("BAG-A",77,88,"马来西亚");
-  const call=(actor,action,payload={})=>mutateWholesale(db,actor,{action,...payload,operationId:crypto.randomUUID()});
+  const call=async(actor,action,payload={})=>{
+    const result=await mutateWholesale(db,actor,{action,...(action==='customerCreate'?{companyShortName:'TEST 客户简称'}:{}),...payload,operationId:crypto.randomUUID()});
+    // Historical regression fixtures: migration defaults already-existing orders to 1.
+    if(workflowVersion===1&&action==='orderCreate')sqlite.prepare('UPDATE wholesale_orders SET workflow_version=1 WHERE id=?').run(result.id);
+    return result;
+  };
   const orderRow=id=>sqlite.prepare("SELECT * FROM wholesale_orders WHERE id=?").get(id);
   const change=(actor,id,action,payload={})=>call(actor,action,{orderId:id,version:orderRow(id).version,...payload});
   const create=async({qty=5,terms="credit",who=users.sales,items,invoice=true,businessDate="2026-08-01",saleType}={})=>{
@@ -31,4 +36,10 @@ export function fixture({catalogPrices=true}={}){
   const approve=id=>change(users.admin,id,"orderApprove",{supplyUserId:users.supply.id,stockBasisConfirmed:true,reason:"已核对客户账期和独立库存"});
   const ship=(id,qty,date=indonesiaDate(),extra={})=>change(users.supply,id,"orderShip",{items:[{itemId:sqlite.prepare("SELECT id FROM wholesale_order_items WHERE order_id=?").get(id).id,qty}],businessDate:date,carrier:"测试承运商",warehouse:"印尼仓",trackingNo:"TEST-TRACK",handoverConfirmed:true,...extra});
   return {sqlite,db,users,stock,call,change,orderRow,create,approve,ship};
+}
+
+// Explicitly seed an existing pre-migration order for historical account/service
+// regressions. Modern API regression tests never call this helper.
+export function historicalWholesaleOrder(f,id){
+ f.sqlite.prepare('UPDATE wholesale_orders SET workflow_version=1 WHERE id=?').run(id);
 }
