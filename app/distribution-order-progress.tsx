@@ -43,6 +43,7 @@ export function WholesaleProgress({o,data,tr}:{o:Row;data:Row;tr:Tr}){
 export function SampleProgress({o,data,language,tr}:{o:Row;data:Row;language:string;tr:Tr}){
  const shipped=quantity(o.items,'shipped_qty'),remaining=quantity(o.items,'qty')-shipped-quantity(o.items,'released_qty'),received=(o.shipments||[]).filter((s:Row)=>s.receipt).length,pending=(o.shipments||[]).length-received,work=o.workKinds||[];
  const next:Record<string,[string,string]>={review:['核对 SKU、数量与库存','Periksa SKU, jumlah dan stok'],assign:['指定仓库与执行账号','Tugaskan gudang dan pelaksana'],ship:['打包拍照，登记实发','Foto kemasan, catat pengiriman'],receipt:['核实达人实际签收','Verifikasi penerimaan kreator'],cost:['分列核对样品成本与运费','Verifikasi biaya sampel dan ongkos kirim'],content:['继续跟进视频 / 直播交付','Lanjutkan tindak lanjut video / siaran']};
+ if(o.party_type==='mcn'){next.receipt=['核实机构实际签收','Verifikasi penerimaan agensi'];next.content=['跟进 MCN 约定交付','Tindak lanjuti kewajiban MCN'];}
  const active=work.find((k:string)=>next[k]),terminal=['rejected','cancelled'].includes(o.status);
  return <DistributionFlowSummary title={active?tr(...next[active]):tr('样品进度，一眼看清','Status sampel dalam satu tampilan')} subtitle={active?tr('这是当前需要你处理的事项','Ini tindakan yang perlu Anda tangani sekarang'):tr('物流、内容和费用独立跟进，不用互相等结单','Pengiriman, konten dan biaya ditindaklanjuti secara terpisah')} steps={[
   {label:tr('协议 / 申请','Perjanjian'),done:true},
@@ -54,5 +55,5 @@ export function SampleProgress({o,data,language,tr}:{o:Row;data:Row;language:str
   {label:tr('样品物流','Pengiriman sampel'),value:`${shipped} `+tr('件已发','unit terkirim'),note:`${remaining} `+tr('件待发','unit tersisa')+` · ${pending} `+tr('批待签收','kiriman belum diterima')},
   {label:tr('合作内容','Konten'),value:marketingSampleStatus(language,o.contentStatus||'unknown','content'),note:tr('样品签收不会自动完成视频 / 直播承诺','Penerimaan sampel tidak menyelesaikan janji konten')},
   data.canFinance?{label:tr('成本与运费','Biaya dan ongkos kirim'),value:o.costStatus==='confirmed'?tr('两类费用已核对','Kedua biaya diverifikasi'):tr('费用待核实','Biaya belum diverifikasi'),note:tr('按实际出库数量，不计销售收入或应收','Berdasarkan pengiriman aktual, tanpa penjualan atau piutang')}:{label:tr('费用归属','Pusat biaya'),value:tr('印尼 TikTok 运营','Operasional TikTok Indonesia'),note:tr('样品成本、运费由财务分列核对','Keuangan memverifikasi biaya sampel dan ongkos kirim terpisah')},
- ]}>{work.includes('content')&&<a className="btn" href={`/?page=creators&entity=${encodeURIComponent(o.creator_id)}`}>{tr('去跟进内容','Tindak lanjuti konten')} ↗</a>}</DistributionFlowSummary>;
+ ]}>{o.party_type!=='mcn'&&work.includes('content')&&<a className="btn" href={`/?page=creators&entity=${encodeURIComponent(o.creator_id)}`}>{tr('去跟进内容','Tindak lanjuti konten')} ↗</a>}</DistributionFlowSummary>;
 }

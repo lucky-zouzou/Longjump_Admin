@@ -1,0 +1,20 @@
+// Synthetic local fixture: no production records, credentials or outbound calls.
+import {marketingSamplesFixture} from '../tests/marketing-samples-fixture.mjs';
+import {mutateCreator} from '../lib/creators.mjs';
+import {existsSync,mkdirSync,writeFileSync,readdirSync,readFileSync} from 'node:fs';
+import {resolve} from 'node:path';
+import {createHash} from 'node:crypto';
+const root=resolve('work/bd-sample-entry-preview'),target=root+'/business.sqlite';
+if(existsSync(target))throw Error('Existing synthetic preview retained');
+mkdirSync(root,{recursive:true});
+const f=marketingSamplesFixture(),now=new Date().toISOString();
+f.sqlite.prepare("UPDATE creator_profiles SET name='演示 · 已寄样达人',data_json=? WHERE id='sample-creator'").run(JSON.stringify({contact:'TEST-ONLY'}));
+f.sqlite.prepare("UPDATE creator_rounds SET logistics_json=? WHERE id='sample-round'").run(JSON.stringify({dispatch:{orderNumber:'TEST-OLD-SAMPLE',at:now,qty:4}}));
+for(const [id,name] of [['sample-new','演示 · 新合作达人'],['sample-pending','演示 · 待确认达人']])f.sqlite.prepare("INSERT INTO creator_profiles(id,scope_id,platform_id,name,kind,source_user_id,owner_bd_id,data_json,created_at,updated_at) VALUES(?,'sample-scope',?,?,'video',?,?,?, ?,?)").run(id,id,name,f.users.indonesia.id,f.users.bd.id,JSON.stringify({contact:'TEST-ONLY'}),now,now);
+await mutateCreator(f.db,f.users.bd,{action:'requestCreate',requestId:'test-pending-request',creatorId:'sample-pending',items:[{sku:'BAG-A',sampleQty:2}],dueAt:new Date(Date.now()+14*86400000).toISOString(),method:'commission',commission:'8',videos:1,lives:0});
+for(const [id,name] of [['sample-bd','TEST ONLY 达人BD'],['sample-other','TEST ONLY 其他BD'],['admin-1','TEST ONLY 管理员'],['supply-1','TEST ONLY 供应链'],['supply-2','TEST ONLY 仓库'],['finance-1','TEST ONLY 财务']])f.sqlite.prepare('UPDATE users SET name=? WHERE id=?').run(name,id);
+f.sqlite.exec('CREATE TABLE IF NOT EXISTS local_migrations(name TEXT PRIMARY KEY,sha256 TEXT NOT NULL,applied_at TEXT NOT NULL)');
+for(const name of readdirSync('drizzle').filter(n=>n.endsWith('.sql')).sort())f.sqlite.prepare('INSERT INTO local_migrations VALUES(?,?,?)').run(name,createHash('sha256').update(readFileSync(resolve('drizzle',name))).digest('hex'),now);
+f.sqlite.exec("VACUUM INTO '"+target.replaceAll("'","''")+"'");f.sqlite.close();
+writeFileSync(root+'/fixture.json',JSON.stringify({source:'SYNTHETIC_ONLY_BD_SAMPLE_ENTRY',createdAt:now}),{mode:0o600});
+console.log('Synthetic BD sample entry preview ready. No live records read or changed.');

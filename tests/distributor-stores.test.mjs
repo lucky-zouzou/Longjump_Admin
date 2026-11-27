@@ -78,7 +78,8 @@ test('分销汇总和任务不计普通线下订单；运营只看本人商家�
  assert((await distributionTasks(f.db,f.users.admin)).some(t=>t.tab==='distribution'&&t.title==='分销商家待审核'));assert.equal((await distributionTasks(f.db,f.users.indonesia)).length,0);
 });
 
-test('登录限速、过期激活和停用负责人不会产生有效会话',async()=>{
+test('登录限速、过期激活和停用负责人不会产生有效会话',async t=>{
+ t.mock.timers.enable({apis:['Date'],now:new Date()}); // Login window is logical time, independent of workstation sleep.
  const f=fixture(),id=await enroll(f),s=store(f,id);const invite=await manageStore(f.db,f.users.admin,{action:'approve',customerId:id,version:s.version,reason:'TEST ONLY 审核'}),activation=new URLSearchParams(invite.activationPath.split('#')[1]).get('activate');
  f.sqlite.prepare("UPDATE distributor_stores SET activation_expires_at='2000-01-01' WHERE customer_id=?").run(id);await assert.rejects(authenticateDistributor(f.db,{username:s.username,password,activation}),{status:401});
  for(let i=0;i<9;i++)await assert.rejects(authenticateDistributor(f.db,{username:s.username,password:'wrong-password-only'}));

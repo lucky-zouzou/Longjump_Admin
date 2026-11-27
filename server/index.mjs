@@ -1,3 +1,6 @@
+import {createConnections} from './platform-connections.mjs';
+import {createConnectionsHandler} from './connections-http.mjs';
+import {scheduleAgentPilot} from './agent-pilot-monitor.mjs';
 import {createRequestMetrics} from './request-metrics.mjs';
 import {startWholesaleReservationMonitor} from './wholesale-reservation-monitor.mjs';
 import {scheduleForecastMonitor} from './forecast-monitor.mjs';
@@ -22,6 +25,7 @@ import {importServerEntryModule,tryServeStatic,sendWebResponse} from 'vinext/ser
 const origin=new URL(process.env.LOONGJUMP_ORIGIN||'http://localhost:3000');
 if(origin.protocol!=='https:'&&!(process.env.LOONGJUMP_ALLOW_HTTP==='1'&&['localhost','127.0.0.1'].includes(origin.hostname)))throw Error('Set LOONGJUMP_ORIGIN to the public HTTPS origin; local testing requires LOONGJUMP_ALLOW_HTTP=1');
 const db=env.DB.sqlite;accountSchema(db);
+const connectionsHandler=createConnectionsHandler(createConnections({db,origin:origin.origin}),origin.origin);
 if(!db.prepare('SELECT 1 FROM local_accounts LIMIT 1').get()&&process.env.LOONGJUMP_ADMIN_PASSWORD_FILE){setAccount(db,{id:process.env.LOONGJUMP_ADMIN_ID||'company-admin',email:process.env.LOONGJUMP_ADMIN_EMAIL,name:process.env.LOONGJUMP_ADMIN_NAME||'公司管理员',role:'管理员',password:readFileSync(process.env.LOONGJUMP_ADMIN_PASSWORD_FILE,'utf8').trim()});}
 if(!db.prepare('SELECT 1 FROM local_accounts LIMIT 1').get())throw Error('Create a company account with server/cli.mjs account:add before starting');
 const built=await importServerEntryModule(resolve('dist-node/server/index.js')),handler=built.default;
@@ -85,6 +89,7 @@ const server=http.createServer(async(req,res)=>{const started=performance.now();
   res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify({ok:true,release:process.env.LOONGJUMP_RELEASE||'local'}));return;
  }
  const c=cookies(req);
+ if(url.pathname.startsWith('/api/connections/callback/')){await connectionsHandler(req,res,null,null);return;}
  if(url.pathname==='/signin-with-chatgpt'){
   const csrf=randomBytes(24).toString('hex');let message='';
   if(req.method==='POST'){
@@ -102,6 +107,7 @@ const server=http.createServer(async(req,res)=>{const started=performance.now();
  const user=c.lj_session?db.prepare('SELECT u.* FROM local_sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>? AND u.active=1').get(hashToken(c.lj_session),Date.now()):null;
  if(url.pathname==='/signout-with-chatgpt'){if(c.lj_session)db.prepare('DELETE FROM local_sessions WHERE token_hash=?').run(hashToken(c.lj_session));res.writeHead(303,{'location':'/signin-with-chatgpt','set-cookie':[cookie('lj_session','',0),cookie('lj_workspace_visit','',0)]});res.end();return}
  if(!user){if(url.pathname.startsWith('/api/')){res.writeHead(401,{'content-type':'application/json'});res.end(JSON.stringify({error:'请登录公司账号 / Silakan masuk'}));}else{res.writeHead(303,{'location':'/signin-with-chatgpt'});res.end()}return}
+ if(url.pathname==='/api/connections'){await connectionsHandler(req,res,user,hashToken(c.lj_session));return;}
  if(url.pathname==='/api/system-performance'&&req.method==='GET'){res.writeHead(user.role==='管理员'?200:403,{'content-type':'application/json'});res.end(JSON.stringify(user.role==='管理员'?requestMetrics.snapshot():{error:'仅管理员可查看性能诊断'}));return;}
  if(url.pathname==='/admin/inventory-baseline'||url.pathname==='/api/inventory-baseline'){await handleBaseline(req,res,env,user);return}
  if(url.pathname==='/admin/test-cleanup'||url.pathname==='/api/test-cleanup'){await handleCleanup(req,res,env,user);return}
@@ -121,7 +127,8 @@ scheduleBusinessActionMonitor(env.DB);
 scheduleForecastMonitor(env.DB);
 const wholesaleReservationMonitor=startWholesaleReservationMonitor(env.DB);
 const feishuMonitor=scheduleFeishuAttendance(env);
-server.on('close',()=>{wholesaleReservationMonitor.stop();feishuMonitor.stop();});
+const agentPilotMonitor=scheduleAgentPilot(env.DB);
+server.on('close',()=>{wholesaleReservationMonitor.stop();feishuMonitor.stop();agentPilotMonitor.stop();});
 
 for(const signal of ['SIGINT','SIGTERM'])process.on(signal,()=>server.close(()=>{db.close();process.exit(0)}));
 

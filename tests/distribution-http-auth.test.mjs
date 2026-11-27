@@ -8,6 +8,7 @@ import {spawn} from 'node:child_process';
 import {once} from 'node:events';
 import net from 'node:net';
 import {marketingSamplesFixture} from './marketing-samples-fixture.mjs';
+import {configurePilot} from '../lib/agent-pilot.mjs';
 import {setAccount} from '../server/accounts.mjs';
 import {fileBucket,openDatabase} from '../server/storage.mjs';
 import {mutateDomesticDistribution,domesticToday} from '../lib/domestic-distribution.mjs';
@@ -27,6 +28,7 @@ async function seed(root,password){
   const quote=await proof('quote');await change(f.users.supply,domestic.id,'quoteConfirm',{proofId:quote.id,customerConfirmed:true});const contract=await proof('contract');
   await change(f.users.supply,domestic.id,'contractSubmit',{proofId:contract.id,contractSigned:true,settlementMode:'prepaid',factoryUserId:factory.id,contractNumber:'TEST-HTTP',contractTerms:'TEST ONLY'});
   await change(f.users.admin,domestic.id,'contractDecide',{approved:true,reason:'TEST ONLY 独立审核'});
+  await configurePilot(f.db,f.users.admin,{version:1,creatorScopeId:'sample-scope',supplyOwnerId:f.users.supply.id,prioritySkus:['BAG-A'],dailyTime:'23:59',enabled:true,scopeVerified:false,reason:'TEST ONLY HTTP role boundary'});
   // Persist only the synthetic fixture with the exact migration ledger required by the real server.
   f.sqlite.exec('CREATE TABLE local_migrations(name TEXT PRIMARY KEY,sha256 TEXT NOT NULL,applied_at TEXT NOT NULL)');
   for(const name of readdirSync(resolve('drizzle')).filter(n=>n.endsWith('.sql')).sort())f.sqlite.prepare('INSERT INTO local_migrations VALUES(?,?,?)').run(name,createHash('sha256').update(readFileSync(resolve('drizzle',name))).digest('hex'),new Date().toISOString());
@@ -47,6 +49,11 @@ test('真实公司HTTP登录：BD寄样可读可签收，仍拒绝跨人员/跨�
   const login=async who=>{const page=await fetch(origin+'/signin-with-chatgpt'),html=await page.text(),csrf=html.match(/name="csrf" value="([a-f0-9]+)"/)[1],pre=page.headers.getSetCookie()[0].split(';')[0];const response=await fetch(origin+'/signin-with-chatgpt',{method:'POST',redirect:'manual',headers:{origin,cookie:pre,'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({csrf,email:`${seeded.users[who].id}@example.test`,password})});assert.equal(response.status,303,await response.text());return response.headers.getSetCookie().find(c=>c.startsWith('lj_session=')).split(';')[0];};
   const cookies={};for(const who of ['bd','other','indonesia','malaysia','factory','supply','finance','admin'])cookies[who]=await login(who);
   const request=async(who,path,payload,extra={})=>{const response=await fetch(origin+path,{method:payload?'POST':'GET',headers:{cookie:cookies[who],origin,...(payload?{'content-type':'application/json'}:{}),...extra},...(payload?{body:JSON.stringify({...payload,operationId:crypto.randomUUID()})}:{})});const raw=await response.text();let body;try{body=JSON.parse(raw);}catch{body=raw;}return {status:response.status,body};};
+  assert.equal((await fetch(origin+'/api/agent-pilot')).status,401);
+  for(const who of ['bd','indonesia','supply','finance','admin'])assert.equal((await request(who,'/api/agent-pilot')).status,200,who+' Agent entry');
+  for(const who of ['other','malaysia','factory'])assert.equal((await request(who,'/api/agent-pilot')).status,403,who+' Agent denied');
+  assert.equal((await request('bd','/api/agent-pilot',{action:'configure'})).status,403);
+  assert.equal((await request('bd','/api/agent-pilot',{action:'run'})).status,403);
   const path='/api/marketing-samples';assert.equal((await fetch(origin+path)).status,401);
   assert.equal((await fetch(origin+path,{headers:{'x-local-test-user':seeded.users.bd.id,'oai-authenticated-user-id':seeded.users.bd.id}})).status,401);
   const mine=await request('bd',path);assert.equal(mine.status,200,JSON.stringify(mine.body));assert.deepEqual(mine.body.orders.map(o=>o.id).sort(),[seeded.pending,seeded.sent].sort());assert.equal(mine.body.summary,null);

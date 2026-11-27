@@ -82,9 +82,11 @@ test('month-end pending costs respect the cutoff and a revision moved to a later
   assert.equal((await marketingSampleCostSummary(f.db)).pending.length,0);assert.equal(f.sqlite.prepare("SELECT COUNT(*) n FROM marketing_sample_costs WHERE kind='sample'").get().n,2);
  }finally{f.sqlite.close();}
 });
-test('legacy creator paths cannot double dispatch/receive new sample orders; linked finance reads actual costs once',async()=>{
+test('legacy creator paths cannot double dispatch/receive new sample orders; linked finance reads actual costs once',async t=>{
+ t.mock.timers.enable({apis:['Date'],now:new Date('2026-11-26T18:00:00Z')}); // Jakarta is already November 27 while UTC is November 26.
  const f=setup(),id=await sent(f);let r=f.sqlite.prepare("SELECT * FROM creator_rounds WHERE id='sample-round'").get();await assert.rejects(()=>mutateCreator(f.db,f.users.bd,{action:'receipt',creatorId:'sample-creator',roundId:r.id,version:r.version,at:now(),evidence:'https://example.test/receipt'}),/营销寄样/);
  await f.cost(id);await f.cost(id,'freight');r=f.sqlite.prepare("SELECT * FROM creator_rounds WHERE id='sample-round'").get();const payload={action:'finance',creatorId:'sample-creator',roundId:r.id,version:r.version,date:day(),currency:'CNY',rate:1,rateBasis:'人民币',sourceRef:'CREATOR-SETTLEMENT',confirmed:true,netRevenue:'100',costs:Object.fromEntries(Object.keys(creatorFees).map(k=>[k,{mode:'separate',amount:'99',evidence:'其他费用依据'}])),orders:1,ordersFrom:ago(),ordersAsOf:now(),evidence:'https://example.test/settlement',note:'核对合作收益'};
+ await assert.rejects(()=>mutateCreator(f.db,f.users.finance,{...payload,date:'2026-11-28'}),/核算日期/);
  await mutateCreator(f.db,f.users.finance,payload);const result=JSON.parse(f.sqlite.prepare("SELECT data_json FROM creator_finance WHERE round_id='sample-round'").get().data_json);assert.equal(result.costs.samples.minor,1000);assert.equal(result.costs.sampleFreight.minor,300);assert.equal(result.costs.samples.sampleLedger,true);assert.equal((await readCreators(f.db,f.users.bd)).rounds[0].marketingSample.id,id);
  await assert.rejects(()=>f.cost(id,'freight',{revision:1,sourceRef:f.shipment(id).id+'-sample'}),/其他寄样费用/);
  const before=await readCreators(f.db,f.users.finance);assert.ok(financeValue(before.rounds[0],before.finances));await f.cost(id,'freight',{revision:1,amount:'4'});const after=await readCreators(f.db,f.users.finance);assert.equal(financeValue(after.rounds[0],after.finances),null);assert.equal(after.finances[0].data.profitCnyMinor,result.profitCnyMinor);

@@ -1,5 +1,6 @@
 "use client";
 import {useState} from 'react';
+import {sampleRoundUrl,sampleCreatorUrl} from '../lib/marketing-sample-application.mjs';
 type Row=Record<string,any>;
 const states:Record<string,string>={pending:'待BD接收',following:'BD跟进中',executing:'合作执行中',completed:'已完成',cancelled:'已取消'};
 const methods:Record<string,string>={commission:'纯佣',paid:'付费',mixed:'佣金＋付费'};
@@ -22,6 +23,7 @@ export function RequestList({data,profiles,open,save,busy,onProfile,onRound}:{da
  {(owner&&q.state==='pending'||bd&&['pending','following'].includes(q.state))&&<button className="btn" onClick={()=>open('requestCancel',p,null,extra)}>{owner?'撤回需求':'取消需求'}</button>}
  {bd&&q.state==='pending'&&<button className="btn primary" disabled={busy} onClick={()=>void save({action:'requestAccept',...extra})}>接收需求</button>}
  {bd&&q.state==='following'&&<button className="btn primary" onClick={()=>open('requestConfirm',p,null,{...extra,terms:t})}>确认合作条件</button>}
+ {bd&&p.site==='印尼'&&p.platform==='TikTok'&&q.state==='executing'&&t.items.some((i:Row)=>Number(i.sampleQty)>0)&&(()=>{const r=data.rounds.find((r:Row)=>r.id===q.round_id),sample=r?.marketingSample,existing=sample&&!['rejected','cancelled'].includes(sample.status);return <a className="btn primary" href={existing?'/?page=marketing-samples&entity='+encodeURIComponent(sample.id):r?.logistics.dispatch?sampleCreatorUrl('round',q.round_id):sampleRoundUrl(q.round_id)}>{existing?'查看寄样单':r?.logistics.dispatch?'查看历史寄样':'申请样品 →'}</a>;})()}
  {q.round_id&&<button className="btn" onClick={()=>onRound(q.round_id)}>查看本轮履约 →</button>}</div></div>
  <Terms terms={t}/>{data.events.some((e:Row)=>e.detail.requestId===q.id&&e.action==='requestEdit')&&<details><summary>运营已修订条件 · 查看变更</summary>{data.events.filter((e:Row)=>e.detail.requestId===q.id&&e.action==='requestEdit').map((e:Row)=><div key={e.id}><b>{date(e.created_at)} · {e.actor_name}</b><p>修改前</p><Terms terms={e.detail.before}/><p>修改后</p><Terms terms={e.detail.after}/></div>)}</details>}</article>;})}
  {!rows.length&&<p className="creator-empty">当前范围暂无合作需求</p>}</section>;
