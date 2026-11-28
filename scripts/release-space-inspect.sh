@@ -6,7 +6,7 @@ import os,re,gzip,hashlib,shutil,json
 from pathlib import Path
 root=Path('/root/loong-jump-v17/backups')
 files=sorted((p for p in root.iterdir() if re.fullmatch(r'pre-[0-9a-f]{40}-[0-9]+\.tar',p.name) and p.is_file() and not p.is_symlink()),key=lambda p:p.stat().st_mtime,reverse=True)
-for source in files[3:]:
+for source in sorted(files[3:],key=lambda p:p.stat().st_size):
  original=source.stat();target=Path(str(source)+'.gz');temp=Path(str(target)+'.partial')
  if target.exists() or temp.exists():raise RuntimeError('Archive destination already exists')
  if shutil.disk_usage(root).free < original.st_size+64*1024*1024:raise RuntimeError('Insufficient compression headroom')
