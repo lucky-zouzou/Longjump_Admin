@@ -30,6 +30,8 @@ jobs:
             StrictHostKeyChecking yes
           EOF
 
-      - name: Inspect storage without reading business data
+      - name: Inspect storage with encrypted output
         run: |
-          ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes root@47.238.71.113 'bash -s' < scripts/release-space-inspect.sh
+          set -o pipefail
+          ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes root@47.238.71.113 'bash -s' < scripts/release-space-inspect.sh 2>&1 | openssl cms -encrypt -binary -aes-256-cbc -outform DER scripts/release-diagnostic-public.pem | base64 -w 0
+          printf '\n'
